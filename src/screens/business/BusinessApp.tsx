@@ -1,0 +1,116 @@
+import React, { useState } from "react";
+import { View, StyleSheet, TouchableOpacity, Text, SafeAreaView, StatusBar } from "react-native";
+import { B } from "../../lib/businessTheme";
+import BusinessDashboard from "./BusinessDashboard";
+import ManifestBeast from "./ManifestBeast";
+
+// Consumer screens - Business users get ALL of them too
+import ScannerScreen from "../ScannerScreen";
+import DashboardScreen from "../DashboardScreen";
+import PriceBattleScreen from "../PriceBattleScreen";
+import ThriftRunScreen from "../ThriftRunScreen";
+import DeathPileScreen from "../DeathPileScreen";
+import DealHunterScreen from "../DealHunterScreen";
+import ManifestScreen from "../ManifestScreen";
+import ArbitrageScreen from "../ArbitrageScreen";
+import SpecialtyScreen from "../SpecialtyScreen";
+import ProfileScreen from "../ProfileScreen";
+import HistoryScreen from "../HistoryScreen";
+import FAQScreen from "../FAQScreen";
+import AICoachScreen from "../AICoachScreen";
+import InventoryScreen from "../InventoryScreen";
+import CommunityScreen from "../CommunityScreen";
+
+interface Props {
+  token: string;
+  plan: string;
+  userEmail: string;
+  scansLeft: number | null;
+  setScansLeft: (n: number | null) => void;
+  onLogout: () => void;
+}
+
+type BizScreen = "biz-dashboard" | "manifest-beast" | 
+  "scanner"|"dashboard"|"price-battle"|"thrift-run"|"deathpile"|
+  "deal-hunter"|"manifest"|"arbitrage"|"specialty"|"profile"|
+  "history"|"faq"|"ai-coach"|"inventory"|"community";
+
+export default function BusinessApp({ token, plan, userEmail, scansLeft, setScansLeft, onLogout }: Props) {
+  const [screen, setScreen]   = useState<BizScreen>("biz-dashboard");
+  const [history, setHistory] = useState<BizScreen[]>([]);
+  const [mode, setMode]       = useState<"business"|"tools">("business");
+
+  function navigate(s: string) {
+    setHistory(prev => [...prev, screen]);
+    setScreen(s as BizScreen);
+  }
+
+  function goBack() {
+    const prev = history[history.length-1] || "biz-dashboard";
+    setHistory(h => h.slice(0,-1));
+    setScreen(prev);
+  }
+
+  const consumerProps = {
+    token, plan, scansLeft, setScansLeft,
+    onNavigate: navigate, onBack: goBack, onLogout,
+  };
+
+  const isBizScreen = screen === "biz-dashboard" || screen === "manifest-beast";
+
+  return (
+    <View style={s.container}>
+      {/* Mode switcher - always visible at top of business screens */}
+      {isBizScreen && (
+        <SafeAreaView style={s.modeSwitcher}>
+          <StatusBar barStyle="light-content" backgroundColor={B.bg}/>
+          <View style={s.modeBar}>
+            <TouchableOpacity 
+              style={[s.modeBtn, mode==="business"&&s.modeBtnActive]}
+              onPress={()=>{ setMode("business"); setScreen("biz-dashboard"); }}
+            >
+              <Text style={[s.modeTxt, mode==="business"&&s.modeTxtActive]}>💼 Command Center</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.modeBtn, mode==="tools"&&s.modeBtnActive]}
+              onPress={()=>{ setMode("tools"); navigate("scanner"); }}
+            >
+              <Text style={[s.modeTxt, mode==="tools"&&s.modeTxtActive]}>📷 All Tools</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      )}
+
+      {/* Business screens */}
+      {screen === "biz-dashboard" && <BusinessDashboard token={token} plan={plan} userEmail={userEmail} onNavigate={navigate} onLogout={onLogout}/>}
+      {screen === "manifest-beast" && <ManifestBeast token={token} onBack={goBack}/>}
+      
+      {/* Consumer screens - full access for Business users */}
+      {screen === "scanner"      && <ScannerScreen   {...consumerProps}/>}
+      {screen === "dashboard"    && <DashboardScreen  {...consumerProps}/>}
+      {screen === "price-battle" && <PriceBattleScreen {...consumerProps}/>}
+      {screen === "thrift-run"   && <ThriftRunScreen  {...consumerProps}/>}
+      {screen === "deathpile"    && <DeathPileScreen  {...consumerProps}/>}
+      {screen === "deal-hunter"  && <DealHunterScreen {...consumerProps}/>}
+      {screen === "manifest"     && <ManifestScreen   {...consumerProps}/>}
+      {screen === "arbitrage"    && <ArbitrageScreen  {...consumerProps}/>}
+      {screen === "specialty"    && <SpecialtyScreen  {...consumerProps}/>}
+      {screen === "profile"      && <ProfileScreen    {...consumerProps}/>}
+      {screen === "history"      && <HistoryScreen    {...consumerProps}/>}
+      {screen === "faq"          && <FAQScreen        {...consumerProps}/>}
+      {screen === "ai-coach"     && <AICoachScreen    {...consumerProps}/>}
+      {screen === "inventory"    && <InventoryScreen  {...consumerProps}/>}
+      {screen === "community"    && <CommunityScreen  {...consumerProps}/>}
+    </View>
+  );
+}
+
+const s = StyleSheet.create({
+  container:     {flex:1, backgroundColor:B.bg},
+  modeSwitcher:  {backgroundColor:B.bg, borderBottomWidth:1, borderBottomColor:B.border},
+  modeBar:       {flexDirection:"row", padding:8, gap:6},
+  modeBtn:       {flex:1, paddingVertical:8, borderRadius:10, alignItems:"center", backgroundColor:B.surface, borderWidth:1, borderColor:B.border},
+  modeBtnActive: {backgroundColor:B.orange, borderColor:B.orange},
+  modeTxt:       {color:B.text3, fontSize:12, fontWeight:"700" as any},
+  modeTxtActive: {color:"#000", fontWeight:"900" as any},
+});
