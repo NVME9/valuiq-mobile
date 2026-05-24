@@ -3,6 +3,8 @@
     name: ValuIQ iOS Production
     max_build_duration: 60
     environment:
+      groups:
+        - default
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.valuiq.app
