@@ -12,7 +12,7 @@ interface Props {
   onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void;
 }
 
-type HistoryTab = "scans" | "thrift" | "battles";
+type HistoryTab = "scans" | "thrift";
 
 const PLAN_LIMITS: Record<string, Record<string, number>> = {
   free:     { thrift: 3,   battles: 3   },
@@ -113,7 +113,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack }: Props
 
       {/* Tabs */}
       <View style={s.tabs}>
-        {(["scans","thrift","battles"] as HistoryTab[]).map(t => (
+        {(["scans","thrift"] as HistoryTab[]).map(t => (
           <TouchableOpacity key={t} style={[s.tabBtn, tab===t && s.tabActive]} onPress={() => setTab(t)}>
             <Text style={[s.tabTxt, tab===t && s.tabActiveTxt]}>
               {t==="scans"?"📷 Scans":t==="thrift"?"🛍️ Thrift":"⚡ Battles"}
@@ -206,7 +206,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack }: Props
                           <TouchableOpacity
                             style={[s.actionBtn,{flex:1}]}
                             onPress={() => {
-                              onNavigate("price-battle");
+                              onNavigate("scanner");
                             }}
                           >
                             <Text style={s.actionBtnTxt}>⚡ Price Battle</Text>
@@ -333,7 +333,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack }: Props
                 <View style={s.empty}>
                   <Text style={{fontSize:40,marginBottom:12}}>⚡</Text>
                   <Text style={s.emptyTxt}>No Price Battles yet</Text>
-                  <TouchableOpacity style={s.emptyBtn} onPress={() => onNavigate("price-battle")}>
+                  <TouchableOpacity style={s.emptyBtn} onPress={() => onNavigate("scanner")}>
                     <Text style={s.emptyBtnTxt}>Start a Price Battle →</Text>
                   </TouchableOpacity>
                 </View>
@@ -378,7 +378,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack }: Props
                             </View>
                           ))}
                           <View style={s.expandedActions}>
-                            <TouchableOpacity style={s.actionBtn} onPress={() => onNavigate("price-battle")}>
+                            <TouchableOpacity style={s.actionBtn} onPress={() => onNavigate("scanner")}>
                               <Text style={s.actionBtnTxt}>⚡ New Battle</Text>
                             </TouchableOpacity>
                             <TouchableOpacity

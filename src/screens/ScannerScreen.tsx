@@ -32,6 +32,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [photos, setPhotos] = useState<string[]>([]);
   const [brandInput, setBrandInput] = useState("");
   const [loadMsg, setLoadMsg] = useState(0);
+  const [goDeeper, setGoDeeper] = useState(false);
   const [description, setDescription] = useState("");
   const [buyPrice, setBuyPrice] = useState("");
   const [result, setResult] = useState<any>(null);
@@ -299,24 +300,33 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 ))}
               </View>
 
-              {/* Platform price breakdown */}
-              {result.platformPrices && Object.keys(result.platformPrices).filter(p => (result.platformPrices[p]||0) > 0).length > 0 && (
+              {/* Platform comparison — profit ranked */}
+              {result.platformBreakdown && result.platformBreakdown.length > 0 && (
                 <View style={s.infoCard}>
-                  <Text style={[s.infoLabel,{marginBottom:10}]}>💰 PLATFORM COMPARISON</Text>
-                  {Object.entries(result.platformPrices)
-                    .filter(([,v]) => (v as number) > 0)
-                    .sort(([,a],[,b]) => (b as number) - (a as number))
-                    .slice(0,5)
-                    .map(([platform, price]) => (
-                    <View key={platform} style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                      <View style={{flexDirection:"row",alignItems:"center",gap:6}}>
-                        <View style={{width:3,height:16,borderRadius:2,backgroundColor:platform===result.bestPlatform?C.green:C.border}}/>
-                        <Text style={{color:platform===result.bestPlatform?C.text1:C.text3,fontSize:13,fontWeight:platform===result.bestPlatform?"800":"400"}}>{platform}</Text>
-                        {platform===result.bestPlatform && <Text style={{color:C.green,fontSize:9,fontWeight:"800"}}>BEST</Text>}
+                  <Text style={[s.infoLabel,{marginBottom:10}]}>BEST PLACE TO SELL</Text>
+                  {(goDeeper ? result.platformBreakdown : result.platformBreakdown.slice(0,3)).map((pb:any, i:number) => (
+                    <View key={pb.platform} style={{marginBottom:goDeeper?14:8}}>
+                      <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}}>
+                        <View style={{flexDirection:"row",alignItems:"center",gap:6}}>
+                          <View style={{width:3,height:16,borderRadius:2,backgroundColor:i===0?C.green:C.border}}/>
+                          <Text style={{color:i===0?C.text1:C.text3,fontSize:14,fontWeight:i===0?"800":"500"}}>{pb.platform}</Text>
+                          {i===0 && <Text style={{color:C.green,fontSize:9,fontWeight:"900"}}>BEST</Text>}
+                        </View>
+                        <Text style={{color:i===0?C.green:C.text2,fontSize:15,fontWeight:"800"}}>+${pb.netProfit} profit</Text>
                       </View>
-                      <Text style={{color:platform===result.bestPlatform?C.green:C.text2,fontSize:14,fontWeight:"700"}}>${price as number}</Text>
+                      {goDeeper && (
+                        <View style={{flexDirection:"row",flexWrap:"wrap",gap:10,marginTop:4,marginLeft:9}}>
+                          <Text style={{color:C.text4,fontSize:11}}>Sells ${pb.sellPrice}</Text>
+                          <Text style={{color:C.text4,fontSize:11}}>Fees {pb.feeRate}</Text>
+                          <Text style={{color:C.text4,fontSize:11}}>{pb.roi}% ROI</Text>
+                          <Text style={{color:C.text4,fontSize:11}}>Paid out {pb.payoutSpeed}</Text>
+                        </View>
+                      )}
                     </View>
                   ))}
+                  <TouchableOpacity onPress={()=>setGoDeeper(g=>!g)} style={{marginTop:4,paddingVertical:8,alignItems:"center"}}>
+                    <Text style={{color:C.green,fontSize:13,fontWeight:"800"}}>{goDeeper?"Show less":"Go Deeper — full breakdown"}</Text>
+                  </TouchableOpacity>
                 </View>
               )}
 
@@ -403,9 +413,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               </TouchableOpacity>
 
               {/* Battle this item */}
-              <TouchableOpacity style={s.battleBtn} onPress={()=>onNavigate("price-battle",{itemName:result.itemName||result.item_name,brand:result.brand,category:result.category,condition:result.condition,buyPrice,photo:photos[0]})} activeOpacity={0.85}>
-                <Text style={s.battleBtnText}>⚡ Battle This Item</Text>
-                <Text style={s.battleBtnSub}>Compare all platforms instantly</Text>
+              <TouchableOpacity style={s.battleBtn} onPress={()=>result.priceData?.ebaySearchUrl && Linking.openURL(result.priceData.ebaySearchUrl)} activeOpacity={0.85}>
+                <Text style={s.battleBtnText}>See What It Sold For on eBay</Text>
+                <Text style={s.battleBtnSub}>Real completed sales - verify before you buy</Text>
               </TouchableOpacity>
 
               {/* Analysis — collapsible */}
@@ -684,11 +694,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               <Text style={s.quickBtnIcon}>🛍️</Text>
               <Text style={s.quickBtnText}>Thrift Run</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={s.quickBtn} onPress={() => onNavigate("price-battle", result ? {itemName:result.itemName||result.item_name,brand:result.brand,category:result.category,condition:result.condition,buyPrice,photo:photos[0]} : undefined)} activeOpacity={0.85}>
-              <Text style={s.quickBtnIcon}>⚡</Text>
-              <Text style={s.quickBtnText}>Price Battle</Text>
-            </TouchableOpacity>
-          </View>
+            </View>
 
           {/* Controls */}
           <View style={s.camControls}>

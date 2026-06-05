@@ -43,7 +43,6 @@ const LIVE_FEED = [
 
 const TOOLS = [
   { id:"scanner",       icon:"📷", name:"Scan Item",        desc:"Point camera → instant profit",         minPlan:0, accent:C.green   },
-  { id:"price-battle",  icon:"⚡", name:"Price Battle",     desc:"12 platforms compared instantly",       minPlan:0, accent:C.orange  },
   { id:"community",     icon:"🏆", name:"Community",        desc:"Top flips from real resellers",         minPlan:0, accent:"#ff6b6b" },
   { id:"thrift-run",    icon:"🛍️", name:"Thrift Run",       desc:"Rapid-scan a full store",               minPlan:1, accent:C.green   },
   { id:"deathpile",     icon:"💀", name:"Death Pile",       desc:"Diagnose stuck inventory",              minPlan:1, accent:"#a09b94" },

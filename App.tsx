@@ -10,7 +10,6 @@ import LoginScreen from "./src/screens/LoginScreen";
 import ScannerScreen from "./src/screens/ScannerScreen";
 import DashboardScreen from "./src/screens/DashboardScreen";
 import ThriftRunScreen from "./src/screens/ThriftRunScreen";
-import PriceBattleScreen from "./src/screens/PriceBattleScreen";
 import SpecialtyScreen from "./src/screens/SpecialtyScreen";
 import ManifestScreen from "./src/screens/ManifestScreen";
 import DeathPileScreen from "./src/screens/DeathPileScreen";
@@ -35,7 +34,7 @@ import BusinessApp from "./src/screens/business/BusinessApp";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 export type Screen =
-  "scanner"|"dashboard"|"thrift-run"|"price-battle"|
+  "scanner"|"dashboard"|"thrift-run"|
   "specialty"|"manifest"|"deathpile"|"community"|
   "profile"|"relist"|"hot-now"|"arbitrage"|"upgrade"|
   "bundle"|"alerts"|"leaderboard"|"inventory"|"profit-tracker"|"deal-hunter"|"ai-coach"|"history"|"faq"|"admin"|"titan";
@@ -231,7 +230,6 @@ export default function App() {
     "scanner":      <ScannerScreen {...props} />,
     "dashboard":    <DashboardScreen {...props} />,
     "thrift-run":   <ThriftRunScreen {...props} />,
-    "price-battle": <PriceBattleScreen {...props} />,
     "specialty":    <SpecialtyScreen {...props} />,
     "manifest":     <ManifestScreen {...props} />,
     "deathpile":    <DeathPileScreen {...props} />,
