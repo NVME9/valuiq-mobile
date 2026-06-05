@@ -65,7 +65,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   }
 
   async function pickLibrary() {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaType.Images, base64: true, quality: 0.7 });
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], base64: true, quality: 0.7 });
     if (!res.canceled && res.assets[0]?.base64) {
       setPhotos(p => [...p, res.assets[0].base64!].slice(0, 3));
       setStep("review");
@@ -105,7 +105,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     }
   }
 
-  // ── PERMISSION ────────────────────────────────────────
+  // - PERMISSION -
   useEffect(() => {
     if (step !== "loading") return;
     const msgs = ["Identifying your item...","Reading brand & model details...","Searching eBay sold listings...","Comparing 12+ marketplaces...","Calculating profit & fees...","Finding the best place to sell..."];
@@ -127,7 +127,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     </SafeAreaView>
   );
 
-  // ── LOADING ───────────────────────────────────────────
+  // - LOADING -
   if (step === "loading") return (
     <SafeAreaView style={s.safe}>
       <View style={s.center}>
@@ -142,7 +142,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     </SafeAreaView>
   );
 
-  // ── UPGRADE ───────────────────────────────────────────
+  // - UPGRADE -
   if (step === "upgrade") return (
     <SafeAreaView style={s.safe}>
       <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 60 }}>
@@ -159,7 +159,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             <Text style={s.dealSub}>one time - Pro features forever</Text>
           </View>
           <TouchableOpacity style={s.dealBtn} onPress={() => onNavigate('upgrade')}>
-            <Text style={s.dealBtnText}>Get Lifetime $197 →</Text>
+            <Text style={s.dealBtnText}>Get Lifetime $197 ></Text>
           </TouchableOpacity>
         </View>
         <View style={{ flexDirection: "row", gap: 10, marginBottom: 16 }}>
@@ -173,23 +173,23 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         </View>
         <Text style={[s.caption, { textAlign: "center", marginBottom: 16 }]}>Opens getvaluiq.com to subscribe</Text>
         <TouchableOpacity onPress={reset} style={{ alignItems: "center" }}>
-          <Text style={{ color: C.text4, fontSize: 14 }}>← Back to scanner</Text>
+          <Text style={{ color: C.text4, fontSize: 14 }}> Back to scanner</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 
-  // ── RESULT ────────────────────────────────────────────
+  // - RESULT -
   if (step === "result") {
     if (result?._error) return (
       <SafeAreaView style={s.safe}>
         <View style={s.nav}>
-          <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
+          <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}></Text></TouchableOpacity>
           <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
           <Text style={s.logoText}>ValuIQ</Text>
         </View>
         <View style={s.center}>
-          <Text style={{ fontSize: 36, marginBottom: 16 }}>⚠️</Text>
+          <Text style={{ fontSize: 36, marginBottom: 16 }}></Text>
           <Text style={s.h2}>Scan Failed</Text>
           <Text style={[s.body, { textAlign: "center" }]}>{result._error}</Text>
           <TouchableOpacity style={[s.greenBtn, { marginTop: 24 }]} onPress={reset}>
@@ -212,7 +212,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         {/* Nav */}
         <View style={s.nav}>
           <TouchableOpacity onPress={() => setStep("review")} style={s.navBack}>
-            <Text style={s.navBackText}>←</Text>
+            <Text style={s.navBackText}></Text>
           </TouchableOpacity>
           <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
           <Text style={s.logoText}>ValuIQ</Text>
@@ -223,20 +223,20 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
         <ScrollView contentContainerStyle={{padding:16,paddingBottom:60}} showsVerticalScrollIndicator={false}>
 
-          {/* ── VERDICT CARD ── */}
+          {/* - VERDICT CARD - */}
           <View style={[s.verdictCard,{borderColor:(hasNoData?C.border:dc)+"40",backgroundColor:(hasNoData?C.surface:dc)+"10"}]}>
             {photos[0] && (
               <Image source={{uri:`data:image/jpeg;base64,${photos[0]}`}}
                 style={{width:"100%",height:160,borderRadius:10,marginBottom:12}} resizeMode="cover"/>
             )}
             <Text style={[s.verdictText,{color:hasNoData?C.text3:dc,fontSize:42,lineHeight:48}]} numberOfLines={1} adjustsFontSizeToFit>
-              {verdict === "BUY" ? " BUY IT" : verdict === "WATCH" ? " WATCH IT" : verdict === "UNKNOWN" ? "❓ UNKNOWN" : " PASS"}
+              {verdict === "BUY" ? " BUY IT" : verdict === "WATCH" ? " WATCH IT" : verdict === "UNKNOWN" ? "- UNKNOWN" : " PASS"}
             </Text>
             <Text style={s.itemName} numberOfLines={2}>{result.itemName || result.item_name || "Unknown Item"}</Text>
             {result.category ? <Text style={s.itemMeta}>{result.category}{result.condition ? " - " + (result.condition) + "" : ""}</Text> : null}
           </View>
 
-          {/* ── UNKNOWN: need more info ── */}
+          {/* - UNKNOWN: need more info - */}
           {hasNoData && (
             <View style={s.noDataCard}>
               <Text style={{color:C.text1,fontSize:15,fontWeight:"700",textAlign:"center",marginBottom:8}}>Need More Information</Text>
@@ -249,22 +249,22 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             </View>
           )}
 
-          {/* ── PROFIT (only when we have data) ── */}
+          {/* - PROFIT (only when we have data) - */}
           {!hasNoData && (
             <>
               {/* Data confidence */}
               {hasGoodData && result.priceData && result.priceData.isRealData ? (
                 <TouchableOpacity style={s.goodBanner} onPress={()=>Linking.openURL(result.priceData.ebaySearchUrl)}>
-                  <Text>✅</Text>
+                  <Text></Text>
                   <View style={{flex:1}}>
                     <Text style={s.goodBannerTitle}>{result.priceData.count} real sold listings</Text>
                     <Text style={s.goodBannerSub}>eBay avg ${result.priceData.avgPrice} - ${result.priceData.minPrice}-${result.priceData.maxPrice}</Text>
                   </View>
-                  <Text style={{color:C.green}}>→</Text>
+                  <Text style={{color:C.green}}>></Text>
                 </TouchableOpacity>
               ) : hasLimitedData ? (
                 <View style={s.limitedBanner}>
-                  <Text>⚡</Text>
+                  <Text></Text>
                   <Text style={s.limitedText}>Estimated - limited data. Verify before buying.</Text>
                 </View>
               ) : null}
@@ -347,7 +347,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     ].filter(l => l.url).map(link => (
                       <TouchableOpacity key={link.name} style={{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:8,paddingHorizontal:10,paddingVertical:6}}
                         onPress={()=>Linking.openURL(link.url)}>
-                        <Text style={{color:C.green,fontSize:11,fontWeight:"700"}}>{link.name} →</Text>
+                        <Text style={{color:C.green,fontSize:11,fontWeight:"700"}}>{link.name} ></Text>
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -358,7 +358,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               {result.timeToSell && (
                 <View style={{flexDirection:"row",gap:8,marginBottom:8}}>
                   <View style={[s.infoCard,{flex:1,marginBottom:0}]}>
-                    <Text style={s.infoLabel}>⏱ TIME TO SELL</Text>
+                    <Text style={s.infoLabel}>- TIME TO SELL</Text>
                     <Text style={{color:C.text1,fontSize:14,fontWeight:"700",marginTop:4}}>{result.timeToSell}</Text>
                   </View>
                   <View style={[s.infoCard,{flex:1,marginBottom:0}]}>
@@ -381,7 +381,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     Platform comparison, listing title, risk score, hot tips, and share card are locked on Free. Upgrade to see everything - one good flip pays for 6 months.
                   </Text>
                   <View style={{backgroundColor:C.green,borderRadius:8,paddingHorizontal:20,paddingVertical:8}}>
-                    <Text style={{color:C.greenDark,fontWeight:"900",fontSize:13}}>Upgrade from $14.99/mo →</Text>
+                    <Text style={{color:C.greenDark,fontWeight:"900",fontSize:13}}>Upgrade from $14.99/mo ></Text>
                   </View>
                   <Text style={{color:C.text4,fontSize:10,marginTop:8}}>Used {scansLeft !== null ? 10 - scansLeft : "?"} of 10 free scans this month</Text>
                 </TouchableOpacity>
@@ -408,7 +408,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 }}
                 activeOpacity={0.8}
               >
-                <Text style={{fontSize:16}}>✏️</Text>
+                <Text style={{fontSize:16}}></Text>
                 <View style={{flex:1}}>
                   <Text style={{color:C.yellow,fontSize:13,fontWeight:"800"}}>Edit & Rerun</Text>
                   <Text style={{color:C.text4,fontSize:11}}>Correct item details to get fresh pricing</Text>
@@ -428,7 +428,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   onPress={()=>setShowAnalysis(v=>!v)} activeOpacity={0.85}
                 >
                   <Text style={s.infoLabel}> Analysis & Tips</Text>
-                  <Text style={{color:C.text4,fontSize:18}}>{showAnalysis?"▲":"▼"}</Text>
+                  <Text style={{color:C.text4,fontSize:18}}>{showAnalysis?"":""}</Text>
                 </TouchableOpacity>
               )}
               {showAnalysis && (
@@ -450,7 +450,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                       <Text style={s.infoLabel}>Listing Tips</Text>
                       {result.listingTips.map((tip:string,i:number)=>(
                         <View key={i} style={{flexDirection:"row",gap:8,marginBottom:6}}>
-                          <Text style={{color:C.green,fontSize:13}}>→</Text>
+                          <Text style={{color:C.green,fontSize:13}}>></Text>
                           <Text style={{color:C.text2,fontSize:13,lineHeight:20,flex:1}}>{tip}</Text>
                         </View>
                       ))}
@@ -465,7 +465,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 onPress={()=>setShowShare(v=>!v)} activeOpacity={0.85}
               >
                 <Text style={s.infoLabel}> Share & Content</Text>
-                <Text style={{color:C.text4,fontSize:18}}>{showShare?"▲":"▼"}</Text>
+                <Text style={{color:C.text4,fontSize:18}}>{showShare?"":""}</Text>
               </TouchableOpacity>
               {showShare && (
                 <View style={[s.infoCard,{marginTop:-8,borderTopLeftRadius:0,borderTopRightRadius:0}]}>
@@ -505,7 +505,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                          : result?.decision==="WATCH"
                          ? " Watching this one... " + (result.itemName||"Item")
                          : " ValuIQ saved me from a bad buy - " + (result?.itemName||"Item") + " doesn't pencil out"
-                       ) + "\n\nI use ValuIQ to find profitable flips → getvaluiq.com"
+                       ) + "\n\nI use ValuIQ to find profitable flips > getvaluiq.com"
                      }
                      title="My ValuIQ Find"
                      compact
@@ -523,7 +523,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 <Text style={{color:C.text1,fontSize:13,fontWeight:"700"}}>{scansLeft} scans left this month</Text>
                 <Text style={{color:C.text3,fontSize:11}}>Upgrade for unlimited scans</Text>
               </View>
-              <Text style={{color:C.green,fontSize:18}}>→</Text>
+              <Text style={{color:C.green,fontSize:18}}>></Text>
             </TouchableOpacity>
           )}
 
@@ -532,12 +532,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     );
   }
 
-  // ── REVIEW (photo added, before analyze) ─────────────
+  // - REVIEW (photo added, before analyze) -
   if (step === "review") return (
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" />
       <View style={s.nav}>
-        <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
+        <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}></Text></TouchableOpacity>
         <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
         <Text style={s.logoText}>ValuIQ</Text>
       </View>
@@ -553,7 +553,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               <TouchableOpacity
                 onPress={() => setPhotos(prev => prev.filter((_, j) => j !== i))}
                 style={s.removePhoto}>
-                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>✕</Text>
+                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}></Text>
               </TouchableOpacity>
             </View>
           ))}
@@ -608,13 +608,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         )}
 
         <TouchableOpacity style={[s.greenBtn, { marginTop: 14 }]} onPress={() => analyze()}>
-          <Text style={s.greenBtnText}>Analyze Now →</Text>
+          <Text style={s.greenBtnText}>Analyze Now ></Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 
-  // ── BARCODE mode ──────────────────────────────────────
+  // - BARCODE mode -
   if (step === "camera" && mode === "barcode") return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
       <StatusBar barStyle="light-content" />
@@ -654,7 +654,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     </View>
   );
 
-  // ── CAMERA (photo mode) ───────────────────────────────
+  // - CAMERA (photo mode) -
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
       <StatusBar barStyle="light-content" />
@@ -671,8 +671,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 </Text>
               </View>
             )}
+            <TouchableOpacity onPress={() => onNavigate("thrift-run")} style={s.camModeBtn}>
+              <Text style={s.camModeBtnText}>Thrift Run</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => setMode("barcode")} style={s.camModeBtn}>
-              <Text style={s.camModeBtnText}>▦ Barcode</Text>
+              <Text style={s.camModeBtnText}> Barcode</Text>
             </TouchableOpacity>
           </View>
 
@@ -691,18 +694,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             <Text style={s.camHint}>Snap 1-3 photos, then tap Done</Text>
           </View>
 
-          {/* Quick actions */}
-          <View style={s.quickActions}>
-            <TouchableOpacity style={s.quickBtn} onPress={() => onNavigate("thrift-run")} activeOpacity={0.85}>
-              <Text style={s.quickBtnIcon}>️</Text>
-              <Text style={s.quickBtnText}>Thrift Run</Text>
-            </TouchableOpacity>
-            </View>
-
           {/* Controls */}
           <View style={s.camControls}>
             <TouchableOpacity style={s.camSecondBtn} onPress={pickLibrary}>
-              <Text style={{ fontSize: 26 }}></Text>
+              <View style={s.libIcon}><Text style={s.libIconTxt}>+</Text></View>
               <Text style={s.camSecondLabel}>Library</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.shutter} onPress={takePhoto}>
@@ -710,9 +705,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               {photos.length > 0 && <View style={s.shutterBadge}><Text style={s.shutterBadgeTxt}>{photos.length}</Text></View>}
             </TouchableOpacity>
             {photos.length > 0 ? (
-              <TouchableOpacity style={s.camSecondBtn} onPress={() => setStep("review")}>
-                <Text style={{ fontSize: 22, color: C.green, fontWeight: "900" }}>OK</Text>
-                <Text style={s.camSecondLabel}>Done</Text>
+              <TouchableOpacity style={s.doneBtn} onPress={() => setStep("review")}>
+                <Text style={s.doneBtnTxt}>Done</Text>
               </TouchableOpacity>
             ) : (
               <View style={{ width: 64 }} />
@@ -752,14 +746,18 @@ const s = StyleSheet.create({
   camModeBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   corner:         { position: "absolute", width: 28, height: 28, borderColor: C.green, borderWidth: 3 },
   camHint:        { color: "rgba(255,255,255,0.6)", fontSize: 13, marginTop: 14, fontWeight: "600" },
-  camControls:    { paddingBottom: 44, paddingTop: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingHorizontal: 32 },
-  camSecondBtn:   { width: 64, alignItems: "center" },
-  camSecondLabel: { color: "rgba(255,255,255,0.6)", fontSize: 11, marginTop: 4 },
-  camBottomBar:   { paddingBottom: 40, paddingHorizontal: 24 },
+  camSecondBtn: { width: 56, alignItems: "center", justifyContent: "center" },
+  camSecondLabel: { color: "rgba(255,255,255,0.85)", fontSize: 11, marginTop: 5, fontWeight: "600" },
+  libIcon: { width: 52, height: 52, borderRadius: 26, borderWidth: 2, borderColor: "rgba(255,255,255,0.6)", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)" },
+  libIconTxt: { color: "#fff", fontSize: 26, fontWeight: "300", lineHeight: 30, marginTop: -2 },
   shutter:        { width: 74, height: 74, borderRadius: 37, borderWidth: 4, borderColor: "#fff", alignItems: "center", justifyContent: "center" },
   shutterInner:   { width: 60, height: 60, borderRadius: 30, backgroundColor: "#fff" },
-  shutterBadge:   { position: "absolute" as any, top: -4, right: -4, backgroundColor: C.green, borderRadius: 12, minWidth: 24, height: 24, alignItems: "center" as any, justifyContent: "center" as any, paddingHorizontal: 6 },
-  shutterBadgeTxt:{ color: "#000", fontSize: 13, fontWeight: "900" as any },
+  shutterBadge:   { position: "absolute", top: -4, right: -4, backgroundColor: C.green, borderRadius: 12, minWidth: 24, height: 24, alignItems: "center", justifyContent: "center", paddingHorizontal: 6 },
+  shutterBadgeTxt:{ color: "#000", fontSize: 13, fontWeight: "900" },
+  doneBtn: { width: 52, height: 52, borderRadius: 26, backgroundColor: C.green, alignItems: "center", justifyContent: "center" },
+  doneBtnTxt: { color: "#000", fontSize: 13, fontWeight: "900" },
+  camControls:    { paddingBottom: 44, paddingTop: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingHorizontal: 32 },
+  camBottomBar:   { paddingBottom: 40, paddingHorizontal: 24 },
 
   // Barcode,
   barcodeFrame:   { width: width * 0.8, height: 120, position: "relative", justifyContent: "center", alignItems: "center" },

@@ -15,7 +15,7 @@ type RunItem = { id:string; photo:string; status:ItemStatus; decision?:string; p
 
 interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void; }
 
-export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, onNavigate }: Props) {
+export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, onNavigate, onBack }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState<"intro"|"running"|"done">("intro");
