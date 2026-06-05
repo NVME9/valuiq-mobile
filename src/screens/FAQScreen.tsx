@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, SafeAreaView, StatusBar, Linking } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, Linking } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 
 interface Props {
@@ -35,11 +36,11 @@ const FAQS = [
     items: [
       {
         q: "What's the difference between Seller and Pro?",
-        a: "Seller ($19/mo) gives you 100 scans, 30 Price Battles, 3 Thrift Runs, Death Pile Rescuer, and Auto-Relister — everything a part-time reseller needs. Pro ($49/mo) adds unlimited everything plus Deal Hunter AI, Manifest Analyzer, Arbitrage Search, Specialty Scanner, and AI Coach — the full business toolkit."
+        a: "Seller ($19/mo) gives you 100 scans, 30 Price Battles, 3 Thrift Runs, Death Pile Rescuer, and Auto-Relister — everything a part-time reseller needs. Pro ($49/mo) adds unlimited everything plus Deal Hunter AI, Manifest Analyzer, Arbitrage, Search, Specialty Scanner, and AI Coach — the full business toolkit."
       },
       {
         q: "What is the Lifetime plan?",
-        a: "The Lifetime early-bird plan is $197 one-time (normally $349) — everything in Pro forever, no monthly fees. This price is only available for the first 100 subscribers. After that it rises to $349."
+        a: "The, Lifetime early-bird plan is $197 one-time (normally $349) — everything in Pro forever, no monthly fees. This price is only available for the first 100 subscribers. After that it rises to $349."
       },
       {
         q: "Can I cancel anytime?",
@@ -51,7 +52,7 @@ const FAQS = [
       },
       {
         q: "Is there an annual discount?",
-        a: "Yes. Annual Seller is $139/year (save $89). Annual Pro is $349/year (save $239 vs monthly). Early-bird annual Pro is $197 for the first 100 users."
+        a: "Yes. Annual, Seller is $139/year (save $89). Annual, Pro is $349/year (save $239 vs monthly). Early-bird annual Pro is $197 for the first 100 users."
       },
     ]
   },
@@ -76,7 +77,7 @@ const FAQS = [
       },
       {
         q: "What is the Specialty Scanner?",
-        a: "Specialty Scanner uses category-specific AI for 8 high-knowledge areas: Wine & Spirits, Coins & Currency, Trading Cards, Vintage Jewelry, Antiques, Musical Instruments, Sports Memorabilia, and Fine Art. These categories need expert knowledge that a general scanner misses."
+        a: "Specialty Scanner uses category-specific AI for 8 high-knowledge areas: Wine & Spirits, Coins & Currency, Trading, Cards, Vintage, Jewelry, Antiques, Musical, Instruments, Sports, Memorabilia, and Fine, Art. These categories need expert knowledge that a general scanner misses."
       },
       {
         q: "What is Manifest Analyzer?",
@@ -89,7 +90,7 @@ const FAQS = [
     items: [
       {
         q: "Which platforms does ValuIQ cover?",
-        a: "ValuIQ calculates fees and profit for eBay, Poshmark, Mercari, Etsy, Facebook Marketplace, OfferUp, Depop, Whatnot, Amazon, StockX, GOAT, and Craigslist — 12 platforms with real fee structures built in."
+        a: "ValuIQ calculates fees and profit for eBay, Poshmark, Mercari, Etsy, Facebook, Marketplace, OfferUp, Depop, Whatnot, Amazon, StockX, GOAT, and Craigslist — 12 platforms with real fee structures built in."
       },
       {
         q: "Are the fee calculations accurate?",
@@ -106,7 +107,7 @@ const FAQS = [
       },
       {
         q: "How do I delete my account?",
-        a: "Go to Profile → scroll to the bottom → tap 'Request Account Deletion'. This sends an email to our support team who will delete your account and all data within 24 hours."
+        a: "Go to Profile → scroll to the bottom → tap 'Request, Account Deletion'. This sends an email to our support team who will delete your account and all data within 24 hours."
       },
       {
         q: "Is my data safe?",
@@ -205,7 +206,7 @@ export default function FAQScreen({ onNavigate, onBack }: Props) {
 
 const s = StyleSheet.create({
   safe:         {flex:1,backgroundColor:C.bg},
-  nav:          {flexDirection:"row",alignItems:"center",justifyContent:"space-between",paddingHorizontal:20,paddingVertical:14,borderBottomWidth:1,borderBottomColor:C.border},
+  nav:          {flexDirection:"row",alignItems:"center",justifyContent:"space-between",paddingHorizontal:20,paddingTop: 16, paddingBottom: 10,borderBottomWidth:1,borderBottomColor:C.border},
   backBtn:      {width:36,height:36,justifyContent:"center"},
   backTxt:      {color:C.text3,fontSize:22},
   navTitle:     {color:C.text1,fontSize:16,fontWeight:"800" as any},
@@ -225,7 +226,6 @@ const s = StyleSheet.create({
   contactCard:  {backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:16,padding:20,marginTop:8,marginBottom:20,alignItems:"center"},
   contactTitle: {color:C.text1,fontSize:18,fontWeight:"800" as any,marginBottom:4},
   contactSub:   {color:C.text3,fontSize:13,marginBottom:16},
-  contactBtn:   {backgroundColor:C.green,borderRadius:12,paddingVertical:12,paddingHorizontal:24,width:"100%",alignItems:"center"},
+  contactBtn:   {backgroundColor:C.green,borderRadius:12,paddingTop:16, paddingBottom:10,paddingHorizontal:24,width:"100%",alignItems:"center"},
   contactBtnTxt:{color:C.greenDark,fontSize:14,fontWeight:"800" as any},
-  version:      {color:C.text4,fontSize:11,textAlign:"center" as any,marginBottom:8},
-});
+  version:      {color:C.text4,fontSize:11,textAlign:"center" as any,marginBottom:8} });

@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput,
-  SafeAreaView, StatusBar, ActivityIndicator, Pressable,
-} from "react-native";
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Pressable } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import { API_BASE } from "../lib/api";
 
@@ -22,8 +21,7 @@ const VERDICT_CONFIG: Record<string, { color:string; icon:string; label:string }
   MOVE_PLATFORM:  { color: C.green,   icon: "🚀", label: "Wrong Platform" },
   BUNDLE:         { color: "#b066ff", icon: "📦", label: "Bundle It" },
   DONATE:         { color: C.text3,   icon: "💝", label: "Donate It" },
-  TRASH:          { color: C.red,     icon: "🗑️",  label: "Cut Your Losses" },
-};
+  TRASH:          { color: C.red,     icon: "🗑️",  label: "Cut Your Losses" } };
 
 export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Props) {
   const [itemName, setItemName]       = useState("");
@@ -60,9 +58,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
           condition,
           category,
           listingTitle: listingTitle.trim() || undefined,
-          userToken: token,
-        }),
-      });
+          userToken: token }) });
       const d = await r.json();
       if (d.success) {
         setResult(d);
@@ -115,7 +111,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
       </View>
 
       {!result ? (
-        /* ── INPUT FORM ── */
+        /* ── INPUT, FORM ── */
         <ScrollView contentContainerStyle={s.form} keyboardShouldPersistTaps="handled">
           <Text style={s.formTitle}>Tell me about your stuck item</Text>
           <Text style={s.formSub}>The more detail you give, the better the rescue plan.</Text>
@@ -124,7 +120,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
 
           <Text style={s.label}>Item Name *</Text>
           <TextInput style={s.input} value={itemName} onChangeText={setItemName}
-            placeholder="e.g. Lululemon Align Leggings Size 6" placeholderTextColor={C.text4}/>
+            placeholder="e.g. Lululemon, Align Leggings, Size 6" placeholderTextColor={C.text4}/>
 
           <View style={{ flexDirection:"row", gap:10 }}>
             <View style={{ flex:1 }}>
@@ -223,7 +219,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
                       <Text style={[s.scoreNum, { color: C.green }]}>
                         ${Math.round(result.analysis.rescuePrice)}
                       </Text>
-                      <Text style={s.scoreLabel}>RESCUE PRICE</Text>
+                      <Text style={s.scoreLabel}>RESCUE, PRICE</Text>
                     </View>
                   )}
                 </View>
@@ -243,20 +239,19 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
                 <TouchableOpacity key={t} onPress={() => setActiveTab(t)}
                   style={[s.tabBtn, activeTab===t && s.tabBtnActive]}>
                   <Text style={[s.tabTxt, activeTab===t && s.tabTxtActive]}>
-                    {t==="rescue"?"🎯 Rescue Plan":t==="listing"?"✏️ New Listing":t==="cascade"?"📉 Price Plan":"📦 Bundle"}
+                    {t==="rescue"?"🎯 Rescue, Plan":t==="listing"?"✏️ New, Listing":t==="cascade"?"📉 Price, Plan":"📦 Bundle"}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
           </ScrollView>
 
-          {/* ── RESCUE TAB ── */}
+          {/* ── RESCUE, TAB ── */}
           {activeTab === "rescue" && (
             <View style={s.tabContent}>
               {/* Root causes */}
               <View style={s.section}>
-                <Text style={s.sectionTitle}>Why It's Not Selling</Text>
-                {(result.analysis?.rootCauses || []).map((cause: string, i: number) => (
+                <Text style={s.sectionTitle}>Why It's Not Selling</Text>{(result.analysis?.rootCauses || []).map((cause: string, i: number) => (
                   <View key={i} style={s.causeRow}>
                     <Text style={{ color:C.red, fontSize:14, width:20 }}>✗</Text>
                     <Text style={s.causeTxt}>{cause}</Text>
@@ -345,7 +340,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
             </View>
           )}
 
-          {/* ── NEW LISTING TAB ── */}
+          {/* ── NEW, LISTING TAB ── */}
           {activeTab === "listing" && (
             <View style={s.tabContent}>
               {result.analysis?.rescueTitle && (
@@ -369,7 +364,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
 
               {(result.analysis?.rescueKeywords || []).length > 0 && (
                 <View style={s.section}>
-                  <Text style={s.sectionTitle}>SEO Keywords</Text>
+                  <Text style={s.sectionTitle}>SEO, Keywords</Text>
                   <View style={{ flexDirection:"row", flexWrap:"wrap" as any, gap:6 }}>
                     {result.analysis.rescueKeywords.map((kw: string, i: number) => (
                       <View key={i} style={s.kwChip}><Text style={s.kwTxt}>{kw}</Text></View>
@@ -380,12 +375,11 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
             </View>
           )}
 
-          {/* ── CASCADE PLAN TAB ── */}
+          {/* ── CASCADE, PLAN TAB ── */}
           {activeTab === "cascade" && (
             <View style={s.tabContent}>
               <Text style={s.sectionTitle}>Pricing Cascade</Text>
-              <Text style={s.sectionSub}>If it doesn't sell, follow this exact plan</Text>
-              {(result.analysis?.cascadePlan || []).map((step: any, i: number) => (
+              <Text style={s.sectionSub}>If it doesn't sell, follow this exact plan</Text>{(result.analysis?.cascadePlan || []).map((step: any, i: number) => (
                 <View key={i} style={s.cascadeRow}>
                   <View style={s.cascadeDayBox}>
                     <Text style={s.cascadeDayNum}>Day {step.dayThreshold}</Text>
@@ -400,14 +394,13 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
               ))}
               {result.analysis?.hardCutThreshold > 0 && (
                 <View style={[s.infoCard, { marginTop:16, borderColor:C.red+"40" }]}>
-                  <Text style={[s.infoLabel, { color:C.red }]}>Hard Cut: ${result.analysis.hardCutThreshold}</Text>
-                  <Text style={s.infoTxt}>Below this price, your time is worth more than what you'll make. Donate and take the tax deduction.</Text>
-                </View>
+                  <Text style={[s.infoLabel, { color:C.red }]}>Hard, Cut: ${result.analysis.hardCutThreshold}</Text>
+                  <Text style={s.infoTxt}>Below this price, your time is worth more than what you'll make. Donate and take the tax deduction.</Text></View>
               )}
             </View>
           )}
 
-          {/* ── BUNDLE TAB ── */}
+          {/* ── BUNDLE, TAB ── */}
           {activeTab === "bundle" && (
             <View style={s.tabContent}>
               {(result.analysis?.bundleIdeas || []).length === 0 ? (
@@ -445,7 +438,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
 
 const s = StyleSheet.create({
   safe:           { flex:1, backgroundColor:C.bg },
-  nav:            { flexDirection:"row", alignItems:"center", justifyContent:"space-between", paddingHorizontal:20, paddingVertical:14, borderBottomWidth:1, borderBottomColor:C.border },
+  nav:            { flexDirection:"row", alignItems:"center", justifyContent:"space-between", paddingHorizontal:20, paddingTop: 16, paddingBottom: 10, borderBottomWidth:1, borderBottomColor:C.border },
   backBtn:        { paddingRight:8 },
   backTxt:        { color:C.text3, fontSize:16, fontWeight:"700" },
   navTitle:       { color:C.text1, fontSize:16, fontWeight:"800" },
@@ -456,7 +449,7 @@ const s = StyleSheet.create({
   errorTxt:       { color:C.red, fontSize:13 },
   label:          { color:C.text3, fontSize:12, fontWeight:"700", textTransform:"uppercase" as any, letterSpacing:0.5, marginBottom:6, marginTop:10 },
   input:          { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:12, padding:13, color:C.text1, fontSize:14, marginBottom:4 },
-  chip:           { paddingHorizontal:12, paddingVertical:7, borderRadius:100, borderWidth:1, borderColor:C.border, backgroundColor:C.surface },
+  chip:           { paddingHorizontal:12, paddingTop:16, paddingBottom:10, borderRadius:100, borderWidth:1, borderColor:C.border, backgroundColor:C.surface },
   chipActive:     { backgroundColor:C.green, borderColor:C.green },
   chipTxt:        { color:C.text3, fontSize:12, fontWeight:"600" },
   chipTxtActive:  { color:C.greenDark, fontWeight:"800" },
@@ -474,7 +467,7 @@ const s = StyleSheet.create({
   marketLbl:      { color:C.text4, fontSize:11 },
   tabScroll:      { maxHeight:46, marginBottom:14, borderBottomWidth:1, borderBottomColor:C.border },
   tabRow:         { flexDirection:"row", paddingHorizontal:4, gap:4 },
-  tabBtn:         { paddingHorizontal:14, paddingVertical:10, borderRadius:8, borderBottomWidth:2, borderBottomColor:"transparent" },
+  tabBtn:         { paddingHorizontal:14, paddingTop:16, paddingBottom:10, borderRadius:8, borderBottomWidth:2, borderBottomColor:"transparent" },
   tabBtnActive:   { borderBottomColor:C.green },
   tabTxt:         { color:C.text4, fontSize:12, fontWeight:"600" },
   tabTxtActive:   { color:C.green, fontWeight:"800" },
@@ -509,7 +502,7 @@ const s = StyleSheet.create({
   kwChip:         { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:100, paddingHorizontal:10, paddingVertical:5 },
   kwTxt:          { color:C.text2, fontSize:12 },
   cascadeRow:     { flexDirection:"row", gap:12, marginBottom:10, alignItems:"flex-start" },
-  cascadeDayBox:  { backgroundColor:C.surface, borderRadius:8, paddingHorizontal:10, paddingVertical:6, minWidth:60, alignItems:"center" },
+  cascadeDayBox:  { backgroundColor:C.surface, borderRadius:8, paddingHorizontal:10, paddingTop:16, paddingBottom:10, minWidth:60, alignItems:"center" },
   cascadeDayNum:  { color:C.text3, fontSize:11, fontWeight:"700" },
   cascadeAction:  { color:C.text1, fontSize:13, lineHeight:18 },
   cascadePrice:   { color:C.green, fontSize:13, fontWeight:"700", marginTop:2 },
@@ -527,5 +520,4 @@ const s = StyleSheet.create({
   lockedTitle:    { color:C.text1, fontSize:20, fontWeight:"900", marginBottom:10 },
   lockedBody:     { color:C.text3, fontSize:14, lineHeight:21, textAlign:"center" as any, marginBottom:20 },
   upgradeBtn:     { backgroundColor:C.green, borderRadius:13, padding:16, alignItems:"center", width:"100%" as any },
-  upgradeBtnTxt:  { color:C.greenDark, fontSize:15, fontWeight:"900" },
-});
+  upgradeBtnTxt:  { color:C.greenDark, fontSize:15, fontWeight:"900" } });

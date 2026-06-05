@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, SafeAreaView, StatusBar, ActivityIndicator, Share } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Share } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import { API_BASE } from "../lib/api";
 
@@ -29,8 +30,7 @@ export default function RelisterScreen({ token, plan, onNavigate, onBack }: Prop
     try {
       const r = await fetch(`${API_BASE}/api/relist`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ userToken:token, itemName, brand, condition, size, color, platforms:selectedPlatforms, sellPrice:Number(sellPrice)||0 }),
-      });
+        body:JSON.stringify({ userToken:token, itemName, brand, condition, size, color, platforms:selectedPlatforms, sellPrice:Number(sellPrice)||0 }) });
       const d = await r.json();
       if (!d.success) throw new Error(d.error||"Failed");
       setResults(d.listings||[]);
@@ -69,7 +69,7 @@ export default function RelisterScreen({ token, plan, onNavigate, onBack }: Prop
           <View style={{gap:12}}>
             {error?<View style={s.errBox}><Text style={s.errText}>{error}</Text></View>:null}
 
-            <View><Text style={s.label}>Item Name *</Text><TextInput style={s.input} value={itemName} onChangeText={setItemName} placeholder="e.g. Lululemon Align Leggings" placeholderTextColor={C.text4}/></View>
+            <View><Text style={s.label}>Item Name *</Text><TextInput style={s.input} value={itemName} onChangeText={setItemName} placeholder="e.g. Lululemon, Align Leggings" placeholderTextColor={C.text4}/></View>
             <View><Text style={s.label}>Brand</Text><TextInput style={s.input} value={brand} onChangeText={setBrand} placeholder="e.g. Lululemon" placeholderTextColor={C.text4}/></View>
             <View style={{flexDirection:"row",gap:10}}>
               <View style={{flex:1}}><Text style={s.label}>Size</Text><TextInput style={s.input} value={size} onChangeText={setSize} placeholder="e.g. Size 6" placeholderTextColor={C.text4}/></View>
@@ -132,7 +132,7 @@ export default function RelisterScreen({ token, plan, onNavigate, onBack }: Prop
 }
 
 const s = StyleSheet.create({
-  safe:{flex:1,backgroundColor:C.bg}, nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingVertical:14,gap:8},
+  safe:{flex:1,backgroundColor:C.bg}, nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingTop: 16, paddingBottom: 10,gap:8},
   navBack:{padding:4}, navBackText:{color:C.text3,fontSize:24,lineHeight:24},
   logoRow:{flexDirection:"row",alignItems:"center",gap:8},
   logoIcon:{width:26,height:26,backgroundColor:C.green,borderRadius:7,alignItems:"center",justifyContent:"center"},
@@ -144,11 +144,11 @@ const s = StyleSheet.create({
   body:{color:C.text2,fontSize:14,lineHeight:21},
   label:{color:C.text3,fontSize:13,fontWeight:"700",marginBottom:6},
   input:{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:12,padding:14,color:C.text1,fontSize:14},
-  chip:{paddingHorizontal:14,paddingVertical:8,borderRadius:100,borderWidth:1,borderColor:C.border,backgroundColor:C.surface},
+  chip:{paddingHorizontal:14,paddingTop:16, paddingBottom:10,borderRadius:100,borderWidth:1,borderColor:C.border,backgroundColor:C.surface},
   chipActive:{backgroundColor:C.green,borderColor:C.green},
   chipText:{color:C.text3,fontSize:13,fontWeight:"600"},
   chipTextActive:{color:C.greenDark,fontWeight:"700"},
-  greenBtn:{backgroundColor:C.green,borderRadius:14,paddingVertical:16,alignItems:"center"},
+  greenBtn:{backgroundColor:C.green,borderRadius:14,paddingTop:16, paddingBottom:10,alignItems:"center"},
   greenBtnText:{color:C.greenDark,fontSize:16,fontWeight:"900"},
   errBox:{backgroundColor:"#1a0505",borderWidth:1,borderColor:C.red+"40",borderRadius:10,padding:12},
   errText:{color:C.red,fontSize:13},
@@ -163,5 +163,4 @@ const s = StyleSheet.create({
   copyBtn:{borderWidth:1,borderColor:C.border,borderRadius:8,paddingHorizontal:12,paddingVertical:6},
   copyBtnText:{color:C.text3,fontSize:12,fontWeight:"700"},
   tagPill:{backgroundColor:C.surfaceHigh,borderRadius:100,paddingHorizontal:8,paddingVertical:3},
-  tagText:{color:C.text4,fontSize:10,fontWeight:"600"},
-});
+  tagText:{color:C.text4,fontSize:10,fontWeight:"600"} });

@@ -1,27 +1,30 @@
 {
-  "cli": {
-    "version": ">= 19.0.1",
-    "appVersionSource": "remote"
-  },
-  "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal"
-    },
-    "preview": {
-      "distribution": "internal"
-    },
-    "preview-device": {
-      "distribution": "internal",
-      "ios": {
-        "resourceClass": "m-medium"
-      }
-    },
-    "production": {
-      "autoIncrement": true
-    }
-  },
-  "submit": {
-    "production": {}
-  }
+    "cli":  {
+                "version":  "\u003e= 12.0.0"
+            },
+    "build":  {
+                  "development":  {
+                                      "developmentClient":  true,
+                                      "distribution":  "internal",
+                                      "ios":  {
+                                                  "simulator":  false,
+                                                  "resourceClass":  "m-medium"
+                                              }
+                                  },
+                  "preview":  {
+                                  "distribution":  "internal",
+                                  "ios":  {
+                                              "resourceClass":  "m-medium",
+                                              "image":  "macos-sequoia-15.4-xcode-16.3"
+                                          },
+                                  "env":  {
+                                              "EXPO_USE_HERMES":  "0"
+                                          }
+                              },
+                  "production":  {
+                                     "ios":  {
+                                                 "resourceClass":  "m-medium"
+                                             }
+                                 }
+              }
 }

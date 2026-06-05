@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity, SafeAreaView,
-  StatusBar, ActivityIndicator, TextInput, Linking, Image, Modal, Pressable,
-} from "react-native";
+  View, Text, ScrollView, StyleSheet, TouchableOpacity,
+  StatusBar, ActivityIndicator, TextInput, Linking, Image, Modal, Pressable } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { C } from "../lib/theme";
 import { isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric, getBiometricLabel } from "../lib/biometrics";
@@ -10,7 +10,7 @@ import { API_BASE } from "../lib/api";
 
 const EMOJIS = ["🛍️","💰","🔥","⚡","🏆","👑","💎","🦁","🐉","🎯","🚀","💪","🌟","🦊","😎","🤑","🏅","🌊","🎪","🦅"];
 
-const PLAN_COLOR: Record<string,string> = { free:C.text4, seller:C.green, pro:C.orange, lifetime:C.yellow };
+const PLAN_COLOR: Record<string,string> = { free:C.text4, seller:C.green, pro:C.orange, lifetime:C.yellow, business:"#ff8c42" };
 
 const BADGES = [
   { id:"first_scan",    e:"🔍", n:"First Scan",      d:"Completed your first scan",         xp:10  },
@@ -49,11 +49,35 @@ function getRank(xp: number) {
 
 interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void; }
 
+const ps = {
+  navRow:        { flexDirection:"row" as any, alignItems:"center", padding:16, borderBottomWidth:1, borderBottomColor:C.border, gap:12 },
+  navIcon:       { fontSize:20, width:28, textAlign:"center" as any },
+  navLabel:      { flex:1, color:C.text1, fontSize:14, fontWeight:"600" as any },
+  navArrow:      { color:C.text4, fontSize:18 },
+  toggle:        { width:44, height:24, borderRadius:12, backgroundColor:C.surface, borderWidth:1, borderColor:C.border, justifyContent:"center" as any, paddingHorizontal:2 },
+  toggleOn:      { backgroundColor:C.greenBg, borderColor:C.green },
+  toggleThumb:   { width:18, height:18, borderRadius:9, backgroundColor:C.text4 },
+  toggleThumbOn: { backgroundColor:C.green, alignSelf:"flex-end" as any },
+  refCard:       { backgroundColor:C.surface, borderRadius:14, padding:16, margin:16, borderWidth:1, borderColor:C.border },
+  refHeader:     { color:C.text1, fontSize:16, fontWeight:"800" as any, marginBottom:4 },
+  refSub:        { color:C.text3, fontSize:13, lineHeight:18, marginBottom:12 },
+  refStats:      { flexDirection:"row" as any, gap:8, marginBottom:12 },
+  refStat:       { flex:1, backgroundColor:C.bg, borderRadius:10, padding:10, alignItems:"center" as any },
+  refStatVal:    { color:C.green, fontSize:20, fontWeight:"900" as any },
+  refStatLbl:    { color:C.text4, fontSize:9, fontWeight:"700" as any, textTransform:"uppercase" as any },
+  refLinkBox:    { backgroundColor:C.bg, borderRadius:10, padding:10, flexDirection:"row" as any, alignItems:"center", gap:8 },
+  refLink:       { flex:1, color:C.text2, fontSize:12 },
+  copyBtn:       { backgroundColor:C.green, borderRadius:8, paddingHorizontal:12, paddingVertical:6 },
+  copyBtnTxt:    { color:C.greenDark, fontSize:12, fontWeight:"700" as any },
+  refTitle:      { color:C.green, fontSize:14, fontWeight:"700" as any, marginBottom:2 },
+  refNote:       { color:C.text4, fontSize:11, marginTop:8, lineHeight:16 },
+};
+
 export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Props) {
   const [profile, setProfile]       = useState<any>(null);
   const [stats, setStats]           = useState<any>(null);
   const [earnedIds, setEarnedIds]   = useState<Set<string>>(new Set());
-  const [loading, setLoading]       = useState(true);
+  const [loading, setLoading]       = useState(false);
   const [editing, setEditing]       = useState(false);
   const [editName, setEditName]     = useState("");
   const [editBio, setEditBio]       = useState("");
@@ -62,8 +86,76 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
   const [saving, setSaving]         = useState(false);
   const [tab, setTab]               = useState<"stats"|"badges"|"plan">("stats");
   const [emojiModal, setEmojiModal] = useState(false);
+  const [biometricType, setBioType] = useState<"face"|"fingerprint"|"none">("none");
+  const [biometricEnabled, setBioEnabled] = useState(false);
+  const [userEmail, setUserEmail] = useState("");
+  const [referralLink, setReferralLink] = useState("");
+  const [referrals, setReferrals] = useState({ total: 0, totalEarned: 0, pendingEarned: 0 });
+  const [showDeletion, setShowDeletion] = useState(false);
 
-  useEffect(() => { load(); }, []);
+  // Decode email from JWT token immediately on mount
+  useEffect(() => {
+    try {
+      // Simple JWT payload decode - works in React Native
+      const b64 = token.split(".")[1]
+        .replace(/-/g,"+").replace(/_/g,"/");
+      // Pad to multiple of 4
+      const pad = b64 + "===".slice(0, (4 - b64.length % 4) % 4);
+      // Decode using global atob if available, else manual
+      let decoded = "";
+      try {
+        decoded = decodeURIComponent(escape(atob(pad)));
+      } catch {
+        // Manual base64 decode fallback
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let result = "";
+        let i = 0;
+        const str = pad.replace(/=+$/, "");
+        while (i < str.length) {
+          const a = chars.indexOf(str[i++]);
+          const b = chars.indexOf(str[i++]);
+          const c = chars.indexOf(str[i++]);
+          const d = chars.indexOf(str[i++]);
+          result += String.fromCharCode(((a<<2)|(b>>4))&255);
+          if (c !== -1) result += String.fromCharCode(((b<<4)|(c>>2))&255);
+          if (d !== -1) result += String.fromCharCode(((c<<6)|d)&255);
+        }
+        decoded = result;
+      }
+      const payload = JSON.parse(decoded);
+      if (payload.email) setUserEmail(payload.email);
+    } catch {}
+  }, [token]);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => { load(); loadBiometrics(); }, []);
+
+  function buildReferralLink(userId: string) {
+    setReferralLink(`https://www.getvaluiq.com/r/${userId.slice(0,8)}`);
+  }
+
+  async function copyReferralLink() {
+    try {
+      const { Clipboard } = await import("@react-native-clipboard/clipboard").catch(() => 
+        ({ Clipboard: null }));
+      if (Clipboard) {
+        Clipboard.setString(referralLink);
+      } else {
+        // Fallback - show the link
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  }
+
+  async function loadBiometrics() {
+    const { available, type } = await isBiometricAvailable();
+    if (available) {
+      setBioType(type as any);
+      const en = await isBiometricEnabled();
+      setBioEnabled(en);
+    }
+  }
 
   async function load() {
     try {
@@ -73,6 +165,23 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
         setProfile(d.profile || {});
         setStats(d.stats || {});
         setEarnedIds(new Set((d.badges || []).map((b:any) => b.id)));
+        // Get email from profile or decode from JWT token
+        const emailFromProfile = d.profile?.email || "";
+        if (emailFromProfile) {
+          setUserEmail(emailFromProfile);
+        } else {
+          // Decode from JWT token
+          try {
+            // Email already set from JWT in useEffect above
+          // This is just a fallback
+          try {
+            const b64 = token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");
+            const pad = b64 + "===".slice(0,(4-b64.length%4)%4);
+            const pl = JSON.parse(decodeURIComponent(escape(atob(pad))));
+            setUserEmail(pl.email || "");
+          } catch {}
+          } catch {}
+        }
         setEditName(d.profile?.display_name || "");
         setEditBio(d.profile?.bio || "");
       }
@@ -82,9 +191,8 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
 
   async function pickPhoto() {
     const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true, aspect: [1,1], quality: 0.7, base64: true,
-    });
+      mediaTypes: ImagePicker.MediaType.Images,
+      allowsEditing: true, aspect: [1,1], quality: 0.7, base64: true });
     if (!res.canceled && res.assets[0]?.base64) {
       setEditPhoto(`data:image/jpeg;base64,${res.assets[0].base64}`);
       setEditEmoji(null);
@@ -101,16 +209,13 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
           display_name: editName,
           bio: editBio,
           ...(editPhoto ? { avatar_photo: editPhoto } : {}),
-          ...(editEmoji ? { avatar_emoji: editEmoji } : {}),
-        }),
-      });
+          ...(editEmoji ? { avatar_emoji: editEmoji } : {}) }) });
       setProfile((p:any) => ({
         ...p,
         display_name: editName,
         bio: editBio,
         ...(editPhoto ? { avatar_photo: editPhoto, avatar_emoji: null } : {}),
-        ...(editEmoji ? { avatar_emoji: editEmoji, avatar_photo: null } : {}),
-      }));
+        ...(editEmoji ? { avatar_emoji: editEmoji, avatar_photo: null } : {}) }));
       setEditing(false);
     } catch {}
     setSaving(false);
@@ -119,7 +224,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
   const xp = Array.from(earnedIds).reduce((sum, id) => sum + (BADGES.find(b=>b.id===id)?.xp||0), 0);
   const rank = getRank(xp);
   const planColor = PLAN_COLOR[plan] || C.text4;
-  const displayName = profile?.display_name || "Flipper";
+  const displayName = profile?.display_name || profile?.full_name || "Your Profile";
 
   // Current avatar: photo > emoji > initial
   const currentPhoto = profile?.avatar_photo;
@@ -128,16 +233,10 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
   // Preview in edit mode
   const previewPhoto = editPhoto || (!editEmoji && currentPhoto);
   const previewEmoji = editEmoji || (!editPhoto && currentEmoji);
-  const previewInitial = displayName[0]?.toUpperCase() || "F";
-
-  if (loading) return (
-    <SafeAreaView style={s.safe}>
-      <View style={s.center}><ActivityIndicator color={C.green} size="large"/></View>
-    </SafeAreaView>
-  );
+  const previewInitial = (displayName || "F")[0]?.toUpperCase() || "F";
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={[s.safe, {backgroundColor: C.bg}]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
 
       {/* Emoji picker modal */}
@@ -172,15 +271,15 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
                 <Text style={s.editNavText}>Edit</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={onLogout}>
-              <Text style={{color:C.text4,fontSize:13}}>Sign out</Text>
+            <TouchableOpacity style={s.logoutNavBtn} onPress={onLogout}>
+              <Text style={s.logoutNavText}>Sign Out</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* === PROFILE CARD === */}
+        {/* === PROFILE, CARD === */}
         {!editing ? (
-          /* VIEW MODE */
+          /* VIEW, MODE */
           <View style={s.profileCard}>
             <View style={s.avatarArea}>
               {currentPhoto ? (
@@ -200,7 +299,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
             </View>
           </View>
         ) : (
-          /* EDIT MODE */
+          /* EDIT, MODE */
           <View style={s.editCard}>
             <Text style={s.editTitle}>Edit Profile</Text>
 
@@ -271,7 +370,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
             {rank.next && <Text style={{color:C.text4,fontSize:11}}>{rank.next.e} {rank.next.l} at {rank.next.min} XP</Text>}
           </View>
           <View style={s.xpBarBg}>
-            <View style={[s.xpBarFill,{width:`${Math.min(100,rank.progress*100)}%` as any,backgroundColor:rank.c}]}/>
+            <View style={[s.xpBarFill,{width:Math.min(100,(rank?.progress||0)*100) + "%" as any,backgroundColor:rank.c}]}/>
           </View>
           <Text style={{color:C.text4,fontSize:11,marginTop:6}}>{xp} XP · {earnedIds.size}/{BADGES.length} badges earned</Text>
         </View>
@@ -316,7 +415,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
               <Text style={{fontSize:20}}>🔗</Text>
               <View style={{flex:1,paddingHorizontal:12}}>
                 <Text style={{color:C.text1,fontSize:14,fontWeight:"700"}}>Refer a Friend</Text>
-                <Text style={{color:C.text4,fontSize:12,marginTop:2}}>Share ValuIQ · earn rewards</Text>
+                <Text style={{color:C.text4,fontSize:12,marginTop:2}}>Share, ValuIQ · earn rewards</Text>
               </View>
               <Text style={{color:C.green,fontSize:18}}>→</Text>
             </TouchableOpacity>
@@ -361,7 +460,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
           <View style={{gap:10}}>
             <View style={[s.currentPlan,{borderColor:planColor+"50"}]}>
               <Text style={[s.currentPlanName,{color:planColor}]}>
-                {plan==="lifetime"?"♾️ Lifetime":plan==="pro"?"🔥 Pro":plan==="seller"?"💪 Seller":"Free"} Plan
+                {plan==="lifetime"?"♾️ Lifetime":plan==="pro"?"🔥 Pro":plan==="seller"?"💪 Seller":"Free"} Plan,
               </Text>
               <View style={[s.currentPlanBadge,{backgroundColor:planColor+"20",borderColor:planColor+"50"}]}>
                 <Text style={[{color:planColor,fontSize:10,fontWeight:"700"}]}>ACTIVE</Text>
@@ -385,7 +484,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
                 To delete your account and all data, contact us at support@getvaluiq.com or use the link below.
               </Text>
               <TouchableOpacity
-                onPress={()=>Linking.openURL("mailto:support@getvaluiq.com?subject=Delete My Account")}
+                onPress={()=>Linking.openURL("mailto:support@getvaluiq.com?subject=Delete, My Account")}
                 style={{backgroundColor:"#1a0505",borderWidth:1,borderColor:C.red+"40",borderRadius:10,padding:12,alignItems:"center"}}>
                 <Text style={{color:C.red,fontSize:13,fontWeight:"700"}}>Request account deletion</Text>
               </TouchableOpacity>
@@ -414,7 +513,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
             <View style={s.referralCard}>
               <Text style={s.referralTitle}>🔗 Refer Friends & Earn</Text>
               <Text style={s.referralBody}>
-                Share ValuIQ with other resellers. When they sign up through your link, you both benefit.
+                Share, ValuIQ with other resellers. When they sign up through your link, you both benefit.
               </Text>
               <TouchableOpacity
                 style={s.referralBtn}
@@ -442,11 +541,12 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
             onPress={async () => {
               if (biometricEnabled) {
                 await disableBiometric();
-                setBiometricEnabled(false);
+                setBioEnabled(false);
               } else {
-                if (userEmail) {
-                  await enableBiometric(userEmail);
-                  setBiometricEnabled(true);
+                const emailToSave = profile?.email || "";
+                if (emailToSave) {
+                  await enableBiometric(emailToSave);
+                  setBioEnabled(true);
                 }
               }
             }}
@@ -468,7 +568,9 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
           <Text style={ps.navLabel}>FAQ & Help</Text>
           <Text style={ps.navArrow}>›</Text>
         </TouchableOpacity>
-        {(userEmail === "Natev9@comcast.net" || userEmail === "natev9@comcast.net" || userEmail === "NVisionsinc@gmail.com" || userEmail === "nvisionsinc@gmail.com") && (
+        {(userEmail === "Natev9@comcast.net" || userEmail === "natev9@comcast.net" || 
+           userEmail === "NVisionsinc@gmail.com" || userEmail === "nvisionsinc@gmail.com" ||
+           userEmail === "NathanRussell9@outlook.com" || userEmail === "nathanrussell9@outlook.com") && (
           <TouchableOpacity style={[ps.navRow,{borderColor:C.orange+"40",backgroundColor:C.orange+"08"}]} onPress={() => onNavigate("admin")}>
             <Text style={ps.navIcon}>⚙️</Text>
             <Text style={[ps.navLabel,{color:C.orange}]}>Admin Panel</Text>
@@ -481,13 +583,12 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
           <Text style={ps.navArrow}>›</Text>
         </TouchableOpacity>
 
-        {/* ── REFERRAL PROGRAM ── */}
+        {/* ── REFERRAL, PROGRAM ── */}
         {["seller","pro","lifetime"].includes(plan) && (
           <View style={ps.refCard}>
             <View style={ps.refHeader}>
               <Text style={ps.refTitle}>💰 Your Referral Link</Text>
-              <Text style={ps.refSub}>Earn 20% of every friend's first payment</Text>
-            </View>
+              <Text style={ps.refSub}>Earn 20% of every friend's first payment</Text></View>
             <View style={ps.refLinkBox}>
               <Text style={ps.refLink} numberOfLines={1}>
                 {referralLink || "Loading..."}
@@ -511,12 +612,12 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
               </View>
             </View>
             <Text style={ps.refNote}>
-              Seller → $3.80 · Pro → $9.80 · Lifetime → $39.40 per referral
+              Seller → $3.80 · Pro → $9.80 · Lifetime → $39.40 per referral,
             </Text>
           </View>
         )}
 
-        {/* ── ACCOUNT SECTION — always visible regardless of tab ── */}
+        {/* ── ACCOUNT, SECTION — always visible regardless of tab ── */}
         <View style={s.accountSection}>
           <Text style={s.accountSectionTitle}>Account</Text>
 
@@ -537,7 +638,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
               style={s.manageBtn}
             >
               <Text style={s.manageBtnTxt}>
-                {plan==="lifetime"?"♾️ Lifetime Access — Manage Account":"Manage Billing & Plan →"}
+                {plan==="lifetime"?"♾️ Lifetime, Access — Manage, Account":"Manage, Billing & Plan →"}
               </Text>
             </TouchableOpacity>
           )}
@@ -565,7 +666,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
 }
 
 const s = StyleSheet.create({
-  safe:              { flex:1, backgroundColor:C.bg },
+  safe: { flex: 1, backgroundColor: C.bg },
   center:            { flex:1, alignItems:"center", justifyContent:"center" },
   container:         { padding:20, paddingBottom:60 },
   nav:               { flexDirection:"row", justifyContent:"space-between", alignItems:"center", marginBottom:20 },
@@ -573,10 +674,12 @@ const s = StyleSheet.create({
   logoIcon:          { width:30, height:30, backgroundColor:C.green, borderRadius:8, alignItems:"center", justifyContent:"center" },
   logoIconText:      { color:C.greenDark, fontSize:15, fontWeight:"900" },
   logoText:          { color:C.text1, fontSize:17, fontWeight:"800", letterSpacing:-0.5 },
+  logoutNavBtn: { backgroundColor: "#1a0505", borderWidth: 1, borderColor: "#ff5a5a40", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 },
+  logoutNavText: { color: C.red, fontSize: 13, fontWeight: "700" as any },
   editNavBtn:        { borderWidth:1, borderColor:C.border, borderRadius:8, paddingHorizontal:14, paddingVertical:7 },
   editNavText:       { color:C.text3, fontSize:13, fontWeight:"600" },
 
-  // View mode
+  // View mode,
   profileCard:       { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:18, padding:20, alignItems:"center", marginBottom:14 },
   avatarArea:        { marginBottom:14 },
   avatarImg:         { width:80, height:80, borderRadius:40, borderWidth:2, borderColor:C.green },
@@ -589,7 +692,7 @@ const s = StyleSheet.create({
   rankLabel:         { fontSize:13, fontWeight:"800" },
   xpText:            { color:C.text4, fontSize:11 },
 
-  // Edit mode
+  // Edit mode,
   editCard:          { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:18, padding:20, marginBottom:14 },
   editTitle:         { color:C.text1, fontSize:18, fontWeight:"900", marginBottom:16 },
   avatarPickerRow:   { flexDirection:"row", gap:16, alignItems:"center", marginBottom:20 },
@@ -606,7 +709,7 @@ const s = StyleSheet.create({
   cancelBtn:         { borderWidth:1, borderColor:C.border, borderRadius:12, padding:14, paddingHorizontal:18 },
   cancelBtnText:     { color:C.text4, fontSize:14 },
 
-  // Emoji modal
+  // Emoji modal,
   modalOverlay:      { flex:1, backgroundColor:"rgba(0,0,0,0.75)", justifyContent:"flex-end" },
   emojiSheet:        { backgroundColor:C.surface, borderTopLeftRadius:24, borderTopRightRadius:24, padding:24, paddingBottom:40 },
   sheetHandle:       { width:40, height:4, backgroundColor:C.border, borderRadius:2, alignSelf:"center", marginBottom:16 },
@@ -616,26 +719,26 @@ const s = StyleSheet.create({
   emojiOptActive:    { backgroundColor:C.green+"30", borderWidth:2, borderColor:C.green },
   emojiOptText:      { fontSize:28 },
 
-  // XP
+  // XP,
   xpCard:            { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:14, padding:14, marginBottom:14 },
   xpBarBg:           { height:8, backgroundColor:C.bg, borderRadius:4, overflow:"hidden", marginVertical:4 },
   xpBarFill:         { height:8, borderRadius:4 },
 
-  // Tabs
+  // Tabs,
   tabRow:            { flexDirection:"row", backgroundColor:C.surface, borderRadius:13, padding:4, marginBottom:14, borderWidth:1, borderColor:C.border },
-  tabBtn:            { flex:1, paddingVertical:10, borderRadius:10, alignItems:"center" },
+  tabBtn:            { flex:1, paddingTop:16, paddingBottom:10, borderRadius:10, alignItems:"center" },
   tabBtnActive:      { backgroundColor:C.bg },
   tabText:           { color:C.text4, fontSize:12, fontWeight:"600" },
   tabTextActive:     { color:C.text1, fontWeight:"700" },
 
-  // Stats
+  // Stats,
   statsGrid:         { flexDirection:"row", flexWrap:"wrap", gap:8, marginBottom:8 },
   statCard:          { width:"47.5%", backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:14, padding:14, alignItems:"center" },
   statVal:           { fontSize:22, fontWeight:"900", marginBottom:2 },
   statLabel:         { color:C.text4, fontSize:10, fontWeight:"700", textTransform:"uppercase" },
   communityBtn:      { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:14, padding:16, flexDirection:"row", alignItems:"center" },
 
-  // Badges
+  // Badges,
   badgeSectionLabel: { color:C.text3, fontSize:12, fontWeight:"700", marginBottom:10 },
   earnedPill:        { backgroundColor:C.surface, borderWidth:1, borderColor:C.green+"40", borderRadius:14, padding:14, alignItems:"center", width:90 },
   earnedPillName:    { color:C.text1, fontSize:11, fontWeight:"700", textAlign:"center", marginBottom:2 },
@@ -646,7 +749,7 @@ const s = StyleSheet.create({
   lockedDesc:        { color:C.text4, fontSize:9, textAlign:"center", lineHeight:13, marginBottom:3, opacity:0.7 },
   lockedXp:          { color:C.text4, fontSize:9, opacity:0.5 },
 
-  // Plan tab
+  // Plan tab,
   currentPlan:       { backgroundColor:C.surface, borderWidth:1.5, borderRadius:14, padding:16, flexDirection:"row", justifyContent:"space-between", alignItems:"center" },
   currentPlanName:   { fontSize:17, fontWeight:"900" },
   currentPlanBadge:  { borderWidth:1, borderRadius:100, paddingHorizontal:10, paddingVertical:4 },
@@ -671,6 +774,5 @@ const s = StyleSheet.create({
   signOutBtn:        { borderWidth:1, borderColor:C.border, borderRadius:12, padding:14, alignItems:"center" },
   signOutBtnTxt:     { color:C.text3, fontSize:13, fontWeight:"600" },
   deleteAccountCard: { backgroundColor:C.surface, borderWidth:1, borderColor:C.red+"20", borderRadius:14, padding:16 },
-  upgradeFullBtn:    { backgroundColor:C.green, borderRadius:14, paddingVertical:14, alignItems:"center" },
-  upgradeFullBtnText:{ color:C.greenDark, fontSize:15, fontWeight:"900" },
-});
+  upgradeFullBtn:    { backgroundColor:C.green, borderRadius:14, paddingTop:16, paddingBottom:10, alignItems:"center" },
+  upgradeFullBtnText:{ color:C.greenDark, fontSize:15, fontWeight:"900" } });

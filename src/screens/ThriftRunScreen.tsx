@@ -1,6 +1,8 @@
 import React, { useState, useRef } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, SafeAreaView, StatusBar, ActivityIndicator, Image, Dimensions, Linking } from "react-native";
-import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-camera";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, Image, Dimensions, Linking } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+let CameraView: any = null; let useCameraPermissions: any = () => [null, async()=>{}];
+if (require("react-native").Platform.OS !== "web") { try { const c = require("expo-camera"); CameraView = c.CameraView; useCameraPermissions = c.useCameraPermissions; } catch {} }
 import * as ImagePicker from "expo-image-picker";
 import { C } from "../lib/theme";
 import ShareButton from "../components/ShareButton";
@@ -15,6 +17,7 @@ interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft
 
 export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, onNavigate }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
+  const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState<"intro"|"running"|"done">("intro");
   const [items, setItems] = useState<RunItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<RunItem|null>(null);
@@ -30,7 +33,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
     const newItem: RunItem = { id, photo:photo.base64, status:"scanning" };
     setItems(prev=>[newItem,...prev]);
     if (!isPaid) setScansLeft(n=>n!==null?Math.max(0,n-1):null);
-    // Analyze in background
+    // Analyze in background,
     analyzeItem(id, photo.base64);
   }
 
@@ -38,8 +41,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
     try {
       const r = await fetch(`${API_BASE}/api/lens`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ userToken:token, image:`data:image/jpeg;base64,${base64}`, isThriftRun:true }),
-      });
+        body:JSON.stringify({ userToken:token, images:[`data:image/jpeg;base64,${base64}`], isThriftRun:true }) });
       const d = await r.json();
       if (d.error==="scan_limit_reached") {
         setItems(prev=>prev.map(x=>x.id===id?{...x,status:"error",error:"Scan limit reached"}:x));
@@ -49,8 +51,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
         setItems(prev=>prev.map(x=>x.id===id?{
           ...x, status:"done",
           decision:d.decision, profit:d.netProfit, sellPrice:d.sellPrice,
-          buyTarget:d.buyTarget, platform:d.bestPlatform, name:d.itemName,
-        }:x));
+          buyTarget:d.buyTarget, platform:d.bestPlatform, name:d.itemName }:x));
       } else {
         setItems(prev=>prev.map(x=>x.id===id?{...x,status:"error",error:d.error||"Failed"}:x));
       }
@@ -59,8 +60,55 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
     }
   }
 
-  function endRun() { setPhase("done"); }
+  function endRun() {
+    setPhase("done");
+    // Save run to history
+    const buyItemsList = items.filter(x => x.decision === "BUY");
+    const totalProfitCalc = buyItemsList.reduce((sum,x) => sum + (x.profit||0), 0);
+    fetch(`${API_BASE}/api/thrift-run-save`, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        token,
+        items: items.map(item => ({
+          name: item.name, decision: item.decision,
+          profit: item.profit, platform: item.platform,
+          photo: item.photo?.substring(0, 100), // truncate for storage
+        })),
+        total_profit: totalProfitCalc,
+        buy_count: buyItemsList.length,
+        store_name: "Thrift Run",
+      })
+    }).catch(()=>{});
+  }
   function newRun() { setItems([]); setPhase("running"); setSelectedItem(null); }
+
+  const THRIFT_LIMITS: Record<string, number> = {
+    free: 3, seller: 10, pro: 999, lifetime: 999, business: 999
+  };
+  
+  async function checkAndStartRun() {
+    const limit = THRIFT_LIMITS[plan] || 3;
+    if (limit < 999) {
+      try {
+        const r = await fetch(`${API_BASE}/api/thrift-run-save?token=${token}`);
+        const d = await r.json();
+        const used = d.count || 0;
+        if (used >= limit) {
+          require("react-native").Alert.alert(
+            "Monthly Limit Reached",
+            (plan === "free" ? "Free plan" : "Seller plan") + " allows " + limit + " Thrift Runs per month",
+            [
+              { text: "Cancel", style: "cancel" },
+              { text: "Upgrade →", onPress: () => onNavigate("upgrade") }
+            ]
+          );
+          return;
+        }
+      } catch {}
+    }
+    setPhase("running");
+  }
+
 
 
 
@@ -68,7 +116,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
   const buyItems = items.filter(x=>x.decision==="BUY");
   const totalProfit = buyItems.reduce((sum,x)=>sum+(x.profit||0),0);
 
-  // INTRO
+  // INTRO,
   if (phase==="intro") return (
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
@@ -80,7 +128,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
         <Text style={{ fontSize:64, marginBottom:16 }}>🛍️</Text>
         <Text style={[s.h1,{textAlign:"center"}]}>Thrift Run</Text>
         <Text style={[s.body,{textAlign:"center",marginBottom:32}]}>
-          Rapid-scan mode. Walk through the store snapping photos.{"\n"}
+          Rapid-scan mode. Walk through the store snapping photos. 
           Every item gets analyzed simultaneously — no waiting.
         </Text>
         {[
@@ -108,7 +156,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
           </View>
         )}
         {isPaid && (
-          <TouchableOpacity style={[s.greenBtn,{width:"100%"}]} onPress={()=>{setPhase("running");}}>
+          <TouchableOpacity style={[s.greenBtn,{width:"100%"}]} onPress={checkAndStartRun}>
             <Text style={s.greenBtnText}>Start Thrift Run →</Text>
           </TouchableOpacity>
         )}
@@ -116,7 +164,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
     </SafeAreaView>
   );
 
-  // DONE - summary
+  // DONE - summary,
   if (phase==="done") return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
@@ -127,7 +175,13 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
         <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
           <Text style={s.h1}>Run Complete 🏁</Text>
           <ShareButton compact
-            message={`🛍️ Thrift Run via ValuIQ\n\n${items.length} scanned · ${buyItems.length} BUY finds\nProfit found: $${Math.round(totalProfit)}\n\n${buyItems.slice(0,5).map(x=>`• ${x.name||"Item"}: $${Math.round(x.profit||0)}`).join("\n")}\n\ngetvaluiq.com`}
+            message={
+              "🛍️ Thrift Run via ValuIQ\n\n" +
+              items.length + " scanned · " + buyItems.length + " BUY finds\n" +
+              "Profit found: $" + Math.round(totalProfit) + "\n\n" +
+              buyItems.slice(0,5).map(x => "• " + (x.name||"Item") + ": $" + Math.round(x.profit||0)).join("\n") +
+              "\n\ngetvaluiq.com"
+            }
           />
         </View>
         <Text style={[s.body,{marginBottom:20}]}>{items.length} items scanned · {buyItems.length} BUY verdicts</Text>
@@ -198,7 +252,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
     </SafeAreaView>
   );
 
-  // RUNNING - camera + scanned items feed
+  // RUNNING - camera + scanned items feed,
   if (!permission?.granted) return (
     <SafeAreaView style={s.safe}>
       <View style={s.center}>
@@ -215,8 +269,8 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
       <View style={{height:height*0.48, position:"relative"}}>
         <CameraView ref={cameraRef} style={{flex:1}} facing="back" />
         <View style={{position:"absolute",top:0,left:0,right:0,bottom:0}}>
-          <SafeAreaView style={{flex:1}}>
-            <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingHorizontal:16,paddingTop:8}}>
+          <View style={{flex:1}}>
+            <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingHorizontal:16,paddingTop:insets.top+8}}>
               <View style={s.camLogoBadge}><Text style={s.camLogoText}>Thrift Run</Text></View>
               <TouchableOpacity onPress={endRun} style={s.endBtn}><Text style={s.endBtnText}>End Run →</Text></TouchableOpacity>
             </View>
@@ -230,13 +284,13 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
                 <View style={s.shutter}><View style={s.shutterInner}/></View>
               </TouchableOpacity>
             </View>
-          </SafeAreaView>
+          </View>
         </View>
       </View>
 
       {/* Scanned items bottom half */}
       <View style={{flex:1,backgroundColor:C.bg}}>
-        <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingHorizontal:16,paddingVertical:10,borderBottomWidth:1,borderBottomColor:C.border}}>
+        <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingHorizontal:16,paddingTop:16, paddingBottom:10,borderBottomWidth:1,borderBottomColor:C.border}}>
           <Text style={{color:C.text3,fontSize:12,fontWeight:"700"}}>{items.length} SCANNED · {buyItems.length} BUY</Text>
           {items.length>0 && <Text style={{color:C.green,fontSize:13,fontWeight:"700"}}>${Math.round(totalProfit)} profit</Text>}
         </View>
@@ -279,7 +333,7 @@ const height = Dimensions.get("window").height;
 const s = StyleSheet.create({
   safe:             { flex:1, backgroundColor:C.bg },
   center:           { flex:1, alignItems:"center", justifyContent:"center", padding:28 },
-  nav:              { flexDirection:"row", alignItems:"center", paddingHorizontal:20, paddingVertical:14, gap:8 },
+  nav:              { flexDirection:"row", alignItems:"center", paddingHorizontal:20, paddingTop: 16, paddingBottom: 10, gap:8 },
   navBack:          { padding:4 },
   navBackText:      { color:C.text3, fontSize:24, lineHeight:24 },
   logoRow:          { flexDirection:"row", alignItems:"center", gap:8 },
@@ -293,13 +347,13 @@ const s = StyleSheet.create({
   body:             { color:C.text2, fontSize:14, lineHeight:21 },
   sectionLabel:     { color:C.text4, fontSize:11, fontWeight:"700", textTransform:"uppercase", letterSpacing:0.8 },
   featureRow:       { flexDirection:"row", alignItems:"flex-start", gap:12, width:"100%", backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:12, padding:14 },
-  greenBtn:         { backgroundColor:C.green, borderRadius:14, paddingVertical:16, alignItems:"center" },
+  greenBtn:         { backgroundColor:C.green, borderRadius:14, paddingTop:16, paddingBottom:10, alignItems:"center" },
   greenBtnText:     { color:C.greenDark, fontSize:16, fontWeight:"900" },
   lockedCard:       { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:16, padding:24, alignItems:"center", width:"100%", marginBottom:20 },
   lockedIcon:       { fontSize:36, marginBottom:8 },
   lockedTitle:      { color:C.text1, fontSize:16, fontWeight:"800", marginBottom:6 },
   lockedBody:       { color:C.text3, fontSize:13, textAlign:"center" },
-  camLogoBadge:     { backgroundColor:"rgba(168,230,61,0.15)", borderWidth:1, borderColor:"rgba(168,230,61,0.3)", paddingHorizontal:12, paddingVertical:6, borderRadius:8 },
+  camLogoBadge:     { backgroundColor:"rgba(168,230,61,0.15)", borderWidth:1, borderColor:"rgba(168,230,61,0.3)", paddingHorizontal:12, paddingTop:16, paddingBottom:10, borderRadius:8 },
   camLogoText:      { color:C.green, fontSize:13, fontWeight:"800" },
   endBtn:           { backgroundColor:"rgba(255,107,107,0.15)", borderWidth:1, borderColor:"rgba(255,107,107,0.4)", borderRadius:100, paddingHorizontal:14, paddingVertical:6 },
   endBtnText:       { color:C.red, fontSize:12, fontWeight:"700" },
@@ -322,5 +376,4 @@ const s = StyleSheet.create({
   detailCard:       { backgroundColor:C.surfaceHigh, borderWidth:1, borderColor:C.border, borderRadius:14, padding:16, marginBottom:12 },
   detailStat:       { flex:1, backgroundColor:C.bg, borderRadius:8, padding:10, alignItems:"center" },
   detailStatLabel:  { color:C.text4, fontSize:9, fontWeight:"700", textTransform:"uppercase", marginBottom:4 },
-  detailStatVal:    { fontSize:18, fontWeight:"900" },
-});
+  detailStatVal:    { fontSize:18, fontWeight:"900" } });

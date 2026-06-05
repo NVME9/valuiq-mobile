@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, SafeAreaView, StatusBar, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import { API_BASE } from "../lib/api";
 import ShareButton from "../components/ShareButton";
@@ -26,8 +27,7 @@ export default function BundleBuilderScreen({ token, plan, onNavigate, onBack }:
     try {
       const r = await fetch(`${API_BASE}/api/bundle-builder`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ userToken:token, items: filled }),
-      });
+        body: JSON.stringify({ userToken:token, items: filled }) });
       const d = await r.json();
       if (!d.success) throw new Error(d.error||"Failed");
       setResult(d);
@@ -69,7 +69,7 @@ export default function BundleBuilderScreen({ token, plan, onNavigate, onBack }:
         {result && (
           <View>
             <View style={s.resultCard}>
-              <Text style={s.resultLabel}>SUGGESTED BUNDLE PRICE</Text>
+              <Text style={s.resultLabel}>SUGGESTED, BUNDLE PRICE</Text>
               <Text style={s.resultPrice}>${result.bundlePrice||result.suggested_price||"—"}</Text>
               {result.savings&&<Text style={s.resultSavings}>vs ${result.totalIndividual} sold separately</Text>}
             </View>
@@ -87,7 +87,7 @@ export default function BundleBuilderScreen({ token, plan, onNavigate, onBack }:
   );
 }
 const s = StyleSheet.create({
-  safe:{flex:1,backgroundColor:C.bg},nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingVertical:14,gap:8},
+  safe:{flex:1,backgroundColor:C.bg},nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingTop: 16, paddingBottom: 10,gap:8},
   navBack:{padding:4},navBackText:{color:C.text3,fontSize:24,lineHeight:24},
   logoRow:{flexDirection:"row",alignItems:"center",gap:8},
   logoIcon:{width:26,height:26,backgroundColor:C.green,borderRadius:7,alignItems:"center",justifyContent:"center"},
@@ -101,7 +101,7 @@ const s = StyleSheet.create({
   itemRow:{flexDirection:"row",alignItems:"center",marginBottom:8},
   addBtn:{borderWidth:1,borderColor:C.border,borderStyle:"dashed",borderRadius:12,padding:13,alignItems:"center",marginTop:4},
   addBtnText:{color:C.text3,fontSize:14,fontWeight:"600"},
-  greenBtn:{backgroundColor:C.green,borderRadius:14,paddingVertical:16,alignItems:"center"},
+  greenBtn:{backgroundColor:C.green,borderRadius:14,paddingTop:16, paddingBottom:10,alignItems:"center"},
   greenBtnText:{color:C.greenDark,fontSize:16,fontWeight:"900"},
   errBox:{backgroundColor:"#1a0505",borderWidth:1,borderColor:C.red+"40",borderRadius:10,padding:12,marginBottom:12},
   errText:{color:C.red,fontSize:13},
@@ -113,5 +113,4 @@ const s = StyleSheet.create({
   resultSavings:{color:C.text3,fontSize:13,marginTop:4},
   infoCard:{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:13,padding:14,marginBottom:10},
   infoLabel:{color:C.text4,fontSize:10,fontWeight:"700",textTransform:"uppercase",marginBottom:6},
-  infoText:{color:C.text2,fontSize:13,lineHeight:20},
-});
+  infoText:{color:C.text2,fontSize:13,lineHeight:20} });

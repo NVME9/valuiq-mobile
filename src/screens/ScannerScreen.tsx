@@ -1,9 +1,9 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
-  ScrollView, Linking, SafeAreaView, StatusBar, TextInput,
-  Image, Dimensions,
-} from "react-native";
+  ScrollView, Linking, StatusBar, TextInput,
+  Image, Dimensions } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import { C } from "../lib/theme";
@@ -26,19 +26,27 @@ interface Props {
 
 export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, onNavigate, onLogout }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
+  const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>("camera");
   const [mode, setMode] = useState<"photo" | "barcode">("photo");
   const [photos, setPhotos] = useState<string[]>([]);
+  const [brandInput, setBrandInput] = useState("");
+  const [loadMsg, setLoadMsg] = useState(0);
   const [description, setDescription] = useState("");
+  const [buyPrice, setBuyPrice] = useState("");
   const [result, setResult] = useState<any>(null);
   const [barcodeScanned, setBarcodeScanned] = useState(false);
-  const cameraRef = useRef<any>(null);
+  const cameraRef        = useRef<any>(null);
+  const [showAnalysis,   setShowAnalysis]   = useState(false);
+  const [showShare,      setShowShare]      = useState(false);
 
   function reset() {
     setStep("camera");
     setResult(null);
     setPhotos([]);
     setDescription("");
+    setBrandInput("");
+    setBuyPrice("");
     setBarcodeScanned(false);
     setMode("photo");
   }
@@ -53,7 +61,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   }
 
   async function pickLibrary() {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, base64: true, quality: 0.7 });
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaType.Images, base64: true, quality: 0.7 });
     if (!res.canceled && res.assets[0]?.base64) {
       setPhotos(p => [...p, res.assets[0].base64!].slice(0, 3));
       setStep("review");
@@ -74,10 +82,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         d = await scanBarcode(token, barcode);
       } else {
         const p = customPhotos || photos;
-        if (!p.length && !description) {
+        if (!p.length && !description && !brandInput) {
           setStep("review"); return;
         }
-        d = await scanImage(token, p[0] || "", description);
+        d = await scanImage(token, p[0] || "", (brandInput ? "Brand: " + brandInput + ". " : "") + description, buyPrice ? parseFloat(buyPrice) : undefined);
       }
       if (d.error === "scan_limit_reached") {
         onNavigate("upgrade");
@@ -94,6 +102,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   }
 
   // ── PERMISSION ────────────────────────────────────────
+  useEffect(() => {
+    if (step !== "loading") return;
+    const msgs = ["Identifying your item...","Reading brand & model details...","Searching eBay sold listings...","Comparing 12+ marketplaces...","Calculating profit & fees...","Finding the best place to sell..."];
+    const id = setInterval(() => setLoadMsg(m => (m + 1) % msgs.length), 1800);
+    return () => clearInterval(id);
+  }, [step]);
+
   if (!permission) return <View style={s.center}><ActivityIndicator color={C.green} size="large" /></View>;
   if (!permission.granted) return (
     <SafeAreaView style={s.safe}>
@@ -117,8 +132,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           <Text style={s.logoText}>ValuIQ</Text>
         </View>
         <ActivityIndicator size="large" color={C.green} style={{ marginTop: 40, marginBottom: 16 }} />
-        <Text style={s.h2}>Analyzing item...</Text>
-        <Text style={s.body}>Checking prices on 12+ platforms</Text>
+        <Text style={s.h2}>{["Identifying your item...","Reading brand & model details...","Searching eBay sold listings...","Comparing 12+ marketplaces...","Calculating profit & fees...","Finding the best place to sell..."][loadMsg]}</Text>
+        <Text style={s.body}>This usually takes a few seconds</Text>
       </View>
     </SafeAreaView>
   );
@@ -130,7 +145,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         <Text style={{ fontSize: 52, textAlign: "center", marginBottom: 16 }}>🛑</Text>
         <Text style={[s.h1, { textAlign: "center" }]}>Free scans used up</Text>
         <Text style={[s.body, { textAlign: "center", marginBottom: 24 }]}>
-          Serious resellers scan 50–100 items per run.{"\n"}Upgrade for unlimited.
+          Serious resellers scan 50–100 items per run. Upgrade for unlimited.
         </Text>
         <View style={s.dealBox}>
           <Text style={s.dealOld}>$497 regular price</Text>
@@ -180,201 +195,325 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       </SafeAreaView>
     );
 
-    const hasGoodData = result.dataQuality === "strong";
+    const hasGoodData   = result.dataQuality === "strong";
     const hasLimitedData = result.dataQuality === "limited";
-    const hasNoData = !hasGoodData && !hasLimitedData;
-    const isProfit = (result.netProfit || 0) > 0;
-    const dc = result.decision === "BUY" ? C.green : result.decision === "WATCH" ? C.yellow : C.red;
-    const displayDc = hasNoData ? C.text3 : dc;
+    const hasNoData      = !hasGoodData && !hasLimitedData;
+    const isProfit       = (result.netProfit || 0) > 0;
+    const dc             = result.decision === "BUY" ? C.green : result.decision === "WATCH" ? C.yellow : C.red;
+    const verdict        = hasNoData ? "UNKNOWN" : result.decision || "PASS";
 
     return (
       <SafeAreaView style={s.safe}>
-        <StatusBar barStyle="light-content" />
+        <StatusBar barStyle="light-content"/>
+        {/* Nav */}
         <View style={s.nav}>
           <TouchableOpacity onPress={() => setStep("review")} style={s.navBack}>
             <Text style={s.navBackText}>←</Text>
           </TouchableOpacity>
           <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
           <Text style={s.logoText}>ValuIQ</Text>
-          <TouchableOpacity onPress={reset} style={[s.navBtn, { marginLeft: "auto" as any }]}>
+          <TouchableOpacity onPress={reset} style={[s.navBtn,{marginLeft:"auto" as any}]}>
             <Text style={s.navBtnText}>New Scan</Text>
           </TouchableOpacity>
         </View>
 
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+        <ScrollView contentContainerStyle={{padding:16,paddingBottom:60}} showsVerticalScrollIndicator={false}>
 
-          {/* Data confidence banner */}
-          {hasGoodData && result.priceData && (
-            <TouchableOpacity style={s.goodBanner} onPress={() => Linking.openURL(result.priceData.ebaySearchUrl)}>
-              <Text style={{ fontSize: 18 }}>✅</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={s.goodBannerTitle}>{result.priceData.count} real sold listings — tap to verify</Text>
-                <Text style={s.goodBannerSub}>eBay avg ${result.priceData.avgPrice} · Range ${result.priceData.minPrice}–${result.priceData.maxPrice}</Text>
-              </View>
-              <Text style={{ color: C.green }}>→</Text>
-            </TouchableOpacity>
-          )}
-          {hasLimitedData && (
-            <View style={s.limitedBanner}>
-              <Text>⚡</Text>
-              <Text style={s.limitedText}>Limited data — treat as estimate. Verify before buying.</Text>
-            </View>
-          )}
-          {hasNoData && (
-            <View style={s.noDataBanner}>
-              <Text>⚠️</Text>
-              <Text style={s.noDataText}>No market data found. Add brand + model for accuracy.</Text>
-            </View>
-          )}
-
-          {/* Verdict */}
-          <View style={[s.verdictCard, { borderColor: displayDc + "30", backgroundColor: displayDc + "08" }]}>
-            <View style={[s.verdictIcon, { backgroundColor: displayDc }]}>
-              <Text style={{ fontSize: 30 }}>
-                {result.decision === "BUY" ? "💰" : result.decision === "WATCH" ? "👀" : "🚫"}
-              </Text>
-            </View>
-            <Text style={[s.verdictText, { color: displayDc, fontSize: result.decision === "BUY" ? 48 : 36 }]}>
-              {hasNoData ? "UNKNOWN" : result.decision === "BUY" ? "BUY IT" : result.decision === "WATCH" ? "WATCH IT" : "PASS"}
+          {/* ── VERDICT CARD ── */}
+          <View style={[s.verdictCard,{borderColor:(hasNoData?C.border:dc)+"40",backgroundColor:(hasNoData?C.surface:dc)+"10"}]}>
+            {photos[0] && (
+              <Image source={{uri:`data:image/jpeg;base64,${photos[0]}`}}
+                style={{width:"100%",height:160,borderRadius:10,marginBottom:12}} resizeMode="cover"/>
+            )}
+            <Text style={[s.verdictText,{color:hasNoData?C.text3:dc,fontSize:42,lineHeight:48}]} numberOfLines={1} adjustsFontSizeToFit>
+              {verdict === "BUY" ? "💰 BUY IT" : verdict === "WATCH" ? "👀 WATCH IT" : verdict === "UNKNOWN" ? "❓ UNKNOWN" : "🚫 PASS"}
             </Text>
-            <Text style={s.itemName}>{result.itemName || result.item_name || "Unknown Item"}</Text>
-            <Text style={s.itemMeta}>{result.category}{result.condition ? ` · ${result.condition}` : ""}</Text>
+            <Text style={s.itemName} numberOfLines={2}>{result.itemName || result.item_name || "Unknown Item"}</Text>
+            {result.category ? <Text style={s.itemMeta}>{result.category}{result.condition ? " · " + (result.condition) + "" : ""}</Text> : null}
           </View>
 
-          {/* Profit */}
-          {!hasNoData ? (
-            <View style={[s.profitCard, { borderColor: isProfit ? C.green + "25" : C.red + "25" }]}>
-              <Text style={s.profitLabel}>
-                {hasLimitedData ? "ESTIMATED PROFIT (LIMITED DATA)" : "YOUR PROFIT AFTER FEES"}
-              </Text>
-              <Text style={[s.profitAmount, {
-                fontSize: hasLimitedData ? 48 : 60,
-                color: isProfit ? C.green : C.red,
-                opacity: hasLimitedData ? 0.75 : 1
-              }]}>
-                {isProfit ? "+" : ""}${Math.abs(result.netProfit || 0).toFixed(2)}
-              </Text>
-              <Text style={s.profitSub}>
-                Sell ${result.sellPrice} on {result.bestPlatform} · {result.roi}% ROI
-                {hasLimitedData ? " · verify before buying" : ""}
-              </Text>
-            </View>
-          ) : (
+          {/* ── UNKNOWN: need more info ── */}
+          {hasNoData && (
             <View style={s.noDataCard}>
-              <Text style={{ color: C.text3, fontSize: 15, fontWeight: "700", textAlign: "center", marginBottom: 8 }}>Need more information</Text>
-              <Text style={{ color: C.text4, fontSize: 13, textAlign: "center", lineHeight: 20 }}>Try again with the brand name, model number, or item description for accurate pricing.</Text>
+              <Text style={{color:C.text1,fontSize:15,fontWeight:"700",textAlign:"center",marginBottom:8}}>Need More Information</Text>
+              <Text style={{color:C.text3,fontSize:13,textAlign:"center",lineHeight:20,marginBottom:16}}>
+                Try scanning again with the brand name, model number, or a clearer photo for accurate pricing.
+              </Text>
+              <TouchableOpacity style={[s.navBtn,{alignSelf:"center",paddingHorizontal:24,paddingTop: 16, paddingBottom: 10}]} onPress={() => setStep("camera")}>
+                <Text style={s.navBtnText}>📷 Scan Again</Text>
+              </TouchableOpacity>
             </View>
           )}
 
-          {/* Key numbers - only show when we have real data */}
+          {/* ── PROFIT (only when we have data) ── */}
           {!hasNoData && (
-            <View style={s.numbersCard}>
-              {[
-                ["MAX TO PAY", `$${result.buyTarget || 0}`, C.yellow],
-                ["SELL FOR", `$${result.sellPrice || 0}`, C.text1],
-                ["PLATFORM", result.bestPlatform || "eBay", C.text1],
-              ].map(([label, value, color]) => (
-                <View key={label as string} style={s.numberItem}>
-                  <Text style={s.numberLabel}>{label as string}</Text>
-                  <Text style={[s.numberValue, { color: color as string }]} numberOfLines={1}>{value as string}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* Battle This */}
-          <TouchableOpacity
-            style={s.battleBtn}
-            onPress={() => {
-              // Pre-fill price battle with this item's data
-              onNavigate("price-battle");
-            }}
-            activeOpacity={0.85}
-          >
-            <Text style={s.battleBtnText}>⚡ Battle This Item</Text>
-            <Text style={s.battleBtnSub}>Compare all platforms instantly</Text>
-          </TouchableOpacity>
-
-          {/* Hot tip */}
-          {result.hotTip ? (
-            <View style={s.tipCard}>
-              <Text style={s.tipLabel}>🔥 Hot Tip</Text>
-              <Text style={s.tipText}>{result.hotTip}</Text>
-            </View>
-          ) : null}
-
-          {/* Reasoning */}
-          {result.reasoning ? (
-            <View style={s.infoCard}>
-              <Text style={s.infoLabel}>Analysis</Text>
-              <Text style={s.infoText}>{result.reasoning}</Text>
-            </View>
-          ) : null}
-
-          {/* Listing tips */}
-          {result.listingTips?.length > 0 && (
-            <View style={s.infoCard}>
-              <Text style={s.infoLabel}>Listing Tips</Text>
-              {result.listingTips.map((tip: string, i: number) => (
-                <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
-                  <Text style={{ color: C.green, fontSize: 13 }}>→</Text>
-                  <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, flex: 1 }}>{tip}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-
-          <ShareButton
-            message={`🔍 Found this with ValuIQ!\n\n${result.itemName || "Item"}\n\n${hasNoData ? "No market data" : `${result.decision === "BUY" ? "✅ BUY IT" : result.decision === "WATCH" ? "👀 WATCH IT" : "🚫 PASS"}\n💰 Profit: $${Math.abs(result.netProfit || 0).toFixed(2)}\n🛒 Sell on ${result.bestPlatform}\n📊 ${result.roi}% ROI`}\n\nFind your own deals → getvaluiq.com`}
-            title="ValuIQ Scan Result"
-          />
-                    {result?.decision === "BUY" && (
-            <View style={s.refNudge}>
-              <Text style={s.refTitle}>📱 Turn this into content that sells for you</Text>
-              <Text style={s.refBody}>Get a ready-to-post TikTok script, Instagram caption, and Reddit post generated from this find.</Text>
-              <View style={{flexDirection:"row",gap:8}}>
-                <TouchableOpacity style={[s.refBtn,{flex:1}]} onPress={async ()=>{
-                  try {
-                    const r = await fetch(`${API_BASE}/api/viral-content`, {
-                      method:"POST",
-                      headers:{"Content-Type":"application/json"},
-                      body:JSON.stringify({
-                        token,
-                        itemName:result.itemName||result.item_name||"Item",
-                        profit:Math.round(result.netProfit||result.profit||0),
-                        roi:Math.round(result.roi||0),
-                        buyPrice:Math.round(result.buyTarget||0),
-                        sellPrice:Math.round(result.sellPrice||0),
-                        category:result.category||"General",
-                      }),
-                    });
-                    const d = await r.json();
-                    if(d.content?.tiktok?.hook) {
-                      alert(`🎬 Your TikTok hook:
-
-"${d.content.tiktok.hook}"
-
-📝 Script ready — go to Profile to see all content.`);
-                    }
-                  } catch {}
-                }}>
-                  <Text style={s.refBtnTxt}>🎬 Get Content</Text>
+            <>
+              {/* Data confidence */}
+              {hasGoodData && result.priceData && result.priceData.isRealData ? (
+                <TouchableOpacity style={s.goodBanner} onPress={()=>Linking.openURL(result.priceData.ebaySearchUrl)}>
+                  <Text>✅</Text>
+                  <View style={{flex:1}}>
+                    <Text style={s.goodBannerTitle}>{result.priceData.count} real sold listings</Text>
+                    <Text style={s.goodBannerSub}>eBay avg ${result.priceData.avgPrice} · ${result.priceData.minPrice}–${result.priceData.maxPrice}</Text>
+                  </View>
+                  <Text style={{color:C.green}}>→</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[s.refBtn,{flex:1,backgroundColor:"#1e2a08",borderWidth:1,borderColor:"#3a5010"}]} onPress={() => onNavigate("profile")}>
-                  <Text style={[s.refBtnTxt,{color:"#a8e63d"}]}>💰 Referral Link</Text>
-                </TouchableOpacity>
+              ) : hasLimitedData ? (
+                <View style={s.limitedBanner}>
+                  <Text>⚡</Text>
+                  <Text style={s.limitedText}>Estimated — limited data. Verify before buying.</Text>
+                </View>
+              ) : null}
+
+              {/* AI tier disclosure */}
+              {plan === "free" && !hasNoData && (
+                <View style={{flexDirection:"row",alignItems:"center",gap:6,backgroundColor:C.surface,borderRadius:8,padding: 8 as any,marginBottom:8,borderWidth:1,borderColor:C.border}}>
+                  <Text style={{fontSize:12}}>🤖</Text>
+                  <Text style={{color:C.text4,fontSize:11,flex:1}}>Standard AI analysis. Upgrade for deeper market intelligence.</Text>
+                </View>
+              )}
+
+              {/* Profit number */}
+              <View style={[s.profitCard,{borderColor:isProfit?C.green+"25":C.red+"25"}]}>
+                <Text style={s.profitLabel}>{hasLimitedData?"EST. PROFIT AFTER FEES":"YOUR PROFIT AFTER FEES"}</Text>
+                <Text style={[s.profitAmount,{color:isProfit?C.green:C.red,fontSize:52,opacity:hasLimitedData?0.8:1}]}>
+                  {isProfit?"+":""}${Math.abs(result.netProfit||0).toFixed(2)}
+                </Text>
+                <Text style={s.profitSub}>
+                  Sell ${result.sellPrice} on {result.bestPlatform} · {result.roi}% ROI
+                  {hasLimitedData?" · verify before buying":""}
+                </Text>
               </View>
-            </View>
-          )}
-          <TouchableOpacity style={[s.greenBtn, { marginTop: 10 }]} onPress={reset}>
-            <Text style={s.greenBtnText}>Scan Another Item →</Text>
-          </TouchableOpacity>
 
-          {plan === "free" && scansLeft !== null && (
-            <Text style={[s.caption, { textAlign: "center", marginTop: 12 }]}>
-              {scansLeft} free scan{scansLeft !== 1 ? "s" : ""} remaining this month
-            </Text>
+              {/* Key numbers - compact row */}
+              <View style={s.numbersCard}>
+                {([
+                  ["MAX TO PAY", `$${result.buyTarget||0}`, C.yellow],
+                  ["SELL FOR",   `$${result.sellPrice||0}`, C.text1],
+                  ["PLATFORM",   result.bestPlatform||"eBay", C.text1],
+                ] as [string,string,string][]).map(([label,value,color])=>(
+                  <View key={label} style={s.numberItem}>
+                    <Text style={s.numberLabel}>{label}</Text>
+                    <Text style={[s.numberValue,{color}]} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* Platform price breakdown */}
+              {result.platformPrices && Object.keys(result.platformPrices).filter(p => (result.platformPrices[p]||0) > 0).length > 0 && (
+                <View style={s.infoCard}>
+                  <Text style={[s.infoLabel,{marginBottom:10}]}>💰 PLATFORM COMPARISON</Text>
+                  {Object.entries(result.platformPrices)
+                    .filter(([,v]) => (v as number) > 0)
+                    .sort(([,a],[,b]) => (b as number) - (a as number))
+                    .slice(0,5)
+                    .map(([platform, price]) => (
+                    <View key={platform} style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                      <View style={{flexDirection:"row",alignItems:"center",gap:6}}>
+                        <View style={{width:3,height:16,borderRadius:2,backgroundColor:platform===result.bestPlatform?C.green:C.border}}/>
+                        <Text style={{color:platform===result.bestPlatform?C.text1:C.text3,fontSize:13,fontWeight:platform===result.bestPlatform?"800":"400"}}>{platform}</Text>
+                        {platform===result.bestPlatform && <Text style={{color:C.green,fontSize:9,fontWeight:"800"}}>BEST</Text>}
+                      </View>
+                      <Text style={{color:platform===result.bestPlatform?C.green:C.text2,fontSize:14,fontWeight:"700"}}>${price as number}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Verification links */}
+              {result.priceData?.allPlatformLinks && (
+                <View style={s.infoCard}>
+                  <Text style={[s.infoLabel,{marginBottom:10}]}>🔍 VERIFY PRICES</Text>
+                  <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
+                    {[
+                      {name:"eBay Sold", url:result.priceData.allPlatformLinks?.eBay},
+                      {name:"eBay Active", url:result.priceData.allPlatformLinks?.eBayActive},
+                      {name:"Poshmark", url:result.priceData.allPlatformLinks?.Poshmark},
+                      {name:"Mercari", url:result.priceData.allPlatformLinks?.Mercari},
+                      {name:"Google", url:result.priceData.allPlatformLinks?.Google},
+                    ].filter(l => l.url).map(link => (
+                      <TouchableOpacity key={link.name} style={{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:8,paddingHorizontal:10,paddingVertical:6}}
+                        onPress={()=>Linking.openURL(link.url)}>
+                        <Text style={{color:C.green,fontSize:11,fontWeight:"700"}}>{link.name} →</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Time to sell + payout */}
+              {result.timeToSell && (
+                <View style={{flexDirection:"row",gap:8,marginBottom:8}}>
+                  <View style={[s.infoCard,{flex:1,marginBottom:0}]}>
+                    <Text style={s.infoLabel}>⏱ TIME TO SELL</Text>
+                    <Text style={{color:C.text1,fontSize:14,fontWeight:"700",marginTop:4}}>{result.timeToSell}</Text>
+                  </View>
+                  <View style={[s.infoCard,{flex:1,marginBottom:0}]}>
+                    <Text style={s.infoLabel}>💵 PAYOUT</Text>
+                    <Text style={{color:C.text1,fontSize:14,fontWeight:"700",marginTop:4}}>{result.payoutSpeed||"3-5 days"}</Text>
+                  </View>
+                </View>
+              )}
+
+              {/* FREE TIER PAYWALL - blur premium data */}
+              {plan === "free" && (
+                <TouchableOpacity
+                  style={{backgroundColor:"#0a1500",borderRadius:14,padding:16,marginBottom:12,borderWidth:1,borderColor:C.green+"40",alignItems:"center"}}
+                  onPress={()=>onNavigate("upgrade")}
+                  activeOpacity={0.85}
+                >
+                  <Text style={{fontSize:20,marginBottom:6}}>🔒</Text>
+                  <Text style={{color:C.green,fontSize:14,fontWeight:"900",marginBottom:4}}>Unlock Full Intelligence</Text>
+                  <Text style={{color:C.text3,fontSize:12,textAlign:"center",lineHeight:18,marginBottom:10}}>
+                    Platform comparison, listing title, risk score, hot tips, and share card are locked on Free. Upgrade to see everything — one good flip pays for 6 months.
+                  </Text>
+                  <View style={{backgroundColor:C.green,borderRadius:8,paddingHorizontal:20,paddingVertical:8}}>
+                    <Text style={{color:C.greenDark,fontWeight:"900",fontSize:13}}>Upgrade from $14.99/mo →</Text>
+                  </View>
+                  <Text style={{color:C.text4,fontSize:10,marginTop:8}}>Used {scansLeft !== null ? 10 - scansLeft : "?"} of 10 free scans this month</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Risk score */}
+              {result.riskScore !== undefined && (
+                <View style={{flexDirection:"row",alignItems:"center",gap:8,marginBottom:8,backgroundColor:C.surface,borderRadius:10,padding:12,borderWidth:1,borderColor:C.border}}>
+                  <Text style={{fontSize:16}}>{result.riskScore<=2?"🟢":result.riskScore<=4?"🟡":"🔴"}</Text>
+                  <View style={{flex:1}}>
+                    <Text style={{color:C.text1,fontSize:13,fontWeight:"700"}}>Risk Score: {result.riskScore}/10</Text>
+                    {result.watchOutFor?<Text style={{color:C.text4,fontSize:11,marginTop:2}} numberOfLines={2}>{result.watchOutFor}</Text>:null}
+                  </View>
+                </View>
+              )}
+
+              {/* Edit & Rerun */}
+              <TouchableOpacity
+                style={{backgroundColor:C.surface,borderRadius:12,padding:14,marginBottom:8,borderWidth:1,borderColor:C.border,flexDirection:"row",alignItems:"center",gap:8}}
+                onPress={()=>{
+                  setDescription(result.itemName||"");
+                  setResult(null);
+                  setStep("review");
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={{fontSize:16}}>✏️</Text>
+                <View style={{flex:1}}>
+                  <Text style={{color:C.yellow,fontSize:13,fontWeight:"800"}}>Edit & Rerun</Text>
+                  <Text style={{color:C.text4,fontSize:11}}>Correct item details to get fresh pricing</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Battle this item */}
+              <TouchableOpacity style={s.battleBtn} onPress={()=>onNavigate("price-battle",{itemName:result.itemName||result.item_name,brand:result.brand,category:result.category,condition:result.condition,buyPrice,photo:photos[0]})} activeOpacity={0.85}>
+                <Text style={s.battleBtnText}>⚡ Battle This Item</Text>
+                <Text style={s.battleBtnSub}>Compare all platforms instantly</Text>
+              </TouchableOpacity>
+
+              {/* Analysis — collapsible */}
+              {(result.hotTip || result.reasoning || result.listingTips?.length > 0) && (
+                <TouchableOpacity
+                  style={[s.infoCard,{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}]}
+                  onPress={()=>setShowAnalysis(v=>!v)} activeOpacity={0.85}
+                >
+                  <Text style={s.infoLabel}>🧠 Analysis & Tips</Text>
+                  <Text style={{color:C.text4,fontSize:18}}>{showAnalysis?"▲":"▼"}</Text>
+                </TouchableOpacity>
+              )}
+              {showAnalysis && (
+                <View style={[s.infoCard,{marginTop:-8,borderTopLeftRadius:0,borderTopRightRadius:0}]}>
+                  {result.hotTip ? (
+                    <View style={{marginBottom:12}}>
+                      <Text style={[s.infoLabel,{color:C.red}]}>🔥 Hot Tip</Text>
+                      <Text style={s.infoText}>{result.hotTip}</Text>
+                    </View>
+                  ) : null}
+                  {result.reasoning ? (
+                    <View style={{marginBottom:12}}>
+                      <Text style={s.infoLabel}>Analysis</Text>
+                      <Text style={s.infoText}>{result.reasoning}</Text>
+                    </View>
+                  ) : null}
+                  {result.listingTips?.length > 0 && (
+                    <View>
+                      <Text style={s.infoLabel}>Listing Tips</Text>
+                      {result.listingTips.map((tip:string,i:number)=>(
+                        <View key={i} style={{flexDirection:"row",gap:8,marginBottom:6}}>
+                          <Text style={{color:C.green,fontSize:13}}>→</Text>
+                          <Text style={{color:C.text2,fontSize:13,lineHeight:20,flex:1}}>{tip}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {/* Share — collapsible */}
+              <TouchableOpacity
+                style={[s.infoCard,{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginTop:8}]}
+                onPress={()=>setShowShare(v=>!v)} activeOpacity={0.85}
+              >
+                <Text style={s.infoLabel}>📤 Share & Content</Text>
+                <Text style={{color:C.text4,fontSize:18}}>{showShare?"▲":"▼"}</Text>
+              </TouchableOpacity>
+              {showShare && (
+                <View style={[s.infoCard,{marginTop:-8,borderTopLeftRadius:0,borderTopRightRadius:0}]}>
+                  {result.decision==="BUY" && photos[0] && (
+                    <View style={s.shareCard}>
+                      <Image source={{uri:`data:image/jpeg;base64,${photos[0]}`}}
+                        style={s.shareCardImg} resizeMode="cover"/>
+                      <View style={s.shareCardBody}>
+                        <Text style={s.shareCardItem} numberOfLines={1}>{result.itemName||result.item_name||"Item"}</Text>
+                        <Text style={s.shareHeroLbl}>PROFIT POTENTIAL</Text>
+                        <Text style={s.shareHeroVal}>+${Math.round(result.netProfit||0)}</Text>
+                        <View style={s.shareCardRow}>
+                          <View style={s.shareCardStat}>
+                            <Text style={s.shareStatVal}>{Math.round(result.roi||0)}%</Text>
+                            <Text style={s.shareStatLbl}>ROI</Text>
+                          </View>
+                          <View style={s.shareCardStat}>
+                            <Text style={s.shareStatVal}>${Math.round(result.sellPrice||0)}</Text>
+                            <Text style={s.shareStatLbl}>SELLS FOR</Text>
+                          </View>
+                          <View style={s.shareCardStat}>
+                            <Text style={s.shareStatVal}>${Math.round(result.buyTarget||result.suggestedBuy||0)}</Text>
+                            <Text style={s.shareStatLbl}>BUY UNDER</Text>
+                          </View>
+                        </View>
+                        <View style={s.shareBrandRow}>
+                          <Text style={s.shareBrandName}>ValuIQ</Text>
+                          <Text style={s.shareBrandTag}>Scan it. Know it. Flip it.</Text>
+                        </View>
+                      </View>
+                    </View>
+                  )}
+                   <ShareButton
+                     message={
+                       (result?.decision==="BUY"
+                         ? "🤑 Just found a $" + Math.round(result.netProfit||0) + " profit flip! " + (result.itemName||"Item") + " — " + Math.round(result.roi||0) + "% ROI on " + (result.bestPlatform||"eBay")
+                         : result?.decision==="WATCH"
+                         ? "👀 Watching this one... " + (result.itemName||"Item")
+                         : "🚫 ValuIQ saved me from a bad buy — " + (result?.itemName||"Item") + " doesn't pencil out"
+                       ) + "\n\nI use ValuIQ to find profitable flips → getvaluiq.com"
+                     }
+                     title="My ValuIQ Find"
+                     compact
+                   />
+                </View>
+              )}
+            </>
           )}
+
+          {/* Upgrade nudge for free users */}
+          {plan==="free" && scansLeft !== null && scansLeft <= 3 && (
+            <TouchableOpacity style={s.upgradeNudge} onPress={()=>onNavigate("upgrade")} activeOpacity={0.88}>
+              <View style={{flex:1}}>
+                <Text style={{color:C.green,fontSize:9,fontWeight:"800",letterSpacing:2,marginBottom:4}}>FREE PLAN</Text>
+                <Text style={{color:C.text1,fontSize:13,fontWeight:"700"}}>{scansLeft} scans left this month</Text>
+                <Text style={{color:C.text3,fontSize:11}}>Upgrade for unlimited scans</Text>
+              </View>
+              <Text style={{color:C.green,fontSize:18}}>→</Text>
+            </TouchableOpacity>
+          )}
+
         </ScrollView>
       </SafeAreaView>
     );
@@ -420,22 +559,34 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         </View>
 
         {/* Description */}
-        <Text style={[s.caption, { marginBottom: 6 }]}>Brand, model, or notes (optional but helpful)</Text>
+        <Text style={[s.caption, { marginBottom: 6 }]}>Brand (optional - greatly improves accuracy)</Text>
+        <TextInput style={s.textInput} value={brandInput} onChangeText={setBrandInput} placeholder="e.g. Coach, Nike, DeWalt" placeholderTextColor={C.text4} />
+        <Text style={[s.caption, { marginBottom: 6, marginTop: 12 }]}>Model or notes (optional)</Text>
         <TextInput
           style={s.textInput}
           value={description}
           onChangeText={setDescription}
-          placeholder="e.g. Nike Air Force 1, size 10, good condition"
+          placeholder="e.g. Nike, Air Force 1, size 10, good condition"
           placeholderTextColor={C.text4}
           multiline numberOfLines={2}
+        />
+
+        {/* Buy price (optional) */}
+        <Text style={[s.caption, { marginBottom: 6, marginTop: 12 }]}>What you'd pay for it (optional - improves BUY/PASS accuracy)</Text>
+        <TextInput
+          style={s.textInput}
+          value={buyPrice}
+          onChangeText={setBuyPrice}
+          placeholder="$0.00"
+          placeholderTextColor={C.text4}
+          keyboardType="decimal-pad"
         />
 
         {/* Scan counter */}
         {plan === "free" && scansLeft !== null && (
           <View style={[s.scanBadge, {
             borderColor: scansLeft === 0 ? C.red + "40" : scansLeft <= 1 ? C.yellow + "40" : C.green + "30",
-            backgroundColor: scansLeft === 0 ? "#2a0505" : scansLeft <= 1 ? "#2a1500" : C.green + "10",
-          }]}>
+            backgroundColor: scansLeft === 0 ? "#2a0505" : scansLeft <= 1 ? "#2a1500" : C.green + "10" }]}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: scansLeft === 0 ? C.red : scansLeft <= 1 ? C.yellow : C.green }} />
             <Text style={{ color: scansLeft === 0 ? C.red : scansLeft <= 1 ? C.yellow : C.green, fontSize: 12, fontWeight: "700" }}>
               {scansLeft === 0 ? "No scans left — upgrade to continue" : `${scansLeft} scan${scansLeft !== 1 ? "s" : ""} left this month`}
@@ -458,8 +609,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         barcodeScannerSettings={{ barcodeTypes: ["ean13","ean8","upc_a","upc_e","qr","code128","code39"] }}
         onBarcodeScanned={handleBarcode} />
       <View style={{ flex: 1 }}>
-        <SafeAreaView style={{ flex: 1 }}>
-          <View style={s.camTop}>
+        <View style={{ flex: 1 }}>
+          <View style={[s.camTop, { paddingTop: insets.top + 8 }]}>
             <View style={s.camLogoBadge}><Text style={s.camLogoText}>ValuIQ</Text></View>
             <TouchableOpacity onPress={() => setMode("photo")} style={s.camModeBtn}>
               <Text style={s.camModeBtnText}>📷 Photo Mode</Text>
@@ -482,10 +633,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           </View>
           <View style={s.camBottomBar}>
             <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, textAlign: "center" }}>
-              Supports UPC, EAN, QR codes
+              Supports, UPC, EAN, QR codes,
             </Text>
           </View>
-        </SafeAreaView>
+        </View>
       </View>
     </View>
   );
@@ -496,9 +647,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       <StatusBar barStyle="light-content" />
       <CameraView ref={cameraRef} style={{ flex: 1, position: "absolute" as any, top: 0, left: 0, right: 0, bottom: 0 }} facing="back" />
       <View style={{ flex: 1 }}>
-        <SafeAreaView style={{ flex: 1 }}>
+        <View style={{ flex: 1 }}>
           {/* Top bar */}
-          <View style={s.camTop}>
+          <View style={[s.camTop, { paddingTop: insets.top + 8 }]}>
             <View style={s.camLogoBadge}><Text style={s.camLogoText}>ValuIQ</Text></View>
             {plan === "free" && scansLeft !== null && (
               <View style={[s.camScanBadge, { borderColor: scansLeft === 0 ? C.red : scansLeft <= 1 ? C.yellow : C.green }]}>
@@ -508,7 +659,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               </View>
             )}
             <TouchableOpacity onPress={() => setMode("barcode")} style={s.camModeBtn}>
-              <Text style={s.camModeBtnText}>|||  Barcode</Text>
+              <Text style={s.camModeBtnText}>▦ Barcode</Text>
             </TouchableOpacity>
           </View>
 
@@ -533,7 +684,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               <Text style={s.quickBtnIcon}>🛍️</Text>
               <Text style={s.quickBtnText}>Thrift Run</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={s.quickBtn} onPress={() => onNavigate("price-battle")} activeOpacity={0.85}>
+            <TouchableOpacity style={s.quickBtn} onPress={() => onNavigate("price-battle", result ? {itemName:result.itemName||result.item_name,brand:result.brand,category:result.category,condition:result.condition,buyPrice,photo:photos[0]} : undefined)} activeOpacity={0.85}>
               <Text style={s.quickBtnIcon}>⚡</Text>
               <Text style={s.quickBtnText}>Price Battle</Text>
             </TouchableOpacity>
@@ -550,7 +701,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             </TouchableOpacity>
             <View style={{ width: 64 }} />
           </View>
-        </SafeAreaView>
+        </View>
       </View>
     </View>
   );
@@ -564,8 +715,8 @@ const s = StyleSheet.create({
   body:           { color: C.text2, fontSize: 14, lineHeight: 21 },
   caption:        { color: C.text4, fontSize: 12, lineHeight: 18 },
 
-  // Nav
-  nav:            { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingVertical: 14, gap: 8 },
+  // Nav,
+  nav: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 16, paddingBottom: 10, gap: 8 },
   navBack:        { padding: 4 },
   navBackText:    { color: C.text3, fontSize: 24, lineHeight: 24 },
   navLogoRow:     { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -575,8 +726,8 @@ const s = StyleSheet.create({
   navBtn:         { borderWidth: 1, borderColor: C.border, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 5 },
   navBtnText:     { color: C.text3, fontSize: 12, fontWeight: "600" },
 
-  // Camera
-  camTop:         { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 8 },
+  // Camera,
+  camTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingBottom: 8 },
   camLogoBadge:   { backgroundColor: "rgba(168,230,61,0.15)", borderWidth: 1, borderColor: "rgba(168,230,61,0.3)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
   camLogoText:    { color: C.green, fontSize: 14, fontWeight: "900" },
   camScanBadge:   { borderWidth: 1, borderRadius: 100, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: "rgba(0,0,0,0.5)" },
@@ -591,11 +742,11 @@ const s = StyleSheet.create({
   shutter:        { width: 74, height: 74, borderRadius: 37, borderWidth: 4, borderColor: "#fff", alignItems: "center", justifyContent: "center" },
   shutterInner:   { width: 60, height: 60, borderRadius: 30, backgroundColor: "#fff" },
 
-  // Barcode
+  // Barcode,
   barcodeFrame:   { width: width * 0.8, height: 120, position: "relative", justifyContent: "center", alignItems: "center" },
   barcodeLine:    { width: "100%", height: 2, backgroundColor: C.green + "80" },
 
-  // Review
+  // Review,
   photoThumb:     { width: 88, height: 88, borderRadius: 10, borderWidth: 1, borderColor: C.border },
   removePhoto:    { position: "absolute", top: 4, right: 4, width: 20, height: 20, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 10, alignItems: "center", justifyContent: "center" },
   addPhotoBtn:    { width: 88, height: 88, borderRadius: 10, borderWidth: 1, borderColor: C.border, borderStyle: "dashed", alignItems: "center", justifyContent: "center", backgroundColor: C.surface },
@@ -603,7 +754,7 @@ const s = StyleSheet.create({
   textInput:      { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 14, color: C.text1, fontSize: 14, minHeight: 72, textAlignVertical: "top" },
   scanBadge:      { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginTop: 12, alignSelf: "flex-start" },
 
-  // Result
+  // Result,
   goodBanner:     { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: C.greenBg, borderWidth: 1.5, borderColor: C.greenBorder, borderRadius: 12, padding: 12, marginBottom: 12 },
   goodBannerTitle:{ color: C.green, fontSize: 13, fontWeight: "800", marginBottom: 2 },
   goodBannerSub:  { color: C.text3, fontSize: 12 },
@@ -632,7 +783,7 @@ const s = StyleSheet.create({
   infoLabel:      { color: C.text4, fontSize: 10, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
   infoText:       { color: C.text2, fontSize: 14, lineHeight: 22 },
 
-  // Upgrade
+  // Upgrade,
   dealBox:        { backgroundColor: "#0d0d00", borderWidth: 1, borderColor: "#2a2000", borderRadius: 18, padding: 18, marginBottom: 12 },
   dealOld:        { color: C.text4, fontSize: 14, textDecorationLine: "line-through", marginBottom: 8, opacity: 0.5 },
   dealInner:      { backgroundColor: "#1a1200", borderWidth: 2, borderColor: C.yellow, borderStyle: "dashed", borderRadius: 12, padding: 14, marginBottom: 12 },
@@ -646,8 +797,8 @@ const s = StyleSheet.create({
   planPer:        { color: C.text4, fontSize: 12 },
   planName:       { fontSize: 14, fontWeight: "800", marginTop: 4 },
 
-  greenBtn:       { backgroundColor: C.green, borderRadius: 14, paddingVertical: 16, alignItems: "center" },
-  greenBtnText:   { color: C.greenDark, fontSize: 16, fontWeight: "900" },
+  greenBtn:       { backgroundColor: C.green, borderRadius: 14, paddingTop: 16, paddingBottom: 10, paddingHorizontal: 32, alignItems: "center" as any, alignSelf: "center" as any },
+  greenBtnText:   { color: C.greenDark, fontSize: 15, fontWeight: "900" as any },
   battleBtn:      { backgroundColor: C.surfaceHigh, borderWidth: 1.5, borderColor: C.orange+"50", borderRadius: 14, padding: 14, alignItems: "center", marginBottom: 10 },
   battleBtnText:  { color: C.orange, fontSize: 15, fontWeight: "800" },
   battleBtnSub:   { color: C.text4, fontSize: 11, marginTop: 3 },
@@ -660,4 +811,20 @@ const s = StyleSheet.create({
   refBody:   { color:"#a09b94", fontSize:12, marginBottom:10, lineHeight:17 },
   refBtn:    { backgroundColor:"#a8e63d", borderRadius:10, padding:11, alignItems:"center" as any },
   refBtnTxt: { color:"#0f1500", fontSize:13, fontWeight:"900" as any },
-});
+
+  shareCard:        { backgroundColor:C.surface, borderWidth:1.5, borderColor:C.greenBorder, borderRadius:16, overflow:"hidden" as any, marginBottom:10 },
+  shareCardImg:     { width:"100%" as any, height:200 },
+  shareCardBody:    { padding:14 },
+  shareCardBadge:   { backgroundColor:C.green, borderRadius:100, paddingHorizontal:12, paddingTop:16, paddingBottom:10, alignSelf:"flex-start" as any, marginBottom:8 },
+  shareCardBadgeTxt:{ color:C.greenDark, fontSize:10, fontWeight:"900" as any },
+  shareCardItem:    { color:C.text1, fontSize:16, fontWeight:"800" as any, marginBottom:10 },
+  shareHeroLbl:     { color:C.green, fontSize:11, fontWeight:"900" as any, letterSpacing:1.5, marginBottom:2 },
+  shareHeroVal:     { color:C.green, fontSize:52, fontWeight:"900" as any, marginBottom:12, letterSpacing:-1 },
+  shareBrandRow:    { flexDirection:"row" as any, alignItems:"center" as any, justifyContent:"space-between" as any, marginTop:12, paddingTop:12, borderTopWidth:1, borderTopColor:C.border },
+  shareBrandName:   { color:C.text1, fontSize:18, fontWeight:"900" as any, letterSpacing:0.5 },
+  shareBrandTag:    { color:C.text4, fontSize:11, fontWeight:"600" as any },
+  shareCardRow:     { flexDirection:"row" as any, gap:8, marginBottom:8 },
+  shareCardStat:    { flex:1, backgroundColor:C.bg, borderRadius:8, padding:8, alignItems:"center" as any },
+  shareStatVal:     { color:C.green, fontSize:16, fontWeight:"900" as any },
+  shareStatLbl:     { color:C.text4, fontSize:8, fontWeight:"700" as any, textTransform:"uppercase" as any, marginTop:2 },
+  shareCardFooter:  { color:C.text4, fontSize:10, textAlign:"center" as any } });

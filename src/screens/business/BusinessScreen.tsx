@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity, SafeAreaView,
-  StatusBar, ActivityIndicator, Linking, TextInput, Animated, Dimensions,
-} from "react-native";
+  View, Text, ScrollView, StyleSheet, TouchableOpacity,
+  StatusBar, ActivityIndicator, Linking, TextInput, Animated, Dimensions } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import { API_BASE } from "../lib/api";
 
@@ -16,77 +16,67 @@ const WEAPONS = [
   {
     icon:"📋", name:"Manifest Beast",
     tagline:"5,000+ items. 4 hours. Done.",
-    desc:"Upload ANY manifest — PDF, photo, Excel, CSV, even a photo of a handwritten list. OCR extracts every line item. AI looks up eBay sold data and scores every single item. Returns top pulls, items to skip, and a branded PDF report. A pallet buyer used to spend 3 days on this.",
+    desc:"Upload, ANY manifest — PDF, photo, Excel, CSV, even a photo of a handwritten list. OCR extracts every line item. AI looks up eBay sold data and scores every single item. Returns top pulls, items to skip, and a branded PDF report. A pallet buyer used to spend 3 days on this.",
     wow:"Worth $500/month alone to any serious lot buyer.",
-    color:"#ff8c42",
-  },
+    color:"#ff8c42" },
   {
     icon:"🔮", name:"Pallet Prophet",
     tagline:"Know if a lot is worth it before you wire the money.",
-    desc:"Input: category, condition grade, retail value, lot price. The Prophet runs 90 days of eBay/Poshmark/Mercari sold data through its model and returns: expected sell-through rate, realistic profit range, timeline, best items to pull, and a clear BUY or PASS.",
+    desc:"Input: category, condition grade, retail value, lot price. The, Prophet runs 90 days of eBay/Poshmark/Mercari sold data through its model and returns: expected sell-through rate, realistic profit range, timeline, best items to pull, and a clear BUY or PASS.",
     wow:"Prevents one bad $5,000 lot purchase = 5+ years of subscription paid.",
-    color:"#b066ff",
-  },
+    color:"#b066ff" },
   {
     icon:"🤖", name:"Auto-Scout",
     tagline:"Your personal sourcing agent. Never sleeps.",
     desc:"Set your profile: budget, categories, minimum ROI, max buy price. Auto-Scout monitors all 17 sourcing platforms every hour. When it finds something that matches YOUR profile — not a generic deal, YOUR deal — it pushes you an instant alert with full analysis.",
     wow:"\"Found B-Stock electronics lot matching your profile: Score 91/100, $4,200 expected profit.\"",
-    color:C.green,
-  },
+    color:C.green },
   {
-    icon:"📡", name:"Live Market Pulse",
-    tagline:"What's selling RIGHT NOW. Not last week.",
-    desc:"Real-time dashboard showing category heat maps, price momentum, supply shortage alerts, and demand spikes. When Nike Dunk demand jumps 340% in a week, you know before your competition does. Updated hourly from actual sold data.",
+    icon:"📡", name:"Live, Market Pulse",
+    tagline:"What's selling RIGHT, NOW. Not last week.",
+    desc:"Real-time dashboard showing category heat maps, price momentum, supply shortage alerts, and demand spikes. When, Nike Dunk demand jumps 340% in a week, you know before your competition does. Updated hourly from actual sold data.",
     wow:"Time your buys perfectly. Buy when supply is high, sell when demand spikes.",
-    color:"#00BF4D",
-  },
+    color:"#00BF4D" },
   {
-    icon:"💰", name:"Cash Flow Oracle",
+    icon:"💰", name:"Cash, Flow Oracle",
     tagline:"Know exactly when the money hits.",
-    desc:"Input your inventory with buy prices. The Oracle analyzes sell velocity per item and platform to forecast your cash flow for the next 30, 60, and 90 days. Flags slow movers that need price cuts to free cash. Tells you when to buy aggressively vs conserve.",
+    desc:"Input your inventory with buy prices. The, Oracle analyzes sell velocity per item and platform to forecast your cash flow for the next 30, 60, and 90 days. Flags slow movers that need price cuts to free cash. Tells you when to buy aggressively vs conserve.",
     wow:"\"You have $4,200 incoming in 30 days. These 8 items are blocking $2,100 — reprice them.\"",
-    color:C.yellow,
-  },
+    color:C.yellow },
   {
     icon:"🏹", name:"Competitor Destroyer",
     tagline:"Know exactly what your competition is doing.",
     desc:"Monitor specific eBay sellers in your niche. Track every price change they make in real time. Get alerted when they cut prices so you react first. See their sell-through rates, which items work for them, and where they're weak. Then move there.",
     wow:"The single biggest edge in any competitive resale category.",
-    color:C.red,
-  },
+    color:C.red },
   {
-    icon:"👥", name:"Team Command Center",
+    icon:"👥", name:"Team, Command Center",
     tagline:"Scale your operation. Manage your crew.",
     desc:"Up to 10 team members with individual logins. Assign items to specific people to list. Track individual performance: scans per person, profit found, listings completed. Team leaderboard gamifies productivity. You see everything, employees see only their work.",
-    wow:"Turn ValuIQ into your entire team's operating system.",
-    color:"#3665f3",
-  },
+    wow:"Turn, ValuIQ into your entire team's operating system.",
+    color:"#3665f3" },
   {
-    icon:"🧠", name:"Flip Intelligence Feed",
+    icon:"🧠", name:"Flip, Intelligence Feed",
     tagline:"Gets smarter about YOUR business every week.",
     desc:"Learns what you sell from your scan history and results. Automatically surfaces the most relevant deals from all 17 sourcing platforms tuned specifically to your niche, price range, and profit targets. Gets dramatically better over 90 days.",
     wow:"Month 1 it's good. Month 3 it feels like it reads your mind.",
-    color:C.orange,
-  },
+    color:C.orange },
   {
-    icon:"📄", name:"White-Label Reports",
-    tagline:"Turn ValuIQ into a service you charge for.",
+    icon:"📄", name:"White-Label, Reports",
+    tagline:"Turn, ValuIQ into a service you charge for.",
     desc:"Generate beautifully branded PDF reports with YOUR company logo. Show clients what inventory you sourced, what it's worth, and what you recommend. Consignment stores, estate companies, and sourcing agencies charge $200-$500 per report. ValuIQ generates them in seconds.",
-    wow:"Some Business users make more from client reports than they pay in subscription fees.",
-    color:"#8B6914",
-  },
+    wow:"Some, Business users make more from client reports than they pay in subscription fees.",
+    color:"#8B6914" },
   {
-    icon:"⚡", name:"Platform Auto-List",
+    icon:"⚡", name:"Platform, Auto-List",
     tagline:"Scan it. Approve it. Listed. 30 seconds total.",
-    desc:"After any scan, one tap generates an optimized listing: SEO title, full description, competitive price, correct category, all images organized. Direct integration with eBay and Poshmark. Tracks listing status back in your inventory automatically. Coming Q3 2026.",
+    desc:"After any scan, one tap generates an optimized listing: SEO title, full description, competitive price, correct category, all images organized. Direct integration with eBay and Poshmark. Tracks listing status back in your inventory automatically. Coming, Q3 2026.",
     wow:"Closes the entire resale loop inside one app. The holy grail.",
     color:"#FF3A50",
-    comingSoon:true,
-  },
+    comingSoon:true },
 ];
 
-const FOUNDER_SPOTS_LEFT = 73; // update as people sign up
+const FOUNDER_SPOTS_LEFT = 73; // update as people sign up,
 
 export default function BusinessScreen({ token, plan, onNavigate, onBack }: Props) {
   const [tab, setTab] = useState<"weapons"|"roi"|"marketing">("weapons");
@@ -102,7 +92,7 @@ export default function BusinessScreen({ token, plan, onNavigate, onBack }: Prop
   const isBusiness = plan === "business";
 
   useEffect(() => {
-    // Pulse animation for spots counter
+    // Pulse animation for spots counter,
     const pulse = Animated.loop(
       Animated.sequence([
         Animated.timing(spotsAnim, { toValue:1.05, duration:800, useNativeDriver:true }),
@@ -121,12 +111,12 @@ export default function BusinessScreen({ token, plan, onNavigate, onBack }: Prop
       const lots = parseFloat(lotsMonth)||4;
       const hrs  = parseFloat(hours)||15;
 
-      // Calculate what Business actually saves
-      const badLotLoss     = lots * lotC * 0.25;  // 25% of lots are bad without AI
-      const timeValue      = hrs * 4 * 35;         // 4 weeks * $35/hr value  
-      const dealFinds      = 4 * lotC * 0.45;      // 4 extra deals * 45% margin
-      const manifestSaving = lots * 120;            // $120/lot in research time saved
-      const taxSaving      = Math.round(rev * 12 * 0.04 / 12); // 4% tax opt
+      // Calculate what Business actually saves,
+      const badLotLoss     = lots * lotC * 0.25;  // 25% of lots are bad without AI,
+      const timeValue      = hrs * 4 * 35;         // 4 weeks * $35/hr value,
+      const dealFinds      = 4 * lotC * 0.45;      // 4 extra deals * 45% margin,
+      const manifestSaving = lots * 120;            // $120/lot in research time saved,
+      const taxSaving      = Math.round(rev * 12 * 0.04 / 12); // 4% tax opt,
       const total          = badLotLoss + timeValue + dealFinds + manifestSaving + taxSaving;
       const roi            = Math.round(((total - 79) / 79) * 100);
 
@@ -138,15 +128,13 @@ export default function BusinessScreen({ token, plan, onNavigate, onBack }: Prop
           "Research time saved":    Math.round(timeValue),
           "Auto-Scout deal finds":  Math.round(dealFinds),
           "Manifest time savings":  Math.round(manifestSaving),
-          "Tax optimization":       taxSaving,
-        },
+          "Tax optimization":       taxSaving },
         paybackHours: Math.round(79 / (total/730)),
         verdict: roi > 1000
-          ? "ValuIQ Business pays for itself in under 3 days."
+          ? "ValuIQ, Business pays for itself in under 3 days."
           : roi > 500
           ? "Pays for itself in under a week."
-          : "Pays for itself this month.",
-      });
+          : "Pays for itself this month." });
     } catch {}
     setCalcLoading(false);
   }
@@ -208,12 +196,12 @@ export default function BusinessScreen({ token, plan, onNavigate, onBack }: Prop
           )}
         </View>
 
-        {/* TAB BAR */}
+        {/* TAB, BAR */}
         <View style={s.tabBar}>
           {([
             ["weapons","⚔️ 10 Weapons"],
-            ["roi","💰 ROI Calc"],
-            ["marketing","📣 How We Sell You"],
+            ["roi","💰 ROI, Calc"],
+            ["marketing","📣 How, We Sell, You"],
           ] as const).map(([t,label]) => (
             <TouchableOpacity key={t} onPress={() => setTab(t)}
               style={[s.tabBtn, tab===t && s.tabBtnActive]}>
@@ -222,19 +210,18 @@ export default function BusinessScreen({ token, plan, onNavigate, onBack }: Prop
           ))}
         </View>
 
-        {/* ── WEAPONS TAB ── */}
+        {/* ── WEAPONS, TAB ── */}
         {tab === "weapons" && (
           <View style={s.weaponsGrid}>
             <Text style={s.sectionTitle}>10 Weapons Nobody Else Has</Text>
-            <Text style={s.sectionSub}>Tap any weapon to see exactly why it's game-changing</Text>
-            {WEAPONS.map((w, i) => (
+            <Text style={s.sectionSub}>Tap any weapon to see exactly why it's game-changing</Text>{WEAPONS.map((w, i) => (
               <TouchableOpacity key={i}
                 style={[s.weaponCard, {borderColor:w.color+"40"}, activeWeapon===i && {borderColor:w.color}]}
                 onPress={() => setActiveWeapon(activeWeapon===i ? null : i)}
                 activeOpacity={0.85}
               >
                 {w.comingSoon && (
-                  <View style={s.csChip}><Text style={s.csChipTxt}>COMING SOON</Text></View>
+                  <View style={s.csChip}><Text style={s.csChipTxt}>COMING, SOON</Text></View>
                 )}
                 <View style={s.weaponHeader}>
                   <Text style={{fontSize:28}}>{w.icon}</Text>
@@ -259,7 +246,7 @@ export default function BusinessScreen({ token, plan, onNavigate, onBack }: Prop
           </View>
         )}
 
-        {/* ── ROI CALCULATOR TAB ── */}
+        {/* ── ROI, CALCULATOR TAB ── */}
         {tab === "roi" && (
           <View>
             <Text style={s.sectionTitle}>Is $79/Month Worth It For Your Business?</Text>
@@ -268,10 +255,10 @@ export default function BusinessScreen({ token, plan, onNavigate, onBack }: Prop
             <View style={s.calcCard}>
               <View style={s.inputGrid}>
                 {[
-                  ["Monthly Revenue", revenue, setRevenue, "$", "5000"],
-                  ["Avg Lot/Item Cost", lotCost, setLotCost, "$", "500"],
-                  ["Lots Bought/Month", lotsMonth, setLotsMonth, "#", "4"],
-                  ["Hours/Week Researching", hours, setHours, "h", "15"],
+                  ["Monthly, Revenue", revenue, setRevenue, "$", "5000"],
+                  ["Avg, Lot/Item, Cost", lotCost, setLotCost, "$", "500"],
+                  ["Lots, Bought/Month", lotsMonth, setLotsMonth, "#", "4"],
+                  ["Hours/Week, Researching", hours, setHours, "h", "15"],
                 ].map(([label, val, setter, prefix, placeholder]) => (
                   <View key={label as string} style={s.inputBox}>
                     <Text style={s.inputLabel}>{label as string}</Text>
@@ -336,7 +323,7 @@ export default function BusinessScreen({ token, plan, onNavigate, onBack }: Prop
           </View>
         )}
 
-        {/* ── MARKETING TAB ── */}
+        {/* ── MARKETING, TAB ── */}
         {tab === "marketing" && (
           <View>
             <Text style={s.sectionTitle}>How We Bring Business Users To You</Text>
@@ -344,7 +331,7 @@ export default function BusinessScreen({ token, plan, onNavigate, onBack }: Prop
 
             {[
               {
-                icon:"📧", title:"Targeted Email Campaigns",
+                icon:"📧", title:"Targeted, Email Campaigns",
                 items:[
                   "Pro users get Business upgrade email at day 30",
                   "\"$50K lot analyzed in 4 hours\" case study sequence",
@@ -353,25 +340,25 @@ export default function BusinessScreen({ token, plan, onNavigate, onBack }: Prop
                 ]
               },
               {
-                icon:"🎯", title:"Precision Ad Targeting",
+                icon:"🎯", title:"Precision, Ad Targeting",
                 items:[
                   "Facebook: Liquidation buyer groups (100K+ members)",
-                  "Facebook: eBay Power Seller communities",
-                  "LinkedIn: Amazon FBA sellers, wholesale buyers",
+                  "Facebook: eBay, Power Seller communities",
+                  "LinkedIn: Amazon, FBA sellers, wholesale buyers",
                   "Reddit: r/flipping, r/liquidation (organic content)",
                 ]
               },
               {
-                icon:"🤝", title:"Platform Partnerships",
+                icon:"🤝", title:"Platform, Partnerships",
                 items:[
                   "B-Stock: 'Recommended tool for our buyers'",
                   "BULQ: Featured in their buyer newsletter",
-                  "Direct Liquidation: Co-marketing agreement",
+                  "Direct, Liquidation: Co-marketing agreement",
                   "Estate sale platforms: Tool recommendation",
                 ]
               },
               {
-                icon:"📱", title:"Viral Content Engine",
+                icon:"📱", title:"Viral, Content Engine",
                 items:[
                   "Auto-generate 'Manifest analyzed: $X profit found' posts",
                   "Business users share their ROI = social proof",
@@ -396,7 +383,7 @@ export default function BusinessScreen({ token, plan, onNavigate, onBack }: Prop
           </View>
         )}
 
-        {/* BOTTOM CTA */}
+        {/* BOTTOM, CTA */}
         {!isBusiness && (
           <View style={s.bottomCta}>
             <Animated.View style={{transform:[{scale:spotsAnim}]}}>
@@ -414,8 +401,7 @@ export default function BusinessScreen({ token, plan, onNavigate, onBack }: Prop
         {isBusiness && (
           <View style={s.activeState}>
             <Text style={{fontSize:40,marginBottom:10}}>🏆</Text>
-            <Text style={s.activeTxt}>You're a Business member.</Text>
-            <Text style={s.activeSub}>All 10 weapons are unlocked. Your founding rate is locked forever.</Text>
+            <Text style={s.activeTxt}>You're a Business member.</Text><Text style={s.activeSub}>All 10 weapons are unlocked. Your founding rate is locked forever.</Text>
           </View>
         )}
 
@@ -504,5 +490,4 @@ const s = StyleSheet.create({
   bottomBtnTxt:  {color:"#000",fontSize:15,fontWeight:"900" as any},
   activeState:   {backgroundColor:C.surface,borderWidth:1,borderColor:C.greenBorder,borderRadius:16,padding:24,alignItems:"center",marginTop:8},
   activeTxt:     {color:C.green,fontSize:18,fontWeight:"900" as any,marginBottom:4},
-  activeSub:     {color:C.text3,fontSize:13,textAlign:"center" as any,lineHeight:18},
-});
+  activeSub:     {color:C.text3,fontSize:13,textAlign:"center" as any,lineHeight:18} });

@@ -1,9 +1,7 @@
 // ValuIQ Mobile — Backend Connection
-// These point to your existing getvaluiq.com backend — no changes needed there
-
-export const API_BASE = "https://www.getvaluiq.com";
-export const SUPABASE_URL = "https://your-project.supabase.co"; // paste your Supabase URL
-export const SUPABASE_ANON_KEY = "your-anon-key"; // paste your Supabase anon key
+export const API_BASE        = "https://www.getvaluiq.com";
+export const SUPABASE_URL    = "https://tylrcmczbvcvxkbuwnhf.supabase.co";
+export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR5bHJjbWN6YnZjdnhrYnV3bmhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4OTMxMDgsImV4cCI6MjA5MDQ2OTEwOH0.RkllmmOBfdfhzC9s_3PyKrhFre9QpvzFVC-aY2xhsN4";
 
 export const COLORS = {
   bg:         "#080806",

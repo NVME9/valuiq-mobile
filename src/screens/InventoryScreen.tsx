@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput,
-  SafeAreaView, StatusBar, ActivityIndicator, RefreshControl, Modal, Pressable,
-} from "react-native";
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, RefreshControl, Modal, Pressable } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import { API_BASE } from "../lib/api";
 import ShareButton from "../components/ShareButton";
@@ -44,13 +43,11 @@ export default function InventoryScreen({ token, plan, onNavigate, onBack }: Pro
       if (editing) {
         await fetch(`${API_BASE}/api/inventory`, {
           method:"PATCH", headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({ token, itemId:editing.id, updates:{ item_name:form.itemName, bought_price:Number(form.boughtPrice)||0, target_price:Number(form.targetPrice)||0, platform:form.platform, status:form.status, notes:form.notes } }),
-        });
+          body:JSON.stringify({ token, itemId:editing.id, updates:{ item_name:form.itemName, bought_price:Number(form.boughtPrice)||0, target_price:Number(form.targetPrice)||0, platform:form.platform, status:form.status, notes:form.notes } }) });
       } else {
         await fetch(`${API_BASE}/api/inventory`, {
           method:"POST", headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({ token, item:{ itemName:form.itemName, boughtPrice:Number(form.boughtPrice)||0, targetPrice:Number(form.targetPrice)||0, platform:form.platform, status:form.status, notes:form.notes } }),
-        });
+          body:JSON.stringify({ token, item:{ itemName:form.itemName, boughtPrice:Number(form.boughtPrice)||0, targetPrice:Number(form.targetPrice)||0, platform:form.platform, status:form.status, notes:form.notes } }) });
       }
       setAdding(false); setEditing(null);
       setForm({ itemName:"", boughtPrice:"", targetPrice:"", platform:"eBay", status:"unlisted", notes:"" });
@@ -62,16 +59,14 @@ export default function InventoryScreen({ token, plan, onNavigate, onBack }: Pro
   async function updateStatus(item: any, status: Status) {
     await fetch(`${API_BASE}/api/inventory`, {
       method:"PATCH", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ token, itemId:item.id, updates:{ status, ...(status==="listed"?{listed_at:new Date().toISOString(),listed_price:item.target_price}:{}), ...(status==="sold"?{sold_at:new Date().toISOString(),sold_price:item.listed_price||item.target_price}:{}) } }),
-    });
+      body:JSON.stringify({ token, itemId:item.id, updates:{ status, ...(status==="listed"?{listed_at:new Date().toISOString(),listed_price:item.target_price}:{}), ...(status==="sold"?{sold_at:new Date().toISOString(),sold_price:item.listed_price||item.target_price}:{}) } }) });
     await load();
   }
 
   async function deleteItem(id: string) {
     await fetch(`${API_BASE}/api/inventory`, {
       method:"DELETE", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ token, itemId:id }),
-    });
+      body:JSON.stringify({ token, itemId:id }) });
     await load();
   }
 
@@ -93,7 +88,7 @@ export default function InventoryScreen({ token, plan, onNavigate, onBack }: Pro
         </TouchableOpacity>}
       </View>
 
-      {/* Add/Edit Modal */}
+      {/* Add/Edit, Modal */}
       <Modal visible={adding} transparent animationType="slide" onRequestClose={()=>setAdding(false)}>
         <Pressable style={s.overlay} onPress={()=>setAdding(false)}>
           <Pressable style={s.sheet} onPress={e=>e.stopPropagation()}>
@@ -101,7 +96,7 @@ export default function InventoryScreen({ token, plan, onNavigate, onBack }: Pro
             <Text style={s.sheetTitle}>{editing?"Edit Item":"Add to Inventory"}</Text>
             <ScrollView>
               <Text style={s.fieldLabel}>Item Name *</Text>
-              <TextInput style={s.input} value={form.itemName} onChangeText={v=>setForm(f=>({...f,itemName:v}))} placeholder="e.g. Lululemon Leggings" placeholderTextColor={C.text4}/>
+              <TextInput style={s.input} value={form.itemName} onChangeText={v=>setForm(f=>({...f,itemName:v}))} placeholder="e.g. Lululemon, Leggings" placeholderTextColor={C.text4}/>
               <View style={{flexDirection:"row",gap:10}}>
                 <View style={{flex:1}}><Text style={s.fieldLabel}>Bought For</Text><TextInput style={s.input} value={form.boughtPrice} onChangeText={v=>setForm(f=>({...f,boughtPrice:v}))} placeholder="$0" placeholderTextColor={C.text4} keyboardType="decimal-pad"/></View>
                 <View style={{flex:1}}><Text style={s.fieldLabel}>Target Sell Price</Text><TextInput style={s.input} value={form.targetPrice} onChangeText={v=>setForm(f=>({...f,targetPrice:v}))} placeholder="$0" placeholderTextColor={C.text4} keyboardType="decimal-pad"/></View>
@@ -210,7 +205,7 @@ export default function InventoryScreen({ token, plan, onNavigate, onBack }: Pro
 }
 
 const s = StyleSheet.create({
-  safe:{flex:1,backgroundColor:C.bg},nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingVertical:14,gap:8},
+  safe:{flex:1,backgroundColor:C.bg},nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingTop: 16, paddingBottom: 10,gap:8},
   navBack:{padding:4},navBackText:{color:C.text3,fontSize:24,lineHeight:24},
   logoRow:{flexDirection:"row",alignItems:"center",gap:8},
   logoIcon:{width:26,height:26,backgroundColor:C.green,borderRadius:7,alignItems:"center",justifyContent:"center"},
@@ -224,7 +219,7 @@ const s = StyleSheet.create({
   sheetTitle:{color:C.text1,fontSize:18,fontWeight:"900",marginBottom:16},
   fieldLabel:{color:C.text3,fontSize:13,fontWeight:"700",marginBottom:6,marginTop:10},
   input:{backgroundColor:C.bg,borderWidth:1,borderColor:C.border,borderRadius:12,padding:13,color:C.text1,fontSize:14},
-  statusChip:{flex:1,borderWidth:1,borderColor:C.border,borderRadius:10,paddingVertical:10,alignItems:"center"},
+  statusChip:{flex:1,borderWidth:1,borderColor:C.border,borderRadius:10,paddingTop:16, paddingBottom:10,alignItems:"center"},
   statusChipText:{color:C.text4,fontSize:12,fontWeight:"600"},
   saveBtn:{backgroundColor:C.green,borderRadius:12,padding:14,alignItems:"center"},
   saveBtnText:{color:C.greenDark,fontSize:15,fontWeight:"900"},
@@ -234,7 +229,7 @@ const s = StyleSheet.create({
   statCard:{width:"30%",backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:14,padding:12,alignItems:"center"},
   statVal:{fontSize:16,fontWeight:"900",marginBottom:2},
   statLabel:{color:C.text4,fontSize:9,fontWeight:"700",textTransform:"uppercase"},
-  filterChip:{paddingHorizontal:14,paddingVertical:8,borderRadius:100,borderWidth:1,borderColor:C.border,backgroundColor:C.surface},
+  filterChip:{paddingHorizontal:14,paddingTop:16, paddingBottom:10,borderRadius:100,borderWidth:1,borderColor:C.border,backgroundColor:C.surface},
   filterChipActive:{backgroundColor:C.green,borderColor:C.green},
   filterText:{color:C.text3,fontSize:12,fontWeight:"600"},
   filterTextActive:{color:C.greenDark,fontWeight:"700"},
@@ -254,5 +249,4 @@ const s = StyleSheet.create({
   itemNotes:{color:C.text4,fontSize:11,marginTop:8,fontStyle:"italic"},
   lockedCard:{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:16,padding:32,alignItems:"center"},
   lockedTitle:{color:C.text1,fontSize:18,fontWeight:"800",marginBottom:6},
-  lockedBody:{color:C.text3,fontSize:13,textAlign:"center",lineHeight:20},
-});
+  lockedBody:{color:C.text3,fontSize:13,textAlign:"center",lineHeight:20} });

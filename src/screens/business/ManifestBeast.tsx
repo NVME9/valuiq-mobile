@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, SafeAreaView, StatusBar, ActivityIndicator, Alert } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, Alert } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { B } from "../../lib/businessTheme";
 import { API_BASE } from "../../lib/api";
@@ -26,9 +27,8 @@ export default function ManifestBeast({ token, onBack }: Props) {
 
   async function uploadManifest() {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: false, quality: 0.9, base64: true,
-    });
+      mediaTypes: ImagePicker.MediaType.Images,
+      allowsEditing: false, quality: 0.9, base64: true });
     if (result.canceled || !result.assets?.[0]) return;
 
     setUploading(true);
@@ -37,14 +37,13 @@ export default function ManifestBeast({ token, onBack }: Props) {
       const r = await fetch(`${API_BASE}/api/business/manifest-upload`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, imageBase64: base64, mimeType: "image/jpeg" }),
-      });
+        body: JSON.stringify({ token, imageBase64: base64, mimeType: "image/jpeg" }) });
       const d = await r.json();
       if (d.jobId) {
-        Alert.alert("✅ Manifest Uploaded", `Job started. ValuIQ is analyzing your manifest.\n\nEstimated time: ${d.estimatedMinutes||10} minutes for ${d.estimatedItems||"your"} items.\n\nWe'll notify you when it's complete.`);
+        Alert.alert("✅ Manifest, Uploaded", `Job started. ValuIQ is analyzing your manifest.\n\nEstimated time: ${d.estimatedMinutes||10} minutes for ${d.estimatedItems||"your"} items.\n\nWe'll notify you when it's complete.`);
         loadJobs();
       } else {
-        Alert.alert("Upload Failed", d.error || "Please try again.");
+        Alert.alert("Upload, Failed", d.error || "Please try again.");
       }
     } catch { Alert.alert("Error", "Upload failed. Please try again."); }
     setUploading(false);
@@ -79,13 +78,13 @@ export default function ManifestBeast({ token, onBack }: Props) {
             "✅ Expected total lot profit",
             "✅ Recommended sell price per item",
             "✅ Best platform for each item",
-            "✅ Branded PDF ready to share",
+            "✅ Branded, PDF ready to share",
           ].map((item,i)=>(
             <Text key={i} style={s.returnItem}>{item}</Text>
           ))}
         </View>
 
-        {/* Active/Completed Jobs */}
+        {/* Active/Completed, Jobs */}
         <Text style={s.secTit}>YOUR MANIFEST JOBS</Text>
         {loading ? (
           <ActivityIndicator color={B.orange} style={{marginTop:20}}/>
@@ -118,7 +117,7 @@ export default function ManifestBeast({ token, onBack }: Props) {
               {job.status === "processing" && (
                 <View style={s.progressRow}>
                   <View style={s.progressBg}>
-                    <View style={[s.progressFill, {width:`${Math.round((job.itemsProcessed||0)/(job.total||1)*100)}%` as any}]}/>
+                    <View style={[s.progressFill, {width:(Math.round((job.itemsProcessed||0)/(job.total||1)*100)) + "%" as any}]}/>
                   </View>
                   <Text style={s.progressTxt}>{job.itemsProcessed||0} / {job.total||0} items</Text>
                 </View>
@@ -138,7 +137,7 @@ export default function ManifestBeast({ token, onBack }: Props) {
                     </View>
                   ))}
                   <TouchableOpacity style={s.reportBtn}>
-                    <Text style={s.reportBtnTxt}>📄 Download PDF Report</Text>
+                    <Text style={s.reportBtnTxt}>📄 Download, PDF Report</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -188,5 +187,4 @@ const s = StyleSheet.create({
   topItemName: {color:B.text2,fontSize:12,flex:1},
   topItemProfit:{fontSize:12,fontWeight:"700" as any},
   reportBtn:   {backgroundColor:B.orangeBg,borderWidth:1,borderColor:B.orangeBorder,borderRadius:10,padding:12,alignItems:"center",marginTop:10},
-  reportBtnTxt:{color:B.orange,fontSize:13,fontWeight:"700" as any},
-});
+  reportBtnTxt:{color:B.orange,fontSize:13,fontWeight:"700" as any} });

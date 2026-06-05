@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
-  View, Text, StyleSheet, StatusBar, Platform, SafeAreaView,
+  View, Text, StyleSheet, StatusBar, Platform,
   ActivityIndicator, TouchableOpacity, Animated, Dimensions,
 } from "react-native";
 import { C } from "./src/lib/theme";
 import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken } from "./src/lib/api";
+import { supabase } from "./src/lib/supabase";
 import LoginScreen from "./src/screens/LoginScreen";
 import ScannerScreen from "./src/screens/ScannerScreen";
 import DashboardScreen from "./src/screens/DashboardScreen";
@@ -31,21 +32,22 @@ import FAQScreen from "./src/screens/FAQScreen";
 import AdminScreen from "./src/screens/AdminScreen";
 import BusinessScreen from "./src/screens/BusinessScreen";
 import BusinessApp from "./src/screens/business/BusinessApp";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 export type Screen =
   "scanner"|"dashboard"|"thrift-run"|"price-battle"|
   "specialty"|"manifest"|"deathpile"|"community"|
   "profile"|"relist"|"hot-now"|"arbitrage"|"upgrade"|
-  "bundle"|"alerts"|"leaderboard"|"inventory"|"profit-tracker"|"deal-hunter"|"ai-coach"|"history"|"faq"|"admin"|"business";
+  "bundle"|"alerts"|"leaderboard"|"inventory"|"profit-tracker"|"deal-hunter"|"ai-coach"|"history"|"faq"|"admin"|"titan";
 
 const { height } = Dimensions.get("window");
 
-// ── PLAN DISPLAY HELPERS ─────────────────────────────────────
+// ── PLAN, DISPLAY HELPERS ─────────────────────────────────────
 const PLAN_LABEL: Record<string,string> = {
   free:"Free", seller:"Seller", pro:"Pro", lifetime:"Lifetime ♾️"
 };
 const PLAN_COLOR: Record<string,string> = {
-  free:C.text4, seller:C.green, pro:C.orange, lifetime:C.yellow
+  free:C.text4, seller:C.green, pro:C.orange, lifetime:C.yellow,
 };
 
 // ── SPLASH ───────────────────────────────────────────────────
@@ -54,6 +56,24 @@ function SplashScreen({ onDone }: { onDone:()=>void }) {
   const scale   = useRef(new Animated.Value(0.82)).current;
   const fade2   = useRef(new Animated.Value(0)).current;
   const fade3   = useRef(new Animated.Value(0)).current;
+
+  // Listen to Supabase auth state changes
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, sbSession) => {
+      if (event === "SIGNED_IN" && sbSession && !session) {
+        const s: Session = {
+          access_token: sbSession.access_token,
+          refresh_token: sbSession.refresh_token,
+          user: { id: sbSession.user.id, email: sbSession.user.email || "" },
+        };
+        await saveSession(s);
+        await handleLogin(s);
+      } else if (event === "SIGNED_OUT") {
+        await handleLogout();
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     Animated.sequence([
@@ -86,7 +106,7 @@ function SplashScreen({ onDone }: { onDone:()=>void }) {
         Point. Shoot. Profit.
       </Animated.Text>
       <Animated.Text style={[ss.tagSub, { opacity: fade2 }]}>
-        The unfair advantage every reseller needs
+        The unfair advantage every reseller needs,
       </Animated.Text>
 
       {/* Three feature lines - NOT buttons */}
@@ -119,9 +139,9 @@ const ss = StyleSheet.create({
   pillText: { color:C.text2, fontSize:14, lineHeight:20, flex:1 },
 });
 
-// ── MAIN APP ─────────────────────────────────────────────────
-// Warm up browser for faster OAuth on iOS
-WebBrowser.warmUpAsync().catch(() => {});
+// ── MAIN, APP ─────────────────────────────────────────────────
+// Warm up browser for faster OAuth on iOS,
+
 
 export default function App() {
   const [session, setSession]       = useState<Session|null>(null);
@@ -129,33 +149,13 @@ export default function App() {
   const [scansLeft, setScansLeft]   = useState<number|null>(null);
   const [screen, setScreen]         = useState<Screen>("dashboard");
   const [history, setHistory]       = useState<Screen[]>([]);
+  const [navData, setNavData]       = useState<any>(null);
   const [appReady, setAppReady]     = useState(false);
   const [splashDone, setSplashDone] = useState(false);
   const [onboarded, setOnboarded] = useState(false);
   const fadeIn = useRef(new Animated.Value(0)).current;
 
-  // Handle OAuth deep link callback
-  useEffect(() => {
-    const handleUrl = async (event: { url: string }) => {
-      if (event.url.includes("auth/callback") || event.url.includes("access_token")) {
-        try {
-          const { data } = await supabase.auth.getSession();
-          if (data.session) {
-            const session = {
-              access_token: data.session.access_token,
-              refresh_token: data.session.refresh_token,
-              user: data.session.user,
-            };
-            await saveSession(session as any);
-            handleLogin(session as any);
-          }
-        } catch {}
-      }
-    };
-
-    const sub = Linking.addEventListener("url", handleUrl);
-    return () => sub.remove();
-  }, []);
+  
 
   useEffect(() => { init(); }, []);
 
@@ -166,7 +166,7 @@ export default function App() {
   }, [splashDone, appReady]);
 
   async function init() {
-    // Check if user has seen onboarding
+    // Check if user has seen onboarding,
     try {
       const seen = await AsyncStorage.getItem("@valuiq_onboarded");
       if (seen === "true") setOnboarded(true);
@@ -192,18 +192,20 @@ export default function App() {
   async function handleLogin(s:Session) {
     setSession(s);
     await loadUserData(s.access_token);
+    setScreen("dashboard");
   }
 
   async function handleLogout() {
     await clearSession();
-    setSession(null); setPlan("free"); setScansLeft(null); setScreen("scanner");
+    setSession(null); setPlan("free"); setScansLeft(null); setScreen("dashboard");
   }
 
   const token = session?.access_token || "";
-  const isPaid = ["seller","pro","lifetime"].includes(plan);
+  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
 
-  function navigate(s: Screen) {
-    // Tab bar screens reset history; tool screens push to stack
+  function navigate(s: Screen, data?: any) {
+    setNavData(data ?? null);
+    // Tab bar screens reset history; tool screens push to stack,
     const TAB_SCREENS: Screen[] = ["scanner","dashboard","community","profile","upgrade"];
     if (TAB_SCREENS.includes(s)) {
       setHistory([]);
@@ -223,7 +225,7 @@ export default function App() {
     }
   }
 
-  const props = { token, plan, scansLeft, setScansLeft, onNavigate:navigate, onBack:goBack, onLogout:handleLogout };
+  const props = { token, plan, scansLeft, setScansLeft, onNavigate:navigate, onBack:goBack, onLogout:handleLogout, navData };
 
   const SCREENS: Record<Screen,React.ReactNode> = {
     "scanner":      <ScannerScreen {...props} />,
@@ -246,6 +248,11 @@ export default function App() {
     "profit-tracker":<ProfitTrackerScreen {...props} />,
     "deal-hunter":  <DealHunterScreen {...props} />,
     "ai-coach":     <AICoachScreen {...props} />,
+    "profit-tracker": <ProfitTrackerScreen {...props} />,
+    "history":      <HistoryScreen {...props} />,
+    "faq":          <FAQScreen {...props} />,
+    "admin":        <AdminScreen {...props} />,
+    "titan":     <BusinessScreen {...props} />,
   };
 
   const TAB_SCREENS: Screen[] = ["scanner","dashboard","community","profile"];
@@ -260,6 +267,7 @@ export default function App() {
   ];
 
   return (
+    <SafeAreaProvider>
     <View style={s.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       {(!splashDone || !appReady) && <SplashScreen onDone={()=>setSplashDone(true)} />}
@@ -271,7 +279,7 @@ export default function App() {
                 setOnboarded(true);
               }} />
               : <LoginScreen onLogin={handleLogin} />
-        ) : plan === "business" ? (
+        ) : plan === "titan" ? (
           <BusinessApp
             token={session.access_token}
             plan={plan}
@@ -286,13 +294,21 @@ export default function App() {
             <SafeAreaView style={{backgroundColor:C.surface}}>
               <View style={s.tabBar}>
                 {TABS.map(t => {
-                  // Hide upgrade tab for paid users
+                  // Hide upgrade tab for paid users,
                   if (t.highlight === false || (t.id === "upgrade" && isPaid)) return null;
                   const active = activeTab === t.id;
                   return (
                     <TouchableOpacity
                       key={t.id} style={s.tabItem}
-                      onPress={()=>setScreen(t.id)} activeOpacity={0.7}
+                      onPress={()=>setScreen(t.id)}
+                      onLongPress={t.id === "profile" ? () => {
+                        const { Alert } = require("react-native");
+                        Alert.alert("Sign Out", "Sign out of ValuIQ?", [
+                          { text: "Cancel", style: "cancel" },
+                          { text: "Sign Out", style: "destructive", onPress: handleLogout }
+                        ]);
+                      } : undefined}
+                      activeOpacity={0.7}
                     >
                       <Text style={[s.tabIcon, t.highlight && {opacity:1}]}>{t.icon}</Text>
                       <Text style={[
@@ -313,6 +329,7 @@ export default function App() {
         )}
       </Animated.View>
     </View>
+  </SafeAreaProvider>
   );
 }
 
@@ -324,3 +341,4 @@ const s = StyleSheet.create({
   tabLabel:{ color:C.text4, fontSize:8, fontWeight:"600" },
   tabDot:  { width:3, height:3, borderRadius:1.5, backgroundColor:C.green, marginTop:2 },
 });
+

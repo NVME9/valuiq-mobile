@@ -1,32 +1,33 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, SafeAreaView, StatusBar, ActivityIndicator, RefreshControl } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, RefreshControl } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { B } from "../../lib/businessTheme";
 import { API_BASE } from "../../lib/api";
 
 interface Props { token:string; plan:string; userEmail:string; onNavigate:(s:string)=>void; onLogout:()=>void; }
 
 const TOOLS = [
-  // 💎 THE DIAMONDS — Features no other app has
-  { id:"local-spider",   icon:"📍", title:"Local Deal Spider",     desc:"Finds local deals in minutes of posting",    badge:"🔥" as const, isDiamond:true },
-  { id:"vendor-intel",   icon:"🔬", title:"Vendor Intelligence",   desc:"Know if a vendor over-grades before buying",  badge:"🔥" as const, isDiamond:true },
+  // 💎 THE, DIAMONDS — Features no other app has,
+  { id:"local-spider",   icon:"📍", title:"Local, Deal Spider",     desc:"Finds local deals in minutes of posting",    badge:"🔥" as const, isDiamond:true },
+  { id:"vendor-intel",   icon:"🔬", title:"Vendor, Intelligence",   desc:"Know if a vendor over-grades before buying",  badge:"🔥" as const, isDiamond:true },
   { id:"trend-predictor",icon:"📈", title:"Trend Predictor",       desc:"Know what's hot BEFORE everyone else",        badge:"🔥" as const, isDiamond:true },
-  { id:"fake-detector",  icon:"🛡️", title:"Fake Detector",        desc:"Photo authentication — prevent account bans", badge:"🔥" as const, isDiamond:true },
-  // ⚔️ CORE WEAPONS
+  { id:"fake-detector",  icon:"🛡️", title:"Fake, Detector",        desc:"Photo authentication — prevent account bans", badge:"🔥" as const, isDiamond:true },
+  // ⚔️ CORE, WEAPONS,
   { id:"manifest-beast", icon:"📋", title:"Manifest Beast",        desc:"5,000+ items analyzed overnight",             badge:"LIVE" as const },
   { id:"autoscout",      icon:"🤖", title:"Auto-Scout",            desc:"24/7 personalized deal hunting",              badge:"ON" as const },
-  { id:"cashflow",       icon:"💰", title:"Cash Flow Oracle",       desc:"30/60/90 day forecast",                       badge:null },
+  { id:"cashflow",       icon:"💰", title:"Cash, Flow Oracle",       desc:"30/60/90 day forecast",                       badge:null },
   { id:"competitor",     icon:"🏹", title:"Competitor Destroyer",  desc:"Monitor rival sellers in real time",          badge:null },
   { id:"prophet",        icon:"🔮", title:"Pallet Prophet",        desc:"Predict lot ROI before wiring money",         badge:null },
-  { id:"pulse",          icon:"📡", title:"Market Pulse",          desc:"What's selling hot right now",                badge:"LIVE" as const },
-  // 🏢 TEAM & OPERATIONS
-  { id:"team",           icon:"👥", title:"Team Center",           desc:"Manage up to 10 team members",               badge:null },
-  { id:"tax",            icon:"📊", title:"Tax Export",            desc:"Schedule C ready — accountant-approved",      badge:null },
-  // 📱 CONSUMER TOOLS (full access)
-  { id:"scanner",        icon:"📷", title:"Item Scanner",          desc:"Scan any item",                               badge:null },
+  { id:"pulse",          icon:"📡", title:"Market, Pulse",          desc:"What's selling hot right now",                badge:"LIVE" as const },
+  // 🏢 TEAM & OPERATIONS,
+  { id:"team",           icon:"👥", title:"Team, Center",           desc:"Manage up to 10 team members",               badge:null },
+  { id:"tax",            icon:"📊", title:"Tax, Export",            desc:"Schedule C ready — accountant-approved",      badge:null },
+  // 📱 CONSUMER, TOOLS (full access)
+  { id:"scanner",        icon:"📷", title:"Item, Scanner",          desc:"Scan any item",                               badge:null },
   { id:"deal-hunter",    icon:"🤖", title:"Deal Hunter",           desc:"17 sources monitored",                        badge:null },
-  { id:"viral-content",  icon:"📱", title:"Viral Content Engine",  desc:"TikTok scripts from your finds",              badge:"NEW" as const },
-  { id:"sourcing-trip",  icon:"🗺️", title:"Sourcing Trip Planner", desc:"Optimal daily route with scores",             badge:"NEW" as const },
-  { id:"bundle",         icon:"📦", title:"Bundle Intelligence",   desc:"Bundle items for higher margins",             badge:null },
+  { id:"viral-content",  icon:"📱", title:"Viral, Content Engine",  desc:"TikTok scripts from your finds",              badge:"NEW" as const },
+  { id:"sourcing-trip",  icon:"🗺️", title:"Sourcing, Trip Planner", desc:"Optimal daily route with scores",             badge:"NEW" as const },
+  { id:"bundle",         icon:"📦", title:"Bundle, Intelligence",   desc:"Bundle items for higher margins",             badge:null },
   { id:"ai-coach",       icon:"🎯", title:"AI Coach",              desc:"Personal analysis from your data",            badge:null },
 ];
 
@@ -64,14 +65,14 @@ export default function BusinessDashboard({ token, userEmail, onNavigate, onLogo
       </View>
 
       <ScrollView contentContainerStyle={s.scroll} refreshControl={<RefreshControl refreshing={refreshing} tintColor={B.orange} onRefresh={()=>{setRefreshing(true);load();}}/>}>
-        {/* KPI Strip */}
+        {/* KPI, Strip */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingBottom:14}}>
           {[
-            ["Scans Today",  stats?.scansToday||0,              B.text1],
+            ["Scans, Today",  stats?.scansToday||0,              B.text1],
             ["Profit Found", `$${stats?.profitFound||0}`,        B.profit],
-            ["Active Jobs",  stats?.activeJobs||0,               B.orange],
-            ["Deals Today",  stats?.dealsQueued||0,              B.warning],
-            ["Team",         `${stats?.teamCount||1} member${stats?.teamCount>1?"s":""}`, B.info],
+            ["Active, Jobs",  stats?.activeJobs||0,               B.orange],
+            ["Deals, Today",  stats?.dealsQueued||0,              B.warning],
+            ["Team",         (stats?.teamCount||1) + " member" + ((stats?.teamCount||1)>1?"s":""), B.info],
           ].map(([l,v,c])=>(
             <View key={l as string} style={s.kpi}>
               <Text style={[s.kpiV,{color:c as string}]}>{v as string}</Text>
@@ -80,7 +81,7 @@ export default function BusinessDashboard({ token, userEmail, onNavigate, onLogo
           ))}
         </ScrollView>
 
-        {/* Scout Status */}
+        {/* Scout, Status */}
         <TouchableOpacity style={s.scoutBar} onPress={()=>onNavigate("autoscout")}>
           <View style={s.dot}/>
           <View style={{flex:1}}>
@@ -96,7 +97,7 @@ export default function BusinessDashboard({ token, userEmail, onNavigate, onLogo
           {TOOLS.map(t=>(
             <TouchableOpacity key={t.id} style={[(t as any).isDiamond ? s.diamondCard : s.toolCard]} onPress={()=>onNavigate(t.id)} activeOpacity={0.8}>
               {(t as any).isDiamond && (
-                <View style={s.diamondBadge}><Text style={s.diamondTxt}>💎 DIAMOND FEATURE</Text></View>
+                <View style={s.diamondBadge}><Text style={s.diamondTxt}>💎 DIAMOND, FEATURE</Text></View>
               )}
               {t.badge && t.badge !== "🔥" && (
                 <View style={[s.tbadge,t.badge==="LIVE"||t.badge==="ON"?s.tbadgeLive:s.tbadgeNew]}>
@@ -111,7 +112,7 @@ export default function BusinessDashboard({ token, userEmail, onNavigate, onLogo
           ))}
         </View>
 
-        {/* Recent Deals */}
+        {/* Recent, Deals */}
         {(stats?.recentDeals||[]).length > 0 && (
           <>
             <Text style={s.secTit}>LATEST INTELLIGENCE</Text>
@@ -169,5 +170,4 @@ const s = StyleSheet.create({
   score:     {width:42,height:42,borderRadius:10,alignItems:"center",justifyContent:"center"},
   scoreNum:  {fontSize:17,fontWeight:"900" as any},
   dealTit:   {color:B.text1,fontSize:13,fontWeight:"600" as any},
-  dealMeta:  {color:B.text3,fontSize:11,marginTop:2},
-});
+  dealMeta:  {color:B.text3,fontSize:11,marginTop:2} });

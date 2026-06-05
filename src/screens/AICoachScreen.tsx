@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, SafeAreaView, StatusBar, ActivityIndicator, RefreshControl } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, RefreshControl } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import { API_BASE } from "../lib/api";
 
@@ -10,8 +11,7 @@ const TYPE_CFG: Record<string,{color:string;icon:string}> = {
   strength:    { color:C.green,  icon:"💪" },
   warning:     { color:C.red,    icon:"⚠️"  },
   opportunity: { color:C.yellow, icon:"💡" },
-  tip:         { color:C.orange, icon:"🎯" },
-};
+  tip:         { color:C.orange, icon:"🎯" } };
 
 export default function AICoachScreen({ token, plan, onNavigate, onBack }: Props) {
   const [data, setData]   = useState<any>(null);
@@ -82,8 +82,7 @@ export default function AICoachScreen({ token, plan, onNavigate, onBack }: Props
 
               {data.coaching?.weeklyGoal && (
                 <View style={s.goalCard}>
-                  <Text style={s.goalLbl}>📌 This Week's Goal</Text>
-                  <Text style={s.goalTxt}>{data.coaching.weeklyGoal}</Text>
+                  <Text style={s.goalLbl}>📌 This Week's Goal</Text><Text style={s.goalTxt}>{data.coaching.weeklyGoal}</Text>
                 </View>
               )}
 
@@ -123,7 +122,7 @@ export default function AICoachScreen({ token, plan, onNavigate, onBack }: Props
 
 const s = StyleSheet.create({
   safe:       {flex:1,backgroundColor:C.bg},
-  nav:        {flexDirection:"row",alignItems:"center",justifyContent:"space-between",paddingHorizontal:20,paddingVertical:14,borderBottomWidth:1,borderBottomColor:C.border},
+  nav:        {flexDirection:"row",alignItems:"center",justifyContent:"space-between",paddingHorizontal:20,paddingTop: 16, paddingBottom: 10,borderBottomWidth:1,borderBottomColor:C.border},
   back:       {width:36,height:36,justifyContent:"center"},
   backTxt:    {color:C.text3,fontSize:22},
   navTitle:   {color:C.text1,fontSize:16,fontWeight:"800" as any},
@@ -146,7 +145,7 @@ const s = StyleSheet.create({
   insHeader:  {flexDirection:"row",alignItems:"center",gap:8,marginBottom:8},
   insTitle:   {fontSize:14,fontWeight:"800" as any,flex:1},
   insBody:    {color:C.text2,fontSize:13,lineHeight:19},
-  metric:     {borderRadius:8,paddingHorizontal:10,paddingVertical:5,marginTop:8,alignSelf:"flex-start" as any},
+  metric:     {borderRadius:8,paddingHorizontal:10,paddingTop:16, paddingBottom:10,marginTop:8,alignSelf:"flex-start" as any},
   metricTxt:  {fontSize:12,fontWeight:"700" as any},
   projCard:   {backgroundColor:C.surface,borderWidth:1,borderColor:C.green+"30",borderRadius:14,padding:16,marginBottom:10,alignItems:"center"},
   projLbl:    {color:C.text4,fontSize:11,fontWeight:"700" as any,textTransform:"uppercase" as any,marginBottom:6},
@@ -163,5 +162,4 @@ const s = StyleSheet.create({
   upgradeTxt: {color:C.greenDark,fontSize:15,fontWeight:"900" as any},
   emptyCard:  {backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:16,padding:32,alignItems:"center"},
   emptyTitle: {color:C.text1,fontSize:18,fontWeight:"700" as any,marginBottom:8},
-  emptySub:   {color:C.text3,fontSize:13,textAlign:"center" as any,lineHeight:19},
-});
+  emptySub:   {color:C.text3,fontSize:13,textAlign:"center" as any,lineHeight:19} });

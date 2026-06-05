@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, SafeAreaView, StatusBar, ActivityIndicator, RefreshControl } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, RefreshControl } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import { API_BASE } from "../lib/api";
 
@@ -138,7 +139,7 @@ export default function ProfitTrackerScreen({ token, plan, onNavigate, onBack }:
 }
 
 const s = StyleSheet.create({
-  safe:{flex:1,backgroundColor:C.bg},nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingVertical:14,gap:8},
+  safe:{flex:1,backgroundColor:C.bg},nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingTop: 16, paddingBottom: 10,gap:8},
   navBack:{padding:4},navBackText:{color:C.text3,fontSize:24,lineHeight:24},
   logoRow:{flexDirection:"row",alignItems:"center",gap:8},
   logoIcon:{width:26,height:26,backgroundColor:C.green,borderRadius:7,alignItems:"center",justifyContent:"center"},
@@ -148,7 +149,7 @@ const s = StyleSheet.create({
   body:{color:C.text2,fontSize:14,lineHeight:21},
   sectionLabel:{color:C.text4,fontSize:11,fontWeight:"700",textTransform:"uppercase",letterSpacing:0.8,marginBottom:10},
   periodRow:{flexDirection:"row",backgroundColor:C.surface,borderRadius:12,padding:4,marginBottom:20,borderWidth:1,borderColor:C.border},
-  periodBtn:{flex:1,paddingVertical:9,borderRadius:9,alignItems:"center"},
+  periodBtn:{flex:1,paddingTop:16, paddingBottom:10,borderRadius:9,alignItems:"center"},
   periodBtnActive:{backgroundColor:C.bg},
   periodText:{color:C.text4,fontSize:13,fontWeight:"600"},
   periodTextActive:{color:C.text1,fontWeight:"800"},
@@ -168,11 +169,10 @@ const s = StyleSheet.create({
   saleRow:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:10,padding:12,marginBottom:6},
   saleName:{color:C.text1,fontSize:13,fontWeight:"600",flex:1,paddingRight:12},
   saleProfit:{fontSize:15,fontWeight:"900"},
-  greenBtn:{backgroundColor:C.green,borderRadius:14,paddingVertical:14,alignItems:"center"},
+  greenBtn:{backgroundColor:C.green,borderRadius:14,paddingTop:16, paddingBottom:10,alignItems:"center"},
   greenBtnText:{color:C.greenDark,fontSize:15,fontWeight:"900"},
   lockedCard:{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:16,padding:32,alignItems:"center"},
   lockedTitle:{color:C.text1,fontSize:18,fontWeight:"800"},
   emptyCard:{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:16,padding:36,alignItems:"center"},
   emptyTitle:{color:C.text1,fontSize:16,fontWeight:"700",marginBottom:6},
-  emptyBody:{color:C.text3,fontSize:13,textAlign:"center"},
-});
+  emptyBody:{color:C.text3,fontSize:13,textAlign:"center"} });

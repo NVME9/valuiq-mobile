@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, SafeAreaView, StatusBar, ActivityIndicator, Linking } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Linking } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import { API_BASE } from "../lib/api";
 
@@ -21,8 +22,7 @@ export default function ArbitrageScreen({ token, plan, onNavigate, onBack }: Pro
     try {
       const r = await fetch(`${API_BASE}/api/arbitrage`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ userToken:token, query:query.trim(), maxBuy:Number(maxBuy)||0 }),
-      });
+        body:JSON.stringify({ userToken:token, query:query.trim(), maxBuy:Number(maxBuy)||0 }) });
       const d = await r.json();
       if (!d.success) throw new Error(d.error||"Search failed");
       setResults(d.results||[]);
@@ -50,7 +50,7 @@ export default function ArbitrageScreen({ token, plan, onNavigate, onBack }: Pro
           <View style={{gap:12,marginBottom:20}}>
             {error?<View style={s.errBox}><Text style={s.errText}>{error}</Text></View>:null}
             <View><Text style={s.label}>Search for</Text>
-              <TextInput style={s.input} value={query} onChangeText={setQuery} placeholder="e.g. Nike Dunk Low, Stanley Cup, KitchenAid" placeholderTextColor={C.text4} onSubmitEditing={search}/>
+              <TextInput style={s.input} value={query} onChangeText={setQuery} placeholder="e.g. Nike, Dunk Low, Stanley, Cup, KitchenAid" placeholderTextColor={C.text4} onSubmitEditing={search}/>
             </View>
             <View><Text style={s.label}>Max buy price (optional)</Text>
               <TextInput style={s.input} value={maxBuy} onChangeText={setMaxBuy} placeholder="$50" placeholderTextColor={C.text4} keyboardType="decimal-pad"/>
@@ -86,7 +86,7 @@ export default function ArbitrageScreen({ token, plan, onNavigate, onBack }: Pro
 
 const s = StyleSheet.create({
   safe:{flex:1,backgroundColor:C.bg},
-  nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingVertical:14,gap:8},
+  nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingTop: 16, paddingBottom: 10,gap:8},
   navBack:{padding:4},navBackText:{color:C.text3,fontSize:24,lineHeight:24},
   logoRow:{flexDirection:"row",alignItems:"center",gap:8},
   logoIcon:{width:26,height:26,backgroundColor:C.green,borderRadius:7,alignItems:"center",justifyContent:"center"},
@@ -98,7 +98,7 @@ const s = StyleSheet.create({
   body:{color:C.text2,fontSize:14,lineHeight:21},
   label:{color:C.text3,fontSize:13,fontWeight:"700",marginBottom:6},
   input:{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:12,padding:14,color:C.text1,fontSize:14},
-  greenBtn:{backgroundColor:C.green,borderRadius:14,paddingVertical:16,alignItems:"center"},
+  greenBtn:{backgroundColor:C.green,borderRadius:14,paddingTop:16, paddingBottom:10,alignItems:"center"},
   greenBtnText:{color:C.greenDark,fontSize:16,fontWeight:"900"},
   errBox:{backgroundColor:"#1a0505",borderWidth:1,borderColor:C.red+"40",borderRadius:10,padding:12},
   errText:{color:C.red,fontSize:13},
@@ -112,5 +112,4 @@ const s = StyleSheet.create({
   resultName:{color:C.text1,fontSize:14,fontWeight:"700"},
   miniStat:{flex:1,backgroundColor:C.bg,borderRadius:8,padding:10,alignItems:"center"},
   miniStatLabel:{color:C.text4,fontSize:9,fontWeight:"700",textTransform:"uppercase",marginBottom:3},
-  miniStatVal:{fontSize:16,fontWeight:"900"},
-});
+  miniStatVal:{fontSize:16,fontWeight:"900"} });

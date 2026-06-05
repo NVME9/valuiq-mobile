@@ -1,22 +1,21 @@
 import React, { useState, useEffect } from "react";
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  SafeAreaView, StatusBar, RefreshControl, ActivityIndicator,
-} from "react-native";
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, RefreshControl, ActivityIndicator } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import { API_BASE } from "../lib/api";
 
 const MOCK_WINS = [
   { id:"1", username:"FlipQueen",   item_name:"Coach Leather Crossbody",      profit:67,  platform:"Poshmark", store_name:"Goodwill",        likes:24, created_at:new Date(Date.now()-7200000).toISOString()   },
-  { id:"2", username:"ThriftKing",  item_name:"DeWalt 20V Drill Kit",          profit:112, platform:"eBay",     store_name:"Salvation Army",  likes:41, created_at:new Date(Date.now()-14400000).toISOString()  },
+  { id:"2", username:"ThriftKing",  item_name:"DeWalt 20V Drill, Kit",          profit:112, platform:"eBay",     store_name:"Salvation Army",  likes:41, created_at:new Date(Date.now()-14400000).toISOString()  },
   { id:"3", username:"VintageVibe", item_name:"Pyrex Butterprint Set",         profit:89,  platform:"Etsy",     store_name:"Habitat ReStore", likes:33, created_at:new Date(Date.now()-21600000).toISOString()  },
-  { id:"4", username:"SneakerPro",  item_name:"Jordan 1 Retro High OG",       profit:145, platform:"StockX",   store_name:"Goodwill",        likes:67, created_at:new Date(Date.now()-86400000).toISOString()  },
+  { id:"4", username:"SneakerPro",  item_name:"Jordan 1 Retro, High OG",       profit:145, platform:"StockX",   store_name:"Goodwill",        likes:67, created_at:new Date(Date.now()-86400000).toISOString()  },
   { id:"5", username:"GarageGold",  item_name:"Craftsman Socket Set",          profit:78,  platform:"Facebook", store_name:"Estate Sale",     likes:19, created_at:new Date(Date.now()-172800000).toISOString() },
-  { id:"6", username:"MercariMom",  item_name:"Lululemon Align 3-Pack",        profit:134, platform:"Mercari",  store_name:"Goodwill",        likes:55, created_at:new Date(Date.now()-259200000).toISOString() },
-  { id:"7", username:"EbayElite",   item_name:"Snap-On Wrench Set",            profit:220, platform:"eBay",     store_name:"Garage Sale",     likes:89, created_at:new Date(Date.now()-345600000).toISOString() },
-  { id:"8", username:"LuxLister",   item_name:"Kate Spade Tote Bag",           profit:95,  platform:"Poshmark", store_name:"Goodwill Bins",   likes:42, created_at:new Date(Date.now()-432000000).toISOString() },
+  { id:"6", username:"MercariMom",  item_name:"Lululemon, Align 3-Pack",        profit:134, platform:"Mercari",  store_name:"Goodwill",        likes:55, created_at:new Date(Date.now()-259200000).toISOString() },
+  { id:"7", username:"EbayElite",   item_name:"Snap-On, Wrench Set",            profit:220, platform:"eBay",     store_name:"Garage Sale",     likes:89, created_at:new Date(Date.now()-345600000).toISOString() },
+  { id:"8", username:"LuxLister",   item_name:"Kate, Spade Tote, Bag",           profit:95,  platform:"Poshmark", store_name:"Goodwill Bins",   likes:42, created_at:new Date(Date.now()-432000000).toISOString() },
   { id:"9", username:"FlipMaster",  item_name:"KitchenAid Stand Mixer",        profit:190, platform:"eBay",     store_name:"ThriftTown",      likes:103,created_at:new Date(Date.now()-518400000).toISOString() },
-  { id:"10",username:"CardShark",   item_name:"Pokémon 1st Edition Lot",       profit:340, platform:"eBay",     store_name:"Garage Sale",     likes:214,created_at:new Date(Date.now()-604800000).toISOString() },
+  { id:"10",username:"CardShark",   item_name:"Pokémon 1st Edition, Lot",       profit:340, platform:"eBay",     store_name:"Garage Sale",     likes:214,created_at:new Date(Date.now()-604800000).toISOString() },
 ];
 
 const LEADERBOARD = [
@@ -58,7 +57,7 @@ export default function CommunityScreen({ onNavigate, onBack }: Props) {
   const sorted = [...wins].sort((a, b) =>
     filter === "profit" ? b.profit - a.profit :
     filter === "recent" ? new Date(b.created_at).getTime() - new Date(a.created_at).getTime() :
-    b.likes - a.likes
+    b.likes - a.likes,
   );
 
   function toggleLike(id: string) {
@@ -68,7 +67,7 @@ export default function CommunityScreen({ onNavigate, onBack }: Props) {
       return next;
     });
     setWins(prev => prev.map(w =>
-      w.id === id ? { ...w, likes: w.likes + (liked.has(id) ? -1 : 1) } : w
+      w.id === id ? { ...w, likes: w.likes + (liked.has(id) ? -1 : 1) } : w,
     ));
   }
 
@@ -120,7 +119,7 @@ export default function CommunityScreen({ onNavigate, onBack }: Props) {
         refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.green}
           onRefresh={() => { setRefreshing(true); setTimeout(()=>setRefreshing(false),1000); }}/>}
       >
-        {/* ── WINS TAB ── */}
+        {/* ── WINS, TAB ── */}
         {tab === "wins" && (
           <>
             {/* Filter */}
@@ -129,7 +128,7 @@ export default function CommunityScreen({ onNavigate, onBack }: Props) {
                 <TouchableOpacity key={f} onPress={()=>setFilter(f)}
                   style={[s.filterChip, filter===f&&s.filterChipActive]}>
                   <Text style={[s.filterTxt, filter===f&&s.filterTxtActive]}>
-                    {f==="hot"?"🔥 Hot":f==="profit"?"💰 Top Profit":"⚡ Recent"}
+                    {f==="hot"?"🔥 Hot":f==="profit"?"💰 Top, Profit":"⚡ Recent"}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -168,7 +167,7 @@ export default function CommunityScreen({ onNavigate, onBack }: Props) {
           </>
         )}
 
-        {/* ── LEADERBOARD TAB ── */}
+        {/* ── LEADERBOARD, TAB ── */}
         {tab === "leaderboard" && (
           <>
             <Text style={s.lbTitle}>Top Flippers This Week</Text>
@@ -206,26 +205,26 @@ export default function CommunityScreen({ onNavigate, onBack }: Props) {
 
 const s = StyleSheet.create({
   safe:           { flex:1, backgroundColor:C.bg },
-  nav:            { flexDirection:"row", alignItems:"center", justifyContent:"space-between", paddingHorizontal:20, paddingVertical:14, borderBottomWidth:1, borderBottomColor:C.border },
+  nav:            { flexDirection:"row", alignItems:"center", justifyContent:"space-between", paddingHorizontal:20, paddingTop: 16, paddingBottom: 10, borderBottomWidth:1, borderBottomColor:C.border },
   backBtn:        { width:36, height:36, justifyContent:"center" },
   backTxt:        { color:C.text3, fontSize:22 },
   logoRow:        { flexDirection:"row", alignItems:"center", gap:8 },
   logoIcon:       { width:28, height:28, backgroundColor:C.green, borderRadius:8, alignItems:"center", justifyContent:"center" },
   logoIconTxt:    { color:C.greenDark, fontSize:14, fontWeight:"900" },
   logoTxt:        { color:C.text1, fontSize:17, fontWeight:"800" },
-  statsBanner:    { flexDirection:"row", backgroundColor:C.surface, borderBottomWidth:1, borderBottomColor:C.border, paddingVertical:12 },
+  statsBanner:    { flexDirection:"row", backgroundColor:C.surface, borderBottomWidth:1, borderBottomColor:C.border, paddingTop: 16, paddingBottom: 10 },
   statItem:       { flex:1, alignItems:"center" },
   statVal:        { color:C.text1, fontSize:20, fontWeight:"900", letterSpacing:-0.5 },
   statLabel:      { color:C.text4, fontSize:10, fontWeight:"700", marginTop:2 },
   statDivider:    { width:1, backgroundColor:C.border },
   tabRow:         { flexDirection:"row", borderBottomWidth:1, borderBottomColor:C.border },
-  tabBtn:         { flex:1, paddingVertical:12, alignItems:"center", borderBottomWidth:2, borderBottomColor:"transparent" },
+  tabBtn:         { flex:1, paddingTop:16, paddingBottom:10, alignItems:"center", borderBottomWidth:2, borderBottomColor:"transparent" },
   tabBtnActive:   { borderBottomColor:C.green },
   tabTxt:         { color:C.text4, fontSize:13, fontWeight:"600" },
   tabTxtActive:   { color:C.green, fontWeight:"800" },
   scroll:         { padding:16, paddingBottom:60 },
   filterRow:      { flexDirection:"row", gap:8, marginBottom:14 },
-  filterChip:     { flex:1, paddingVertical:8, alignItems:"center", backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:10 },
+  filterChip:     { flex:1, paddingTop:16, paddingBottom:10, alignItems:"center", backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:10 },
   filterChipActive:{ backgroundColor:C.greenBg, borderColor:C.greenBorder },
   filterTxt:      { color:C.text3, fontSize:12, fontWeight:"600" },
   filterTxtActive:{ color:C.green, fontWeight:"700" },
@@ -255,6 +254,5 @@ const s = StyleSheet.create({
   joinCard:       { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:14, padding:20, marginTop:8, alignItems:"center" },
   joinTitle:      { color:C.text1, fontSize:16, fontWeight:"800", marginBottom:6 },
   joinBody:       { color:C.text3, fontSize:13, textAlign:"center" as any, lineHeight:19, marginBottom:14 },
-  joinBtn:        { backgroundColor:C.green, borderRadius:10, paddingVertical:12, paddingHorizontal:24 },
-  joinBtnTxt:     { color:C.greenDark, fontSize:14, fontWeight:"900" },
-});
+  joinBtn:        { backgroundColor:C.green, borderRadius:10, paddingTop:16, paddingBottom:10, paddingHorizontal:24 },
+  joinBtnTxt:     { color:C.greenDark, fontSize:14, fontWeight:"900" } });

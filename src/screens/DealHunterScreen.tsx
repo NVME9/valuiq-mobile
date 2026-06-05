@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity, SafeAreaView,
-  StatusBar, ActivityIndicator, RefreshControl, Linking,
-} from "react-native";
+  View, Text, ScrollView, StyleSheet, TouchableOpacity,
+  StatusBar, ActivityIndicator, RefreshControl, Linking } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import { API_BASE } from "../lib/api";
 
@@ -22,7 +22,7 @@ interface Alert {
 }
 
 const SOURCE_LABELS: Record<string, { label: string; color: string; icon: string }> = {
-  ebay_bin:           { label: "eBay BIN",      color: "#3665f3", icon: "🛒" },
+  ebay_bin:           { label: "eBay, BIN",      color: "#3665f3", icon: "🛒" },
   ebay_auction:       { label: "⚡ Auction",    color: C.red,     icon: "🔨" },
   ebay_arbitrage:     { label: "📈 Arbitrage",  color: C.orange,  icon: "💹" },
   craigslist:         { label: "Craigslist",    color: "#7C3AED", icon: "📍" },
@@ -38,13 +38,11 @@ const SOURCE_LABELS: Record<string, { label: string; color: string; icon: string
   whatnot:            { label: "Whatnot",       color: "#FF3A50", icon: "📺" },
   stockx:             { label: "StockX",        color: "#1B1B1B", icon: "👟" },
   goat:               { label: "GOAT",          color: "#1B1B1B", icon: "🐐" },
-  direct_liquidation: { label: "Direct Liq.",   color: "#FF8C00", icon: "🏗️" },
-};
+  direct_liquidation: { label: "Direct Liq.",   color: "#FF8C00", icon: "🏗️" } };
 
 const RISK_COLOR: Record<string, string> = {
   "Very Low": C.green, "Low": C.green, "Medium": C.yellow,
-  "High": C.orange, "Very High": C.red,
-};
+  "High": C.orange, "Very High": C.red };
 
 const CATEGORIES = ["All","Clothing","Shoes","Electronics","Collectibles","Home","Tools","Vintage","Arbitrage"];
 
@@ -78,7 +76,7 @@ export default function DealHunterScreen({ token, plan, onNavigate, onBack }: Pr
 
   const sorted = [...alerts].sort((a, b) =>
     sortBy === "score" ? b.score - a.score :
-    sortBy === "profit" ? b.profit - a.profit : b.roi - a.roi
+    sortBy === "profit" ? b.profit - a.profit : b.roi - a.roi,
   );
 
   const scoreColor = (s: number) => s >= 85 ? C.green : s >= 70 ? C.yellow : C.orange;
@@ -100,8 +98,8 @@ export default function DealHunterScreen({ token, plan, onNavigate, onBack }: Pr
             <Text style={{ fontSize: 48, marginBottom: 16 }}>🤖</Text>
             <Text style={s.lockedTitle}>Deal Hunter AI</Text>
             <Text style={s.lockedBody}>
-              24/7 AI agent that monitors eBay, Craigslist, Goodwill auctions,
-              BULQ liquidation lots, and arbitrage gaps — then scores every
+              24/7 AI agent that monitors eBay, Craigslist Goodwill auctions,
+              BULQ liquidation lots, and arbitrage gaps — then scores every,
               opportunity and alerts you before anyone else sees it.
             </Text>
             <View style={s.lockedFeatures}>
@@ -250,7 +248,7 @@ export default function DealHunterScreen({ token, plan, onNavigate, onBack }: Pr
                 <View style={[s.tag, { borderColor: RISK_COLOR[alert.riskLevel] + "40",
                   backgroundColor: RISK_COLOR[alert.riskLevel] + "10" }]}>
                   <Text style={[s.tagTxt, { color: RISK_COLOR[alert.riskLevel] }]}>
-                    {alert.riskLevel} Risk
+                    {alert.riskLevel} Risk,
                   </Text>
                 </View>
                 {alert.isAuction && (
@@ -264,7 +262,7 @@ export default function DealHunterScreen({ token, plan, onNavigate, onBack }: Pr
               {isOpen && (
                 <View style={s.expanded}>
                   <View style={s.reasoningBox}>
-                    <Text style={s.reasoningLabel}>AI Analysis</Text>
+                    <Text style={s.reasoningLabel}>AI, Analysis</Text>
                     <Text style={s.reasoningTxt}>{alert.reasoning}</Text>
                   </View>
                   {alert.hotTip && (
@@ -291,21 +289,21 @@ export default function DealHunterScreen({ token, plan, onNavigate, onBack }: Pr
 
 const s = StyleSheet.create({
   safe:           { flex:1, backgroundColor:C.bg },
-  nav:            { flexDirection:"row", alignItems:"center", paddingHorizontal:20, paddingVertical:14, borderBottomWidth:1, borderBottomColor:C.border },
+  nav:            { flexDirection:"row", alignItems:"center", paddingHorizontal:20, paddingTop: 16, paddingBottom: 10, borderBottomWidth:1, borderBottomColor:C.border },
   backBtn:        { width:36, height:36, justifyContent:"center" },
   backTxt:        { color:C.text3, fontSize:22 },
   navTitle:       { color:C.text1, fontSize:16, fontWeight:"800" },
   navSub:         { color:C.text4, fontSize:11, marginTop:1 },
   refreshBtn:     { width:36, height:36, alignItems:"center", justifyContent:"center" },
   refreshBtnTxt:  { color:C.green, fontSize:22, fontWeight:"700" },
-  catScroll:      { maxHeight:48, paddingVertical:8, borderBottomWidth:1, borderBottomColor:C.border },
-  catChip:        { paddingHorizontal:14, paddingVertical:6, borderRadius:100, backgroundColor:C.surface, borderWidth:1, borderColor:C.border },
+  catScroll:      { maxHeight:48, paddingTop:16, paddingBottom:10, borderBottomWidth:1, borderBottomColor:C.border },
+  catChip:        { paddingHorizontal:14, paddingTop:16, paddingBottom:10, borderRadius:100, backgroundColor:C.surface, borderWidth:1, borderColor:C.border },
   catChipActive:  { backgroundColor:C.green, borderColor:C.green },
   catTxt:         { color:C.text3, fontSize:12, fontWeight:"600" },
   catTxtActive:   { color:C.greenDark, fontWeight:"800" },
-  sortBar:        { flexDirection:"row", alignItems:"center", paddingHorizontal:16, paddingVertical:8, gap:6, borderBottomWidth:1, borderBottomColor:C.border },
+  sortBar:        { flexDirection:"row", alignItems:"center", paddingHorizontal:16, paddingTop: 16, paddingBottom: 10, gap:6, borderBottomWidth:1, borderBottomColor:C.border },
   sortLabel:      { color:C.text4, fontSize:11 },
-  sortBtn:        { paddingHorizontal:10, paddingVertical:5, borderRadius:8, borderWidth:1, borderColor:C.border },
+  sortBtn:        { paddingHorizontal:10, paddingTop:16, paddingBottom:10, borderRadius:8, borderWidth:1, borderColor:C.border },
   sortBtnActive:  { backgroundColor:C.surface, borderColor:C.green },
   sortTxt:        { color:C.text4, fontSize:11 },
   sortTxtActive:  { color:C.green, fontWeight:"700" },
@@ -318,10 +316,10 @@ const s = StyleSheet.create({
   emptyTitle:     { color:C.text1, fontSize:16, fontWeight:"700", marginBottom:6 },
   emptySub:       { color:C.text3, fontSize:13, textAlign:"center" as any },
   card:           { backgroundColor:C.surface, borderWidth:1.5, borderColor:C.border, borderRadius:16, padding:14 },
-  scoreBadge:     { alignSelf:"flex-start" as any, borderWidth:1, borderRadius:10, paddingHorizontal:10, paddingVertical:4, marginBottom:8, flexDirection:"row", alignItems:"baseline", gap:4 },
+  scoreBadge:     { alignSelf:"flex-start" as any, borderWidth:1, borderRadius:10, paddingHorizontal:10, paddingTop:16, paddingBottom:10, marginBottom:8, flexDirection:"row", alignItems:"baseline", gap:4 },
   scoreNum:       { fontSize:20, fontWeight:"900", letterSpacing:-0.5 },
   scoreLabel:     { fontSize:9, fontWeight:"800", textTransform:"uppercase" as any, letterSpacing:1 },
-  srcTag:         { alignSelf:"flex-start" as any, borderRadius:100, paddingHorizontal:8, paddingVertical:3, marginBottom:8 },
+  srcTag:         { alignSelf:"flex-start" as any, borderRadius:100, paddingHorizontal:8, paddingTop:16, paddingBottom:10, marginBottom:8 },
   srcTxt:         { fontSize:11, fontWeight:"700" },
   cardTitle:      { color:C.text1, fontSize:14, fontWeight:"700", marginBottom:4, lineHeight:19 },
   cardCat:        { color:C.text4, fontSize:11, marginBottom:12 },
@@ -349,5 +347,4 @@ const s = StyleSheet.create({
   lockedFeatureRow:{ backgroundColor:C.bg, borderRadius:10, padding:12 },
   lockedFeatureTxt:{ color:C.text2, fontSize:13 },
   upgradeBtn:     { backgroundColor:C.orange, borderRadius:13, padding:16, alignItems:"center", width:"100%" },
-  upgradeBtnTxt:  { color:"#000", fontSize:15, fontWeight:"900" },
-});
+  upgradeBtnTxt:  { color:"#000", fontSize:15, fontWeight:"900" } });

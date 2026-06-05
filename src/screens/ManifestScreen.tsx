@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, SafeAreaView, StatusBar, ActivityIndicator, Image } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Image } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { C } from "../lib/theme";
 import { analyzeManifest } from "../lib/api";
@@ -15,7 +16,7 @@ export default function ManifestScreen({ token, plan, onNavigate, onBack }: Prop
   const [error, setError] = useState("");
 
   async function pickPhoto() {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes:ImagePicker.MediaTypeOptions.Images, base64:true, quality:0.7 });
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes:ImagePicker.MediaType.Images, base64:true, quality:0.7 });
     if (!res.canceled && res.assets[0]?.base64) setPhoto(res.assets[0].base64);
   }
 
@@ -88,7 +89,7 @@ export default function ManifestScreen({ token, plan, onNavigate, onBack }: Prop
           <View>
             {/* Score */}
             <View style={[s.scoreCard, { borderColor: (result.score||0)>=70?C.green:(result.score||0)>=40?C.yellow:C.red }]}>
-              <Text style={s.scoreLabel}>LOT SCORE</Text>
+              <Text style={s.scoreLabel}>LOT, SCORE</Text>
               <Text style={[s.scoreVal, { color:(result.score||0)>=70?C.green:(result.score||0)>=40?C.yellow:C.red }]}>{result.score}/100</Text>
               <Text style={s.scoreVerdict}>{result.verdict}</Text>
               {result.expectedProfit && <Text style={s.scoreProfit}>Expected profit: ${result.expectedProfit}</Text>}
@@ -100,7 +101,7 @@ export default function ManifestScreen({ token, plan, onNavigate, onBack }: Prop
             {/* Line items */}
             {result.items?.length > 0 && (
               <View>
-                <Text style={[s.sectionLabel,{marginBottom:10}]}>Line Items ({result.items.length})</Text>
+                <Text style={[s.sectionLabel,{marginBottom:10}]}>Line, Items ({result.items.length})</Text>
                 {result.items.map((item:any,i:number)=>(
                   <View key={i} style={[s.itemCard, { borderColor:item.decision==="BUY"?C.green+"30":item.decision==="WATCH"?C.yellow+"20":C.border }]}>
                     <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -122,7 +123,7 @@ export default function ManifestScreen({ token, plan, onNavigate, onBack }: Prop
             )}
 
             <ShareButton
-              message={`📋 Manifest Analysis via ValuIQ\n\nLot Score: ${result.score}/100\n${result.verdict || ""}\n${result.expectedProfit ? "Expected profit: $" + result.expectedProfit : ""}\n${result.summary ? "\n" + result.summary.slice(0,200) + "..." : ""}\n\ngetvaluiq.com`}
+              message={"📋 Manifest Analysis via ValuIQ\n\nLot Score: " + (result?.score||0) + "/100\nTop Items: " + (result?.topItems||[]).slice(0,3).map((x:any)=>x.name||"Item").join(", ") + "\n\ngetvaluiq.com"}
             />
             <TouchableOpacity style={[s.greenBtn,{marginTop:10}]} onPress={reset}>
               <Text style={s.greenBtnText}>Analyze Another Manifest →</Text>
@@ -136,7 +137,7 @@ export default function ManifestScreen({ token, plan, onNavigate, onBack }: Prop
 
 const s = StyleSheet.create({
   safe:         { flex:1, backgroundColor:C.bg },
-  nav:          { flexDirection:"row", alignItems:"center", paddingHorizontal:20, paddingVertical:14, gap:8 },
+  nav:          { flexDirection:"row", alignItems:"center", paddingHorizontal:20, paddingTop: 16, paddingBottom: 10, gap:8 },
   navBack:      { padding:4 },
   navBackText:  { color:C.text3, fontSize:24, lineHeight:24 },
   logoRow:      { flexDirection:"row", alignItems:"center", gap:8 },
@@ -152,7 +153,7 @@ const s = StyleSheet.create({
   sectionLabel: { color:C.text4, fontSize:11, fontWeight:"700", textTransform:"uppercase", letterSpacing:0.8 },
   photoBtn:     { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderStyle:"dashed", borderRadius:12, padding:24, alignItems:"center" },
   photoBtnText: { color:C.text4, fontSize:13 },
-  greenBtn:     { backgroundColor:C.green, borderRadius:14, paddingVertical:16, alignItems:"center" },
+  greenBtn:     { backgroundColor:C.green, borderRadius:14, paddingTop:16, paddingBottom:10, alignItems:"center" },
   greenBtnText: { color:C.greenDark, fontSize:16, fontWeight:"900" },
   errBox:       { backgroundColor:"#1a0505", borderWidth:1, borderColor:C.red+"40", borderRadius:10, padding:12 },
   errText:      { color:C.red, fontSize:13 },
@@ -173,5 +174,4 @@ const s = StyleSheet.create({
   itemMeta:     { color:C.text4, fontSize:11 },
   itemNote:     { color:C.text3, fontSize:12, marginTop:6, lineHeight:17 },
   decBadge:     { borderWidth:1, borderRadius:100, paddingHorizontal:8, paddingVertical:2 },
-  decText:      { fontSize:10, fontWeight:"800" },
-});
+  decText:      { fontSize:10, fontWeight:"800" } });

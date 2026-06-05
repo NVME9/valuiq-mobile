@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, SafeAreaView, StatusBar, ActivityIndicator, RefreshControl } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, RefreshControl } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import { API_BASE } from "../lib/api";
 
@@ -38,8 +39,7 @@ export default function SourcingAlertsScreen({ token, plan, onNavigate, onBack }
     try {
       const r = await fetch(`${API_BASE}/api/alerts`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ token, keywords:keywords.trim(), maxPrice:Number(maxPrice)||0, minProfit:Number(minProfit)||0 }),
-      });
+        body: JSON.stringify({ token, keywords:keywords.trim(), maxPrice:Number(maxPrice)||0, minProfit:Number(minProfit)||0 }) });
       const d = await r.json();
       if (!d.success) throw new Error(d.error||"Failed");
       setKeywords(""); setMaxPrice(""); setMinProfit(""); setCreating(false);
@@ -72,7 +72,7 @@ export default function SourcingAlertsScreen({ token, plan, onNavigate, onBack }
             <Text style={s.createTitle}>New Alert</Text>
             {error?<View style={s.errBox}><Text style={s.errText}>{error}</Text></View>:null}
             <Text style={s.label}>Keywords *</Text>
-            <TextInput style={s.input} value={keywords} onChangeText={setKeywords} placeholder="e.g. Nike Dunk Low, Stanley Cup, Vitamix" placeholderTextColor={C.text4}/>
+            <TextInput style={s.input} value={keywords} onChangeText={setKeywords} placeholder="e.g. Nike, Dunk Low, Stanley, Cup, Vitamix" placeholderTextColor={C.text4}/>
             <View style={{flexDirection:"row",gap:10,marginTop:10}}>
               <View style={{flex:1}}><Text style={s.label}>Max Buy Price</Text><TextInput style={s.input} value={maxPrice} onChangeText={setMaxPrice} placeholder="$50" placeholderTextColor={C.text4} keyboardType="decimal-pad"/></View>
               <View style={{flex:1}}><Text style={s.label}>Min Profit</Text><TextInput style={s.input} value={minProfit} onChangeText={setMinProfit} placeholder="$20" placeholderTextColor={C.text4} keyboardType="decimal-pad"/></View>
@@ -90,12 +90,12 @@ export default function SourcingAlertsScreen({ token, plan, onNavigate, onBack }
           <>
             {alerts.length>0&&(
               <View style={{marginBottom:20}}>
-                <Text style={s.sectionLabel}>Your Alerts ({alerts.length})</Text>
+                <Text style={s.sectionLabel}>Your, Alerts ({alerts.length})</Text>
                 {alerts.map((a:any)=>(
                   <View key={a.id} style={s.alertCard}>
                     <View style={{flex:1}}>
                       <Text style={s.alertKeywords}>{a.keywords}</Text>
-                      <Text style={s.alertMeta}>{a.maxPrice?`Max $${a.maxPrice}`:""}{a.minProfit?` · Min profit $${a.minProfit}`:""}</Text>
+                      <Text style={s.alertMeta}>{a.maxPrice? "Max $" + (a.maxPrice) :""}{a.minProfit? " · Min profit $" + (a.minProfit) + "" :""}</Text>
                     </View>
                     <TouchableOpacity onPress={()=>deleteAlert(a.id)} style={s.deleteBtn}><Text style={{color:C.red,fontSize:18}}>✕</Text></TouchableOpacity>
                   </View>
@@ -107,7 +107,7 @@ export default function SourcingAlertsScreen({ token, plan, onNavigate, onBack }
             )}
             {matches.length>0&&(
               <View>
-                <Text style={s.sectionLabel}>Recent Matches ({matches.length})</Text>
+                <Text style={s.sectionLabel}>Recent, Matches ({matches.length})</Text>
                 {matches.map((m:any,i:number)=>(
                   <View key={i} style={[s.matchCard,{borderColor:C.green+"30"}]}>
                     <View style={{flex:1}}>
@@ -130,7 +130,7 @@ export default function SourcingAlertsScreen({ token, plan, onNavigate, onBack }
   );
 }
 const s = StyleSheet.create({
-  safe:{flex:1,backgroundColor:C.bg},nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingVertical:14,gap:8},
+  safe:{flex:1,backgroundColor:C.bg},nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingTop: 16, paddingBottom: 10,gap:8},
   navBack:{padding:4},navBackText:{color:C.text3,fontSize:24,lineHeight:24},
   logoRow:{flexDirection:"row",alignItems:"center",gap:8},
   logoIcon:{width:26,height:26,backgroundColor:C.green,borderRadius:7,alignItems:"center",justifyContent:"center"},
@@ -143,9 +143,9 @@ const s = StyleSheet.create({
   sectionLabel:{color:C.text4,fontSize:11,fontWeight:"700",textTransform:"uppercase",letterSpacing:0.8,marginBottom:10},
   label:{color:C.text3,fontSize:13,fontWeight:"700",marginBottom:6},
   input:{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:12,padding:13,color:C.text1,fontSize:14},
-  greenBtn:{backgroundColor:C.green,borderRadius:14,paddingVertical:14,alignItems:"center"},
+  greenBtn:{backgroundColor:C.green,borderRadius:14,paddingTop:16, paddingBottom:10,alignItems:"center"},
   greenBtnText:{color:C.greenDark,fontSize:15,fontWeight:"900"},
-  cancelBtn:{borderWidth:1,borderColor:C.border,borderRadius:14,paddingVertical:14,paddingHorizontal:18},
+  cancelBtn:{borderWidth:1,borderColor:C.border,borderRadius:14,paddingTop:16, paddingBottom:10,paddingHorizontal:18},
   cancelBtnText:{color:C.text4,fontSize:14},
   errBox:{backgroundColor:"#1a0505",borderWidth:1,borderColor:C.red+"40",borderRadius:10,padding:12,marginBottom:12},
   errText:{color:C.red,fontSize:13},
@@ -163,5 +163,4 @@ const s = StyleSheet.create({
   emptyBody:{color:C.text3,fontSize:13,textAlign:"center"},
   matchCard:{backgroundColor:C.surface,borderWidth:1.5,borderRadius:12,padding:14,marginBottom:8,flexDirection:"row",alignItems:"center"},
   matchTitle:{color:C.text1,fontSize:13,fontWeight:"700",marginBottom:2},
-  matchMeta:{color:C.text4,fontSize:11},
-});
+  matchMeta:{color:C.text4,fontSize:11} });

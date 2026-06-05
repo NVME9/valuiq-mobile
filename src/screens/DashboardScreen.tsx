@@ -1,347 +1,457 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  RefreshControl, SafeAreaView, StatusBar, ActivityIndicator,
+  StatusBar, RefreshControl, ActivityIndicator,
+  Animated, Dimensions, Image,
 } from "react-native";
+import { SafeAreaView as SAV } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
-import { getScanHistory } from "../lib/api";
+import { API_BASE } from "../lib/api";
+
+const { width } = Dimensions.get("window");
 
 interface Props {
-  token:string; plan:string; scansLeft:number|null;
-  setScansLeft:(n:number|null)=>void;
-  onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void;
+  token: string; plan: string; scansLeft: number | null;
+  setScansLeft: (n: number | null) => void;
+  onNavigate: (s: string) => void; onBack?: () => void; onLogout: () => void;
 }
 
-function planLevel(p:string) { return {free:0,seller:1,pro:2,lifetime:3}[p]||0; }
+function planLevel(p: string) {
+  if (p === "titan") return 4;
+  if (p === "lifetime") return 3;
+  if (p === "pro") return 2;
+  if (p === "seller") return 1;
+  return 0;
+}
+function planLabel(p: string) {
+  const m: Record<string,string> = { business:"💼 Business", lifetime:"♾️ Lifetime", pro:"🔥 Pro", seller:"💪 Seller", free:"🆓 Free" };
+  return m[p] || "🆓 Free";
+}
+function planColor(p: string) {
+  const m: Record<string,string> = { business:C.orange, lifetime:C.yellow, pro:C.orange, seller:C.green };
+  return m[p] || C.text3;
+}
 
-const FREE_TOOLS = [
-  { id:"price-battle", icon:"⚡", title:"Price Battle",     desc:"Compare all 12 platforms",       color:C.orange },
-  { id:"community",    icon:"🔥", title:"Community Wins",   desc:"See what others are flipping",   color:"#ff6b6b" },
-  { id:"leaderboard",  icon:"🏆", title:"Leaderboard",      desc:"Top flippers this week",         color:C.yellow  },
+const LIVE_FEED = [
+  { emoji:"🤑", text:"+$340 profit found on Whatnot", time:"2m" },
+  { emoji:"💰", text:"Nike Dunk Low → +$185 on eBay", time:"4m" },
+  { emoji:"🔥", text:"Thrift Run: 3 BUY finds in 12 min", time:"7m" },
+  { emoji:"⚡", text:"Deal Hunter: B-Stock electronics 87/100", time:"11m" },
+  { emoji:"🏆", text:"Top flipper: $2,840 profit this week", time:"18m" },
+  { emoji:"💎", text:"Pyrex set: paid $8 → sells for $145", time:"22m" },
 ];
 
-const SELLER_TOOLS = [
-  { id:"thrift-run",   icon:"🛍️", title:"Thrift Run",       desc:"Rapid-scan a whole store",       color:C.green   },
-  { id:"deathpile",    icon:"💀", title:"Death Pile Rescuer",desc:"Fix stuck inventory",            color:"#a09b94" },
-  { id:"relist",       icon:"✏️", title:"Auto-Relister",    desc:"AI listings for every platform", color:C.green   },
-  { id:"hot-now",      icon:"🔥", title:"Hot Right Now",    desc:"What's selling fast this week",  color:"#ff6b6b" },
-];
-
-const PRO_TOOLS = [
-  { id:"manifest",      icon:"📋", title:"Manifest Analyzer",  desc:"Score liquidation lots",         color:C.yellow  },
-  { id:"arbitrage",     icon:"📈", title:"Arbitrage Search",   desc:"Find underpriced eBay items",    color:C.green   },
-  { id:"bundle",        icon:"📦", title:"Bundle Builder",     desc:"Group items, higher price",      color:C.green   },
-  { id:"alerts",        icon:"🔔", title:"Sourcing Alerts",    desc:"24/7 eBay deal monitor",        color:C.orange  },
-  { id:"inventory",     icon:"🗂️", title:"Inventory Tracker",  desc:"Track every item buy to sold",  color:C.text3   },
-  { id:"profit-tracker",icon:"📊", title:"Profit Tracker",     desc:"Real P&L — your true profit",   color:C.green   },
-  { id:"specialty",     icon:"🏺", title:"Specialty Scanner",  desc:"Wine, Coins, Cards, Art & more",color:"#b066ff" },
+const TOOLS = [
+  { id:"scanner",       icon:"📷", name:"Scan Item",        desc:"Point camera → instant profit",         minPlan:0, accent:C.green   },
+  { id:"price-battle",  icon:"⚡", name:"Price Battle",     desc:"12 platforms compared instantly",       minPlan:0, accent:C.orange  },
+  { id:"community",     icon:"🏆", name:"Community",        desc:"Top flips from real resellers",         minPlan:0, accent:"#ff6b6b" },
+  { id:"thrift-run",    icon:"🛍️", name:"Thrift Run",       desc:"Rapid-scan a full store",               minPlan:1, accent:C.green   },
+  { id:"deathpile",     icon:"💀", name:"Death Pile",       desc:"Diagnose stuck inventory",              minPlan:1, accent:"#a09b94" },
+  { id:"hot-now",       icon:"🔥", name:"Hot Right Now",    desc:"What's selling best this week",         minPlan:1, accent:C.red     },
+  { id:"relist",        icon:"✏️",  name:"Auto-Relist",      desc:"Refresh dying listings",               minPlan:1, accent:C.orange  },
+  { id:"deal-hunter",   icon:"🤖", name:"Deal Hunter AI",   desc:"24/7 alerts from 17 sources",           minPlan:2, accent:"#b066ff" },
+  { id:"manifest",      icon:"📋", name:"Manifest Analyzer",desc:"Score liquidation lots",                minPlan:2, accent:C.yellow  },
+  { id:"specialty",     icon:"🎯", name:"Specialty Scanner",desc:"Sneakers, cards, vinyl & luxury",       minPlan:2, accent:"#b066ff" },
+  { id:"arbitrage",     icon:"📈", name:"Arbitrage Finder", desc:"Underpriced items hiding in plain sight",minPlan:2, accent:C.green  },
+  { id:"ai-coach",      icon:"🧠", name:"AI Coach",         desc:"Personal insights from your history",   minPlan:2, accent:"#b066ff" },
+  { id:"inventory",     icon:"📦", name:"Inventory",        desc:"Track everything you own",              minPlan:1, accent:C.text3   },
+  { id:"profit-tracker",icon:"💰", name:"Profit Tracker",   desc:"Your real P&L every flip",             minPlan:2, accent:C.green   },
 ];
 
 const COMING_SOON = [
-  { icon:"🤖", title:"Deal Hunter AI",        desc:"24/7 autonomous deal-finding agent — scours every platform while you sleep", badge:"Coming Soon" },
-  { icon:"🏭", title:"Liquidation Lot Finder",desc:"Live feed of profitable lots from B-Stock, BULQ, Liquidation.com",           badge:"Coming Soon" },
-  { icon:"📱", title:"Live Auction Intel",     desc:"Real-time Whatnot auction data — know what's selling before you go live",   badge:"Coming Soon" },
+  { icon:"💼", name:"ValuIQ Business",    desc:"Manifest Beast, Auto-Scout, Pallet Prophet + exclusive AI tools", badge:"Coming Soon", color:"#ff8c42" },
+  { icon:"📸", name:"Photo IQ",           desc:"AI critiques your listing photos vs top sellers", badge:"Q3 2026", color:"#b066ff" },
+  { icon:"⏱️", name:"True Hourly Rate",   desc:"Your REAL hourly rate per category — most resellers are shocked", badge:"Q3 2026", color:C.green },
+  { icon:"💨", name:"Cash Velocity",      desc:"Dollars per day held — the metric that rewires sourcing", badge:"Q3 2026", color:C.yellow },
+  { icon:"🗓️", name:"Perfect Timing",    desc:"Exact day and time to list for 43% higher sale prices", badge:"Q4 2026", color:"#4db8ff" },
+  { icon:"⚠️", name:"Safe To Sell",       desc:"CPSC recall + counterfeit check before you list", badge:"Q4 2026", color:C.red },
 ];
 
+function SectionHeader({ title, expanded, onToggle }: { title:string; expanded:boolean; onToggle:()=>void }) {
+  return (
+    <TouchableOpacity style={sh.row} onPress={onToggle} activeOpacity={0.8}>
+      <Text style={sh.title}>{title}</Text>
+      <Text style={[sh.chevron, expanded && {transform:[{rotate:"180deg"}]}]}>⌄</Text>
+    </TouchableOpacity>
+  );
+}
+const sh = StyleSheet.create({
+  row:     { flexDirection:"row", justifyContent:"space-between", alignItems:"center", paddingTop:16, paddingBottom:10, marginBottom:4 },
+  title:   { color:C.text4, fontSize:9, fontWeight:"800", letterSpacing:2, textTransform:"uppercase" },
+  chevron: { color:C.text4, fontSize:18, fontWeight:"900" },
+});
+
 export default function DashboardScreen({ token, plan, scansLeft, onNavigate, onLogout }: Props) {
-  const [scans, setScans]       = useState<any[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [scans, setScans]         = useState<any[]>([]);
+  const [stats, setStats]         = useState<any>(null);
+  const [refreshing, setRefresh]  = useState(false);
+  const [liveIdx, setLiveIdx]     = useState(0);
+  const [showTools, setShowTools] = useState(true);
+  const [showScans, setShowScans] = useState(true);
+  const [showSoon,  setShowSoon]  = useState(false);
+  const [showAI,    setShowAI]    = useState(false);
+  const scanPulse                 = useRef(new Animated.Value(1)).current;
+  const liveFade                  = useRef(new Animated.Value(1)).current;
 
-  const userLevel = planLevel(plan);
-  const isPaid    = userLevel >= 1;
-  const isSeller  = userLevel >= 1;
-  const isPro     = userLevel >= 2;
-  const planColor = ({lifetime:C.yellow,pro:C.orange,seller:C.green} as any)[plan]||C.text4;
-  const planLabel = plan==="lifetime"?"♾️ Lifetime":plan==="pro"?"🔥 Pro":plan==="seller"?"💪 Seller":"Free";
+  const level  = planLevel(plan);
+  const isFree = level === 0;
+  const isPro  = level >= 2;
 
-  useEffect(()=>{ load(); },[]);
-  async function load() { const h = await getScanHistory(token).catch(()=>[]); setScans(h); setLoading(false); }
-  async function refresh() { setRefreshing(true); await load(); setRefreshing(false); }
+  useEffect(() => {
+    loadData();
+    const pulse = Animated.loop(Animated.sequence([
+      Animated.timing(scanPulse, { toValue:1.02, duration:1200, useNativeDriver:true }),
+      Animated.timing(scanPulse, { toValue:1,    duration:1200, useNativeDriver:true }),
+    ]));
+    pulse.start();
+    const interval = setInterval(() => {
+      Animated.timing(liveFade, { toValue:0, duration:250, useNativeDriver:true }).start(() => {
+        setLiveIdx(i => (i+1) % LIVE_FEED.length);
+        Animated.timing(liveFade, { toValue:1, duration:300, useNativeDriver:true }).start();
+      });
+    }, 4000);
+    return () => { pulse.stop(); clearInterval(interval); };
+  }, []);
 
-  const vc = (v:string) => v==="BUY"?C.green:v==="WATCH"?C.yellow:C.red;
-  const totalProfit = scans.filter(s=>s.verdict==="BUY").reduce((sum,s)=>sum+(s.profit||0),0);
-
-  const sellerToolIds = ["thrift-run","deathpile","relist","hot-now"];
-  function ToolCard({ tool, locked }: { tool:any; locked:boolean }) {
-    return (
-      <TouchableOpacity
-        style={[s.toolCard, locked&&{opacity:0.45}]}
-        onPress={()=>locked?onNavigate("upgrade"):onNavigate(tool.id)}
-        activeOpacity={0.75}
-      >
-        {locked && <View style={[s.lockPip,{backgroundColor:sellerToolIds.includes(tool.id)?C.green:C.orange}]}><Text style={{fontSize:8,color:"#000",fontWeight:"900"}}>{sellerToolIds.includes(tool.id)?"SELLER":"PRO"}</Text></View>}
-        <Text style={s.toolIcon}>{tool.icon}</Text>
-        <Text style={[s.toolTitle,{color:locked?C.text4:tool.color}]} numberOfLines={1}>{tool.title}</Text>
-        <Text style={s.toolDesc} numberOfLines={2}>{tool.desc}</Text>
-      </TouchableOpacity>
-    );
+  async function loadData() {
+    try {
+      const r = await fetch(`${API_BASE}/api/scan-history?token=${token}&limit=5`);
+      const d = await r.json();
+      if (d.scans) {
+        setScans(d.scans);
+        const buys = d.scans.filter((s: any) => s.decision === "BUY");
+        setStats({
+          totalScans: d.total || d.scans.length,
+          profitFound: buys.reduce((sum: number, s: any) => sum + (s.net_profit || 0), 0),
+          buys: buys.length,
+        });
+      }
+    } catch {}
+    setRefresh(false);
   }
 
-  function SectionHeader({ title, subtitle, locked, requiredPlan }:
-    { title:string; subtitle?:string; locked:boolean; requiredPlan?:string }) {
-    return (
-      <View style={s.sectionHeader}>
-        <View style={{flex:1}}>
-          <Text style={[s.sectionTitle,locked&&{color:C.text4}]}>{title}</Text>
-          {subtitle&&<Text style={s.sectionSub}>{subtitle}</Text>}
-        </View>
-        {locked&&requiredPlan&&(
-          <TouchableOpacity onPress={()=>onNavigate("upgrade")} style={s.unlockBtn}>
-            <Text style={s.unlockBtnTxt}>Unlock {requiredPlan} →</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    );
-  }
+  const myTools    = TOOLS.filter(t => t.minPlan <= level);
+  const lockedTools = TOOLS.filter(t => t.minPlan > level);
+  const activity   = LIVE_FEED[liveIdx];
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SAV style={s.safe}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
-      <ScrollView
-        contentContainerStyle={s.container}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>}
-      >
-        {/* Nav */}
-        <View style={s.nav}>
-          <View style={s.logoRow}>
-            <View style={s.logoIcon}><Text style={s.logoIconTxt}>V</Text></View>
-            <Text style={s.logoTxt}>ValuIQ</Text>
-          </View>
-          <View style={{flexDirection:"row",alignItems:"center",gap:14}}>
-            <TouchableOpacity onPress={()=>onNavigate("profile")}><Text style={{fontSize:22}}>👤</Text></TouchableOpacity>
-            <TouchableOpacity onPress={onLogout}><Text style={{color:C.text4,fontSize:13}}>Sign out</Text></TouchableOpacity>
-          </View>
-        </View>
 
-        {/* Plan badge */}
-        <View style={[s.planRow,{borderColor:planColor+"40",backgroundColor:planColor+"10"}]}>
-          <View style={{flexDirection:"row",alignItems:"center",gap:8}}>
-            <View style={[s.planDot,{backgroundColor:planColor}]}/>
-            <Text style={{color:planColor,fontSize:13,fontWeight:"700"}}>{planLabel} Plan</Text>
+      {/* Nav */}
+      <View style={s.nav}>
+        <View style={s.logoRow}>
+          <View style={s.logoBox}><Text style={s.logoV}>V</Text></View>
+          <Text style={s.logoTxt}>ValuIQ</Text>
+        </View>
+        <View style={s.navRight}>
+          <View style={[s.planBadge, {borderColor:planColor(plan)+"50", backgroundColor:planColor(plan)+"15"}]}>
+            <Text style={[s.planBadgeTxt, {color:planColor(plan)}]}>{planLabel(plan)}</Text>
           </View>
-          {!isPaid&&(
-            <TouchableOpacity onPress={()=>onNavigate("upgrade")}>
-              <Text style={{color:C.green,fontSize:13,fontWeight:"700"}}>Upgrade →</Text>
-            </TouchableOpacity>
+          {isFree && scansLeft !== null && (
+            <View style={s.scansBadge}><Text style={s.scansBadgeTxt}>{scansLeft}/10</Text></View>
           )}
+          <TouchableOpacity onPress={() => onNavigate("profile")}>
+            <Text style={{fontSize:22}}>👤</Text>
+          </TouchableOpacity>
         </View>
+      </View>
 
-        {/* Stats */}
-        <View style={s.statsRow}>
-          {[
-            [scans.length.toString(), "Scans",    C.text1],
-            [scans.filter(s=>s.verdict==="BUY").length.toString(), "BUY Finds", C.green],
-            ["$"+Math.round(totalProfit), "Profit", C.green],
-          ].map(([val,label,color])=>(
-            <View key={label as string} style={s.statCard}>
-              <Text style={[s.statVal,{color:color as string}]}>{val as string}</Text>
-              <Text style={s.statLabel}>{label as string}</Text>
-            </View>
-          ))}
-        </View>
+      <ScrollView
+        contentContainerStyle={s.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.green}
+          onRefresh={() => { setRefresh(true); loadData(); }}/>}
+      >
 
-        {/* Upgrade banner */}
-        {!isPaid&&(
-          <TouchableOpacity style={s.upgBanner} onPress={()=>onNavigate("upgrade")} activeOpacity={0.85}>
+        {/* HERO SCAN BUTTON */}
+        <Animated.View style={{transform:[{scale:scanPulse}]}}>
+          <TouchableOpacity style={s.hero} onPress={() => onNavigate("scanner")} activeOpacity={0.9}>
             <View style={{flex:1}}>
-              <Text style={s.upgTitle}>🚀 Upgrade for unlimited scans</Text>
-              <Text style={s.upgSub}>Seller $19/mo · Pro $49/mo · Lifetime $197 early-bird</Text>
+              <Text style={s.heroEye}>SCAN ANYTHING · GET INSTANT PROFIT</Text>
+              <Text style={s.heroTitle}>Point. Shoot. Profit.</Text>
+              <Text style={s.heroSub}>Find your next flip in seconds →</Text>
             </View>
-            <Text style={{color:C.green,fontSize:20,fontWeight:"900",paddingLeft:8}}>→</Text>
+            <Text style={{fontSize:44}}>📷</Text>
+          </TouchableOpacity>
+        </Animated.View>
+
+        {/* LIVE FEED */}
+        <TouchableOpacity style={s.liveBar} onPress={() => onNavigate("community")} activeOpacity={0.85}>
+          <View style={s.liveDot}/>
+          <Text style={s.liveLbl}>LIVE</Text>
+          <Animated.Text style={[s.liveTxt, {opacity:liveFade}]} numberOfLines={2}>
+            {activity.emoji} {activity.text}
+          </Animated.Text>
+          <Text style={s.liveTime}>{activity.time}</Text>
+        </TouchableOpacity>
+
+        {/* STATS */}
+        {stats && stats.totalScans > 0 && (
+          <View style={s.statsRow}>
+            {[
+              [stats.totalScans, "Total Scans"],
+              [`$${Math.round(stats.profitFound)}`, "Profit Found"],
+              [stats.buys, "BUY Finds"],
+            ].map(([val, label]) => (
+              <View key={label as string} style={s.statCard}>
+                <Text style={[s.statVal, {color:C.green}]}>{val}</Text>
+                <Text style={s.statLbl}>{label}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* FREE UPGRADE NUDGE */}
+        {isFree && (
+          <TouchableOpacity style={s.upgradeNudge} onPress={() => onNavigate("upgrade")} activeOpacity={0.88}>
+            <View style={{flex:1}}>
+              <Text style={s.nudgeEye}>FREE PLAN</Text>
+              <Text style={s.nudgeTitle}>You have {scansLeft ?? 10} scans left this month</Text>
+              <Text style={s.nudgeSub}>Seller is $14.99/month. One flip pays for 3 months.</Text>
+            </View>
+            <Text style={{color:C.green, fontSize:22}}>→</Text>
           </TouchableOpacity>
         )}
 
-        {/* ── SCANNER CTA — always at top ── */}
-        <TouchableOpacity style={s.scannerCard} onPress={()=>onNavigate("scanner")} activeOpacity={0.85}>
-          <View style={{flex:1}}>
-            <Text style={s.scannerTitle}>📷 Start Scanning</Text>
-            <Text style={s.scannerSub} numberOfLines={1}>
-              {!isPaid
-                ? `${scansLeft!==null?scansLeft:10} free scans remaining this month`
-                : "Unlimited scans · tap to start"}
-            </Text>
+        {/* SPECIALTY SCANNER HERO */}
+        <TouchableOpacity style={s.specialtyHero} onPress={() => onNavigate("specialty")} activeOpacity={0.88}>
+          <View style={s.specialtyLeft}>
+            <View style={s.specialtyBadge}><Text style={s.specialtyBadgeTxt}>🎯 SPECIALTY SCANNER</Text></View>
+            <Text style={s.specialtyTitle}>Expert AI for{"\n"}Rare & Luxury Items</Text>
+            <Text style={s.specialtySubtitle}>Sneakers · Watches · Cards · Wine · Designer & 20 categories</Text>
+            <View style={s.specialtyPill}><Text style={s.specialtyPillTxt}>10x deeper than standard scan →</Text></View>
           </View>
-          <View style={s.scannerBtn}><Text style={s.scannerBtnTxt}>Scan →</Text></View>
+          <View style={s.specialtyRight}>
+            {["👟","⌚","🃏","🍷","👜","🎸"].map((e,i) => (
+              <Text key={i} style={[s.specialtyEmoji, {opacity:1-i*0.12}]}>{e}</Text>
+            ))}
+          </View>
         </TouchableOpacity>
 
-        {/* ── SPECIALTY TEASER — visible to all, gated ── */}
-        <TouchableOpacity
-          style={[s.specialtyTeaser, isPro&&{borderColor:"#b066ff60"}]}
-          onPress={()=>isPro?onNavigate("specialty"):onNavigate("upgrade")}
-          activeOpacity={0.85}
-        >
-          <View style={{flex:1}}>
-            <View style={{flexDirection:"row",alignItems:"center",gap:8,marginBottom:4}}>
-              <Text style={{fontSize:20}}>🏺</Text>
-              <Text style={s.specialtyTeaserTitle}>Specialty Scanner</Text>
-              {!isPro&&<View style={s.proBadge}><Text style={s.proBadgeTxt}>PRO ONLY</Text></View>}
-            </View>
-            <Text style={s.specialtyTeaserDesc}>Expert AI for Wine, Coins, Cards, Jewelry, Antiques & more — categories that need deep knowledge</Text>
-          </View>
-          <Text style={{color:isPro?"#b066ff":C.text4,fontSize:20,paddingLeft:8}}>→</Text>
-        </TouchableOpacity>
-
-        {/* ── FREE TIER TOOLS ── */}
-        <SectionHeader
-          title="🆓 Free Tools"
-          subtitle="Available on all plans"
-          locked={false}
-        />
-        <View style={s.toolsGrid}>
-          {FREE_TOOLS.map(t=><ToolCard key={t.id} tool={t} locked={false}/>)}
-        </View>
-
-        {/* ── SELLER TOOLS ── */}
-        <SectionHeader
-          title="💪 Seller Tools"
-          subtitle={isSeller?"Your plan includes these":"Unlock with Seller plan — $19/mo"}
-          locked={!isSeller}
-          requiredPlan="Seller"
-        />
-        <View style={[s.toolsGrid,!isSeller&&s.lockedSection]}>
-          {SELLER_TOOLS.map(t=><ToolCard key={t.id} tool={t} locked={!isSeller}/>)}
-        </View>
-
-        {/* ── PRO TOOLS ── */}
-        <SectionHeader
-          title="⚡ Pro Power Tools"
-          subtitle={isPro?"Your plan includes these":"Unlock with Pro plan — $49/mo"}
-          locked={!isPro}
-          requiredPlan="Pro"
-        />
-        <View style={[s.toolsGrid,!isPro&&s.lockedSection]}>
-          {PRO_TOOLS.map(t=><ToolCard key={t.id} tool={t} locked={!isPro}/>)}
-        </View>
-
-        {/* ── BUSINESS TIER PROMO ── */}
-        <TouchableOpacity
-          style={s.businessBanner}
-          onPress={() => onNavigate("business")}
-          activeOpacity={0.85}
-        >
-          <View style={{flex:1}}>
-            <View style={{flexDirection:"row",alignItems:"center",gap:8,marginBottom:4}}>
-              <Text style={{fontSize:20}}>💼</Text>
-              <Text style={s.businessBannerTitle}>ValuIQ Business</Text>
-              <View style={s.businessBadge}><Text style={s.businessBadgeTxt}>$149/MO</Text></View>
-            </View>
-            <Text style={s.businessBannerDesc}>Bulk scan, team accounts, tax export, demand forecasting, competitor intel</Text>
-          </View>
-          <Text style={{color:C.orange,fontSize:20,paddingLeft:8}}>→</Text>
-        </TouchableOpacity>
-
-        {/* ── COMING SOON ── */}
-        <SectionHeader
-          title="🔮 Coming Soon"
-          subtitle="Next-level tools in development"
-          locked={false}
-        />
-        {COMING_SOON.map((item,i)=>(
-          <View key={i} style={s.comingSoonCard}>
-            <View style={s.csBadge}><Text style={s.csBadgeTxt}>{item.badge}</Text></View>
-            <View style={{flexDirection:"row",alignItems:"flex-start",gap:12}}>
-              <Text style={{fontSize:28}}>{item.icon}</Text>
-              <View style={{flex:1}}>
-                <Text style={s.csTitle}>{item.title}</Text>
-                <Text style={s.csDesc}>{item.desc}</Text>
-              </View>
-            </View>
-          </View>
-        ))}
-
-        {/* ── RECENT SCANS ── */}
-        <Text style={[s.sectionTitle,{marginTop:4,marginBottom:10}]}>Recent Scans</Text>
-        {loading
-          ? <View style={s.emptyCard}><ActivityIndicator color={C.green}/></View>
-          : scans.length===0
-            ? <View style={s.emptyCard}>
-                <Text style={{fontSize:32,marginBottom:10}}>📷</Text>
-                <Text style={s.emptyTitle}>No scans yet</Text>
-                <Text style={s.emptyBody}>Tap the Scan card above to find your first profitable item</Text>
-              </View>
-            : scans.slice(0,10).map((scan,i)=>(
-                <View key={scan.id||i} style={s.scanCard}>
-                  <View style={{flex:1,paddingRight:12}}>
-                    <Text style={s.scanName} numberOfLines={1}>{scan.item_name||"Unknown Item"}</Text>
-                    <Text style={s.scanPlat}>{scan.best_platform?.split("|||")[0]||"—"}</Text>
-                  </View>
-                  <View style={{alignItems:"flex-end",gap:4}}>
-                    <View style={[s.vBadge,{backgroundColor:vc(scan.verdict)+"15",borderColor:vc(scan.verdict)+"40"}]}>
-                      <Text style={[s.vBadgeTxt,{color:vc(scan.verdict)}]}>{scan.verdict}</Text>
-                    </View>
-                    <Text style={s.scanProfit}>${Math.round(scan.profit||0)}</Text>
-                  </View>
+        {/* YOUR TOOLS - collapsible */}
+        <SectionHeader title="YOUR TOOLS" expanded={showTools} onToggle={() => setShowTools(v => !v)}/>
+        {showTools && (
+          <View style={s.toolGrid}>
+            {myTools.map(tool => (
+              <TouchableOpacity
+                key={tool.id}
+                style={[s.toolCard, {borderColor:tool.accent+"30"}]}
+                onPress={() => onNavigate(tool.id)}
+                activeOpacity={0.82}
+              >
+                <View style={[s.toolIconBox, {backgroundColor:tool.accent+"15"}]}>
+                  <Text style={{fontSize:22}}>{tool.icon}</Text>
                 </View>
-              ))
-        }
+                <Text style={s.toolName}>{tool.name}</Text>
+                <Text style={s.toolDesc}>{tool.desc}</Text>
+              </TouchableOpacity>
+            ))}
+            {lockedTools.length > 0 && (
+              <TouchableOpacity style={[s.toolCard, s.lockedCard]} onPress={() => onNavigate("upgrade")} activeOpacity={0.82}>
+                <View style={[s.toolIconBox, {backgroundColor:C.border}]}>
+                  <Text style={{fontSize:22}}>🔒</Text>
+                </View>
+                <Text style={[s.toolName, {color:C.text4}]}>{lockedTools.length} More Tools</Text>
+                <Text style={[s.toolDesc, {color:C.text4}]}>Upgrade to unlock →</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* AI UNFAIR ADVANTAGE - collapsible, Pro+ only */}
+        {isPro ? (
+          <>
+            <SectionHeader title="⚡ AI UNFAIR ADVANTAGE" expanded={showAI} onToggle={() => setShowAI(v => !v)}/>
+            {showAI && (
+              <View style={[s.aiSection, {marginBottom:14}]}>
+                <View style={s.aiHeader}>
+                  <Text style={s.aiHeaderTxt}>12 AI tools in development — exclusive to Pro & Lifetime members. Every one included at no extra cost when they launch.</Text>
+                </View>
+                {[
+                  { icon:"⏱️", name:"True Hourly Rate", color:C.green, badge:"Q3 2026" },
+                  { icon:"📸", name:"Photo IQ", color:"#b066ff", badge:"Q3 2026" },
+                  { icon:"💨", name:"Cash Velocity Score", color:C.yellow, badge:"Q3 2026" },
+                  { icon:"🎯", name:"Condition Grader AI", color:C.orange, badge:"Q4 2026" },
+                  { icon:"🗓️", name:"Perfect Timing Engine", color:"#4db8ff", badge:"Q4 2026" },
+                  { icon:"🔮", name:"Return Rate Predictor", color:"#ff6b6b", badge:"2027" },
+                ].map((w,i) => (
+                  <View key={i} style={[s.aiItem, {borderColor:w.color+"20"}]}>
+                    <Text style={{fontSize:18}}>{w.icon}</Text>
+                    <Text style={[s.aiItemName, {color:w.color}]}>{w.name}</Text>
+                    <View style={[s.aiBadge, {backgroundColor:w.color+"20"}]}>
+                      <Text style={[s.aiBadgeTxt, {color:w.color}]}>{w.badge}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+          </>
+        ) : (
+          <TouchableOpacity style={s.aiTeaser} onPress={() => onNavigate("upgrade")} activeOpacity={0.88}>
+            <View style={{flex:1}}>
+              <Text style={s.aiTeaserEye}>PRO & LIFETIME EXCLUSIVE</Text>
+              <Text style={s.aiTeaserTitle}>⚡ The Unfair Advantage</Text>
+              <Text style={s.aiTeaserSub}>12 AI tools no other resale app has. Unlock at Pro.</Text>
+            </View>
+            <Text style={{color:"#b066ff", fontSize:18, marginLeft:12}}>→</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* COMING SOON - collapsible */}
+        <SectionHeader title="COMING SOON" expanded={showSoon} onToggle={() => setShowSoon(v => !v)}/>
+        {showSoon && (
+          <View style={{marginBottom:14}}>
+            {COMING_SOON.map((item, i) => (
+              <View key={i} style={[s.csCard, {borderColor:item.color+"25"}]}>
+                <Text style={{fontSize:22, marginRight:10}}>{item.icon}</Text>
+                <View style={{flex:1}}>
+                  <Text style={[s.csName, {color:item.color}]}>{item.name}</Text>
+                  <Text style={s.csDesc}>{item.desc}</Text>
+                </View>
+                <View style={[s.csBadge, {backgroundColor:item.color+"20", borderColor:item.color+"40"}]}>
+                  <Text style={[s.csBadgeTxt, {color:item.color}]}>{item.badge}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* RECENT SCANS - collapsible */}
+        <SectionHeader title="RECENT SCANS" expanded={showScans} onToggle={() => setShowScans(v => !v)}/>
+        {showScans && (
+          <>
+            {scans.length === 0 ? (
+              <TouchableOpacity style={s.emptyCard} onPress={() => onNavigate("scanner")} activeOpacity={0.88}>
+                <Text style={{fontSize:40, marginBottom:10}}>📷</Text>
+                <Text style={s.emptyTitle}>No scans yet — find your first flip</Text>
+                <Text style={s.emptyBtn}>Scan an Item →</Text>
+              </TouchableOpacity>
+            ) : (
+              <>
+                {scans.map((scan: any, i: number) => (
+                  <TouchableOpacity key={i} style={s.scanRow} onPress={() => onNavigate("history")} activeOpacity={0.8}>
+                    {scan.photo_url ? (
+                      <Image source={{uri: scan.photo_url}} style={s.scanThumb}/>
+                    ) : (
+                      <View style={[s.scanThumb, {backgroundColor:C.surface, alignItems:"center", justifyContent:"center"}]}>
+                        <Text style={{fontSize:20}}>📷</Text>
+                      </View>
+                    )}
+                    <View style={[s.verdict, {
+                      backgroundColor:scan.decision==="BUY"?C.green+"20":scan.decision==="WATCH"?C.yellow+"20":"#ff6b6b20"
+                    }]}>
+                      <Text style={[s.verdictTxt, {
+                        color:scan.decision==="BUY"?C.green:scan.decision==="WATCH"?C.yellow:C.red
+                      }]}>{scan.decision==="BUY"?"BUY":scan.decision==="WATCH"?"WATCH":"PASS"}</Text>
+                    </View>
+                    <View style={{flex:1}}>
+                      <Text style={s.scanName} numberOfLines={1}>{scan.item_name || "Item"}</Text>
+                      <Text style={s.scanMeta}>
+                        {scan.decision==="BUY"? "+$" + (Math.round(scan.net_profit||0)) + " · " :""}
+                        {(scan.best_platform||"").split("|||")[0]}
+                      </Text>
+                    </View>
+                    <Text style={{color:C.text4, fontSize:18}}>›</Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity style={s.viewAll} onPress={() => onNavigate("history")}>
+                  <Text style={s.viewAllTxt}>View full scan history →</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </>
+        )}
+
       </ScrollView>
-    </SafeAreaView>
+    </SAV>
   );
 }
 
 const s = StyleSheet.create({
-  safe:            {flex:1,backgroundColor:C.bg},
-  container:       {padding:20,paddingBottom:60},
-  nav:             {flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:16},
-  logoRow:         {flexDirection:"row",alignItems:"center",gap:8},
-  logoIcon:        {width:30,height:30,backgroundColor:C.green,borderRadius:8,alignItems:"center",justifyContent:"center"},
-  logoIconTxt:     {color:C.greenDark,fontSize:15,fontWeight:"900"},
-  logoTxt:         {color:C.text1,fontSize:17,fontWeight:"800",letterSpacing:-0.5},
-  planRow:         {flexDirection:"row",justifyContent:"space-between",alignItems:"center",borderWidth:1,borderRadius:12,paddingHorizontal:14,paddingVertical:10,marginBottom:16},
-  planDot:         {width:8,height:8,borderRadius:4},
-  statsRow:        {flexDirection:"row",gap:8,marginBottom:16},
-  statCard:        {flex:1,backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:14,padding:14,alignItems:"center"},
-  statVal:         {fontSize:20,fontWeight:"900",marginBottom:4},
-  statLabel:       {color:C.text4,fontSize:10,fontWeight:"700",textTransform:"uppercase" as any,textAlign:"center" as any},
-  upgBanner:       {backgroundColor:"#1e2a08",borderWidth:1,borderColor:"#3a5010",borderRadius:14,padding:16,marginBottom:14,flexDirection:"row",alignItems:"center"},
-  upgTitle:        {color:C.green,fontSize:14,fontWeight:"800",marginBottom:3},
-  upgSub:          {color:C.text3,fontSize:12},
-  // Scanner CTA
-  scannerCard:     {backgroundColor:C.greenBg,borderWidth:1.5,borderColor:C.greenBorder,borderRadius:14,padding:16,flexDirection:"row",alignItems:"center",marginBottom:12},
-  scannerTitle:    {color:C.green,fontSize:15,fontWeight:"800",marginBottom:3},
-  scannerSub:      {color:C.text3,fontSize:12},
-  scannerBtn:      {backgroundColor:C.green,borderRadius:10,paddingVertical:10,paddingHorizontal:14,marginLeft:10},
-  scannerBtnTxt:   {color:C.greenDark,fontSize:13,fontWeight:"900"},
-  // Specialty teaser
-  specialtyTeaser: {backgroundColor:"#0d0514",borderWidth:1.5,borderColor:"#b066ff30",borderRadius:14,padding:16,flexDirection:"row",alignItems:"center",marginBottom:20},
-  specialtyTeaserTitle:{color:C.text1,fontSize:15,fontWeight:"800"},
-  specialtyTeaserDesc: {color:C.text3,fontSize:12,lineHeight:17,marginTop:3},
-  proBadge:        {backgroundColor:"#b066ff20",borderRadius:100,paddingHorizontal:8,paddingVertical:3,borderWidth:1,borderColor:"#b066ff50"},
-  proBadgeTxt:     {color:"#b066ff",fontSize:9,fontWeight:"900"},
-  // Section headers
-  sectionHeader:   {flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,marginTop:4},
-  sectionTitle:    {color:C.text1,fontSize:13,fontWeight:"800",letterSpacing:0.2},
-  sectionSub:      {color:C.text4,fontSize:11,marginTop:2},
-  unlockBtn:       {borderWidth:1,borderColor:C.green+"50",borderRadius:8,paddingHorizontal:10,paddingVertical:4,marginLeft:8},
-  unlockBtnTxt:    {color:C.green,fontSize:11,fontWeight:"700"},
-  // Tool grid
-  toolsGrid:       {flexDirection:"row",flexWrap:"wrap" as any,gap:8,marginBottom:20},
-  lockedSection:   {opacity:0.6},
-  toolCard:        {width:"47.5%",backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:14,padding:14,minHeight:90,position:"relative" as any},
-  lockPip:         {position:"absolute" as any,top:8,right:8,backgroundColor:C.orange,borderRadius:100,paddingHorizontal:5,paddingVertical:2},
-  toolIcon:        {fontSize:22,marginBottom:7},
-  toolTitle:       {fontSize:13,fontWeight:"800",marginBottom:3},
-  toolDesc:        {color:C.text4,fontSize:11,lineHeight:15},
+  safe:          { flex:1, backgroundColor:C.bg },
+  nav:           { flexDirection:"row", justifyContent:"space-between", alignItems:"center", paddingHorizontal:20, paddingTop: 16, paddingBottom: 10, borderBottomWidth:1, borderBottomColor:C.border },
+  logoRow:       { flexDirection:"row", alignItems:"center", gap:8 },
+  logoBox:       { width:32, height:32, borderRadius:9, backgroundColor:C.green, alignItems:"center", justifyContent:"center" },
+  logoV:         { color:C.greenDark, fontSize:18, fontWeight:"900" },
+  logoTxt:       { color:C.text1, fontSize:19, fontWeight:"900", letterSpacing:-0.5 },
+  navRight:      { flexDirection:"row", alignItems:"center", gap:8 },
+  planBadge:     { borderRadius:100, borderWidth:1, paddingHorizontal:10, paddingVertical:4 },
+  planBadgeTxt:  { fontSize:10, fontWeight:"800" },
+  scansBadge:    { backgroundColor:C.greenBg, borderRadius:100, paddingHorizontal:8, paddingTop:16, paddingBottom:10, borderWidth:1, borderColor:C.greenBorder },
+  scansBadgeTxt: { color:C.green, fontSize:10, fontWeight:"700" },
+  scroll:        { padding:16, paddingBottom:100 },
+  // Hero
+  hero:          { backgroundColor:C.greenBg, borderWidth:2, borderColor:C.green+"60", borderRadius:22, padding:22, flexDirection:"row", alignItems:"center", justifyContent:"space-between", marginBottom:12 },
+  heroEye:       { color:C.green, fontSize:8, fontWeight:"900", letterSpacing:2, marginBottom:6 },
+  heroTitle:     { color:C.text1, fontSize:26, fontWeight:"900", letterSpacing:-0.8, marginBottom:4 },
+  heroSub:       { color:C.text3, fontSize:13 },
+  // Live
+  liveBar:       { backgroundColor:"#130a00", borderWidth:1.5, borderColor:"#ff6b6b50", borderRadius:16, padding:16, marginBottom:16 },
+  liveTopRow:    { flexDirection:"row", alignItems:"center", gap:8, marginBottom:10 },
+  livePulse:     { flexDirection:"row", alignItems:"center", gap:6 },
+  liveDot:       { width:9, height:9, borderRadius:5, backgroundColor:C.red },
+  liveLbl:       { color:C.red, fontSize:11, fontWeight:"900", letterSpacing:1 },
+  liveTime:      { color:C.text4, fontSize:10, marginLeft:"auto" as any },
+  liveSeeAll:    { color:C.orange, fontSize:11, fontWeight:"700", marginLeft:8 },
+  liveTxt:       { color:C.text1, fontSize:14, fontWeight:"700", lineHeight:20, marginBottom:2 },
+  liveSubtxt:    { color:C.text4, fontSize:11 },
+  // Specialty Hero
+  specialtyHero:      { backgroundColor:"#0a0d08", borderWidth:1.5, borderColor:C.green+"40", borderRadius:18, padding:18, marginBottom:16, flexDirection:"row", alignItems:"center", overflow:"hidden" },
+  specialtyLeft:      { flex:1, gap:6 },
+  specialtyBadge:     { backgroundColor:C.green+"15", borderRadius:100, paddingHorizontal:10, paddingVertical:4, alignSelf:"flex-start" as any },
+  specialtyBadgeTxt:  { color:C.green, fontSize:9, fontWeight:"900", letterSpacing:1 },
+  specialtyTitle:     { color:C.text1, fontSize:18, fontWeight:"900", letterSpacing:-0.5, lineHeight:24 },
+  specialtySubtitle:  { color:C.text3, fontSize:11, lineHeight:16 },
+  specialtyPill:      { backgroundColor:C.green+"20", borderRadius:8, paddingHorizontal:10, paddingVertical:6, alignSelf:"flex-start" as any, marginTop:4 },
+  specialtyPillTxt:   { color:C.green, fontSize:11, fontWeight:"800" },
+  specialtyRight:     { flexDirection:"column", gap:2, paddingLeft:10, alignItems:"center" },
+  specialtyEmoji:     { fontSize:20 },
+  // Stats
+  statsRow:      { flexDirection:"row", gap:8, marginBottom:14 },
+  statCard:      { flex:1, backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:12, padding:12, alignItems:"center" },
+  statVal:       { fontSize:20, fontWeight:"900", letterSpacing:-0.5 },
+  statLbl:       { color:C.text4, fontSize:9, fontWeight:"700", textTransform:"uppercase", marginTop:3, letterSpacing:0.5 },
+  // Upgrade nudge
+  upgradeNudge:  { backgroundColor:"#0a1500", borderWidth:1.5, borderColor:C.greenBorder, borderRadius:14, padding:16, flexDirection:"row", alignItems:"center", marginBottom:14 },
+  nudgeEye:      { color:C.green, fontSize:8, fontWeight:"900", letterSpacing:2, marginBottom:4 },
+  nudgeTitle:    { color:C.text1, fontSize:14, fontWeight:"800", marginBottom:4 },
+  nudgeSub:      { color:C.text3, fontSize:12, lineHeight:17 },
+  // Tools
+  toolGrid:      { flexDirection:"row", flexWrap:"wrap", gap:8, marginBottom:6 },
+  toolCard:      { width:"47.5%", backgroundColor:C.surface, borderWidth:1, borderRadius:14, padding:13 },
+  lockedCard:    { opacity:0.5, borderColor:C.border },
+  toolIconBox:   { width:40, height:40, borderRadius:11, alignItems:"center", justifyContent:"center", marginBottom:8 },
+  toolName:      { color:C.text1, fontSize:12, fontWeight:"800", marginBottom:3 },
+  toolDesc:      { color:C.text3, fontSize:10, lineHeight:14 },
+  // AI section
+  aiSection:     { backgroundColor:C.surface, borderWidth:1, borderColor:"#b066ff30", borderRadius:14 },
+  aiHeader:      { padding:14, borderBottomWidth:1, borderBottomColor:C.border },
+  aiHeaderTxt:   { color:C.text3, fontSize:12, lineHeight:17 },
+  aiItem:        { flexDirection:"row", alignItems:"center", padding:12, borderBottomWidth:1, borderBottomColor:C.border, gap:10 },
+  aiItemName:    { flex:1, fontSize:13, fontWeight:"700" },
+  aiBadge:       { borderRadius:100, paddingHorizontal:8, paddingVertical:2 },
+  aiBadgeTxt:    { fontSize:9, fontWeight:"700" },
+  aiTeaser:      { backgroundColor:C.surface, borderWidth:1, borderColor:"#b066ff30", borderRadius:14, padding:14, flexDirection:"row", alignItems:"center", marginBottom:14 },
+  aiTeaserEye:   { color:"#b066ff", fontSize:8, fontWeight:"900", letterSpacing:1.5, marginBottom:4 },
+  aiTeaserTitle: { color:C.text1, fontSize:15, fontWeight:"900", marginBottom:4 },
+  aiTeaserSub:   { color:C.text3, fontSize:12, lineHeight:17 },
   // Coming soon
-  businessBanner:      { backgroundColor:"#0d0800", borderWidth:1.5, borderColor:C.orange+"40", borderRadius:14, padding:16, flexDirection:"row", alignItems:"center", marginBottom:8 },
-  businessBannerTitle: { color:C.orange, fontSize:15, fontWeight:"800" as any },
-  businessBannerDesc:  { color:C.text3, fontSize:12, lineHeight:17, marginTop:2 },
-  businessBadge:       { backgroundColor:C.orange+"20", borderRadius:100, paddingHorizontal:8, paddingVertical:3, borderWidth:1, borderColor:C.orange+"50" },
-  businessBadgeTxt:    { color:C.orange, fontSize:9, fontWeight:"900" as any },
-  comingSoonCard:  {backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:14,padding:16,marginBottom:10,position:"relative" as any},
-  csBadge:         {position:"absolute" as any,top:12,right:12,backgroundColor:"#1a1a2e",borderRadius:100,paddingHorizontal:10,paddingVertical:4,borderWidth:1,borderColor:"#4040a0"},
-  csBadgeTxt:      {color:"#ffffff",fontSize:9,fontWeight:"900"},
-  csTitle:         {color:C.text1,fontSize:16,fontWeight:"900",marginBottom:5},
-  csDesc:          {color:C.text2,fontSize:14,lineHeight:20},
-  // Recent scans
-  emptyCard:       {backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:16,padding:36,alignItems:"center"},
-  emptyTitle:      {color:C.text1,fontSize:16,fontWeight:"700",marginBottom:6},
-  emptyBody:       {color:C.text3,fontSize:13,textAlign:"center" as any,lineHeight:20},
-  scanCard:        {backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:13,padding:14,marginBottom:8,flexDirection:"row",alignItems:"center"},
-  scanName:        {color:C.text1,fontSize:14,fontWeight:"700",marginBottom:4},
-  scanPlat:        {color:C.text4,fontSize:12},
-  vBadge:          {borderWidth:1,borderRadius:100,paddingHorizontal:10,paddingVertical:3},
-  vBadgeTxt:       {fontSize:11,fontWeight:"800"},
-  scanProfit:      {color:C.text1,fontSize:14,fontWeight:"800"},
+  csCard:        { backgroundColor:C.surface, borderWidth:1, borderRadius:14, padding:14, flexDirection:"row", alignItems:"flex-start", marginBottom:8 },
+  csName:        { fontSize:13, fontWeight:"800", marginBottom:3 },
+  csDesc:        { color:C.text3, fontSize:11, lineHeight:15 },
+  csBadge:       { borderWidth:1, borderRadius:100, paddingHorizontal:8, paddingTop:16, paddingBottom:10, marginLeft:8, flexShrink:0 },
+  csBadgeTxt:    { fontSize:8, fontWeight:"900" },
+  // Scans
+  emptyCard:     { backgroundColor:C.surface, borderRadius:14, padding:28, alignItems:"center", marginBottom:8 },
+  emptyTitle:    { color:C.text2, fontSize:14, fontWeight:"600", textAlign:"center", marginBottom:12 },
+  emptyBtn:      { color:C.green, fontSize:14, fontWeight:"800" },
+  scanRow:       { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:12, padding:10, flexDirection:"row", alignItems:"center", gap:10, marginBottom:6 },
+  scanThumb:     { width:48, height:48, borderRadius:8, flexShrink:0 },
+  verdict:       { borderRadius:8, paddingHorizontal:8, paddingTop:16, paddingBottom:10, minWidth:48, alignItems:"center", flexShrink:0 },
+  verdictTxt:    { fontSize:9, fontWeight:"900", letterSpacing:0.5 },
+  scanName:      { color:C.text1, fontSize:13, fontWeight:"600", marginBottom:2 },
+  scanMeta:      { color:C.text3, fontSize:11 },
+  viewAll:       { alignItems:"center", paddingTop: 16, paddingBottom: 10 },
+  viewAllTxt:    { color:C.green, fontSize:13, fontWeight:"600" },
 });

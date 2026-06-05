@@ -18,7 +18,7 @@ const SOCIALS = [
   { id:"sms",       label:"Text",       emoji:"💬", color:C.green  },
 ];
 
-export default function ShareButton({ message, title = "ValuIQ Find", compact = false }: Props) {
+export default function ShareButton({ message, title = "ValuIQ, Find", compact = false }: Props) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -31,7 +31,7 @@ export default function ShareButton({ message, title = "ValuIQ Find", compact = 
         await Share.share({ message, title });
         break;
       case "copy":
-        // Use Share as clipboard fallback (Clipboard deprecated in newer RN)
+        // Use, Share as clipboard fallback (Clipboard deprecated in newer RN)
         await Share.share({ message });
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -43,8 +43,7 @@ export default function ShareButton({ message, title = "ValuIQ Find", compact = 
         Linking.openURL(`https://www.facebook.com/sharer/sharer.php?quote=${encoded}`);
         break;
       case "instagram":
-        // Instagram doesn't support direct text sharing — open app
-        Share.share({ message, title });
+        // Instagram doesn't support direct text sharing — open app,Share.share({ message, title });
         break;
       case "tiktok":
         Share.share({ message, title });

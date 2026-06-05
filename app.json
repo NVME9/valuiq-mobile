@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "ValuIQ",
-    "slug": "valuiq",
+    "slug": "valuiq-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -32,7 +32,8 @@
         "com.apple.developer.applesignin": [
           "Default"
         ]
-      }
+      },
+      "jsEngine": "jsc"
     },
     "android": {
       "adaptiveIcon": {
@@ -43,18 +44,33 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ]
     },
     "plugins": [
       "expo-camera",
-      "expo-image-picker"
+      "expo-image-picker",
+      "expo-local-authentication"
     ],
     "scheme": "valuiq",
     "extra": {
       "eas": {
-        "projectId": "bb177200-53bd-42d9-878d-91795b0af17a"
+        "projectId": "8f5ddfbb-4b97-497e-8249-71cdf1b6811c"
       }
-    }
+    },
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "newArchEnabled": false,
+    "owner": "valuiq2"
   }
 }
