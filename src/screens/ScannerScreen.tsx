@@ -697,20 +697,15 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           {/* Controls */}
           <View style={s.camControls}>
             <TouchableOpacity style={s.camSecondBtn} onPress={pickLibrary}>
-              <View style={s.libIcon}><Text style={s.libIconTxt}>+</Text></View>
-              <Text style={s.camSecondLabel}>Library</Text>
+              <Text numberOfLines={1} style={s.camSecondLabel}>Library</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.shutter} onPress={takePhoto}>
               <View style={s.shutterInner} />
               {photos.length > 0 && <View style={s.shutterBadge}><Text style={s.shutterBadgeTxt}>{photos.length}</Text></View>}
             </TouchableOpacity>
-            {photos.length > 0 ? (
-              <TouchableOpacity style={s.doneBtn} onPress={() => setStep("review")}>
-                <Text style={s.doneBtnTxt}>Done</Text>
-              </TouchableOpacity>
-            ) : (
-              <View style={{ width: 64 }} />
-            )}
+            <TouchableOpacity style={s.camSecondBtn} onPress={() => photos.length > 0 && setStep("review")} disabled={photos.length === 0}>
+              <Text style={[s.camSecondLabel, { color: photos.length > 0 ? C.green : "rgba(255,255,255,0.3)" }]} numberOfLines={1}>Done</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -746,17 +741,17 @@ const s = StyleSheet.create({
   camModeBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   corner:         { position: "absolute", width: 28, height: 28, borderColor: C.green, borderWidth: 3 },
   camHint:        { color: "rgba(255,255,255,0.6)", fontSize: 13, marginTop: 14, fontWeight: "600" },
-  camSecondBtn: { width: 56, alignItems: "center", justifyContent: "center" },
-  camSecondLabel: { color: "rgba(255,255,255,0.85)", fontSize: 11, marginTop: 5, fontWeight: "600" },
-  libIcon: { width: 52, height: 52, borderRadius: 26, borderWidth: 2, borderColor: "rgba(255,255,255,0.6)", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)" },
-  libIconTxt: { color: "#fff", fontSize: 26, fontWeight: "300", lineHeight: 30, marginTop: -2 },
+  camSecondBtn: { width: 96, alignItems: "center", justifyContent: "center" },
+  camSecondLabel: { color: "rgba(255,255,255,0.9)", fontSize: 14, fontWeight: "600" },
+  libIcon: { width: 50, height: 50, borderRadius: 25, borderWidth: 2, borderColor: "rgba(255,255,255,0.6)", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)" },
+  libIconTxt: { color: "#fff", fontSize: 24, fontWeight: "400", lineHeight: 28 },
   shutter:        { width: 74, height: 74, borderRadius: 37, borderWidth: 4, borderColor: "#fff", alignItems: "center", justifyContent: "center" },
   shutterInner:   { width: 60, height: 60, borderRadius: 30, backgroundColor: "#fff" },
   shutterBadge:   { position: "absolute", top: -4, right: -4, backgroundColor: C.green, borderRadius: 12, minWidth: 24, height: 24, alignItems: "center", justifyContent: "center", paddingHorizontal: 6 },
   shutterBadgeTxt:{ color: "#000", fontSize: 13, fontWeight: "900" },
-  doneBtn: { width: 52, height: 52, borderRadius: 26, backgroundColor: C.green, alignItems: "center", justifyContent: "center" },
-  doneBtnTxt: { color: "#000", fontSize: 13, fontWeight: "900" },
-  camControls:    { paddingBottom: 44, paddingTop: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingHorizontal: 32 },
+  doneBtn: { width: 72, height: 50, borderRadius: 25, backgroundColor: C.green, alignItems: "center", justifyContent: "center" },
+  doneBtnTxt: { color: "#000", fontSize: 14, fontWeight: "900" },
+  camControls: { paddingBottom: 48, paddingTop: 20, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 40 },
   camBottomBar:   { paddingBottom: 40, paddingHorizontal: 24 },
 
   // Barcode,
