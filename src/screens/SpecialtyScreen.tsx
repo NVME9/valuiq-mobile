@@ -54,34 +54,40 @@ interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft
 export default function SpecialtyScreen({ token, onNavigate, onBack }: Props) {
   const [selectedCat, setSelectedCat] = useState<typeof CATS[0]|null>(null);
   const [fields, setFields] = useState<Record<string,string>>({});
-  const [photo, setPhoto] = useState<string|null>(null);
+  const [photos, setPhotos] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState("");
 
   async function pickPhoto() {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaType.Images, base64: true, quality: 0.7 });
-    if (!res.canceled && res.assets[0]?.base64) setPhoto(res.assets[0].base64);
+    if (photos.length >= 5) { setError("Up to 5 photos."); return; }
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], base64: true, quality: 0.7 });
+    if (!res.canceled && res.assets[0]?.base64) setPhotos(prev => [...prev, res.assets[0].base64 as string]);
   }
 
   async function takePhoto() {
-    const res = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 });
-    if (!res.canceled && res.assets[0]?.base64) setPhoto(res.assets[0].base64);
+    if (photos.length >= 5) { setError("Up to 5 photos."); return; }
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) { setError("Enable camera access in Settings."); return; }
+    const res = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], base64: true, quality: 0.7 });
+    if (!res.canceled && res.assets[0]?.base64) setPhotos(prev => [...prev, res.assets[0].base64 as string]);
   }
+
+  function removePhoto(i: number) { setPhotos(prev => prev.filter((_, idx) => idx !== i)); }
 
   async function analyze() {
     if (!selectedCat) return;
-    if (!Object.values(fields).some(v => v.trim()) && !photo) { setError("Fill in at least one field or add a photo."); return; }
+    if (!Object.values(fields).some(v => v.trim()) && photos.length === 0) { setError("Fill in at least one field or add a photo."); return; }
     setLoading(true); setError("");
     try {
-      const d = await analyzeSpecialty(token, selectedCat.id, fields, photo || undefined);
+      const d = await analyzeSpecialty(token, selectedCat.id, fields, photos);
       if (!d.success) throw new Error(d.error || "Analysis failed");
       setResult(d);
     } catch (e: any) { setError(e.message || "Analysis failed. Try again."); }
     setLoading(false);
   }
 
-  function reset() { setSelectedCat(null); setFields({}); setPhoto(null); setResult(null); setError(""); }
+  function reset() { setSelectedCat(null); setFields({}); setPhotos([]); setResult(null); setError(""); }
 
   // ── CATEGORY GRID ──────────────────────────────────────
   if (!selectedCat) return (
@@ -236,21 +242,27 @@ export default function SpecialtyScreen({ token, onNavigate, onBack }: Props) {
 
         {error ? <View style={s.errBox}><Text style={s.errText}>{error}</Text></View> : null}
 
-        {/* Photo */}
-        {photo ? (
-          <TouchableOpacity onPress={pickPhoto} style={s.photoBtn}>
-            <Image source={{ uri: "data:image/jpeg;base64," + photo }} style={{ width: "100%", height: 150, borderRadius: 10 }} resizeMode="cover" />
-            <Text style={{color:C.text4, fontSize:11, marginTop:6}}>Tap to change photo</Text>
-          </TouchableOpacity>
-        ) : (
+        {/* Photos (up to 5) */}
+        <Text style={s.label}>Photos {photos.length > 0 ? "(" + photos.length + "/5)" : "(more angles = better appraisal)"}</Text>
+        {photos.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:10}}>
+            {photos.map((ph, i) => (
+              <View key={i} style={{marginRight:8, position:"relative"}}>
+                <Image source={{ uri: "data:image/jpeg;base64," + ph }} style={{ width: 84, height: 84, borderRadius: 10 }} resizeMode="cover" />
+                <TouchableOpacity onPress={() => removePhoto(i)} style={{position:"absolute", top:-6, right:-6, backgroundColor:"#000", borderRadius:12, width:24, height:24, alignItems:"center", justifyContent:"center", borderWidth:1, borderColor:C.border}}>
+                  <Text style={{color:"#fff", fontSize:14, fontWeight:"900"}}>{"\u00D7"}</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+        )}
+        {photos.length < 5 && (
           <View style={{flexDirection:"row", gap:10, marginBottom:18}}>
             <TouchableOpacity onPress={takePhoto} style={[s.photoHalf, {borderColor:C.green+"40"}]} activeOpacity={0.8}>
-              <Text style={{fontSize:28, marginBottom:4}}>📷</Text>
               <Text style={{color:C.green, fontSize:13, fontWeight:"800"}}>Camera</Text>
-              <Text style={{color:C.text4, fontSize:11}}>Take photo now</Text>
+              <Text style={{color:C.text4, fontSize:11}}>Take a photo</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={pickPhoto} style={s.photoHalf} activeOpacity={0.8}>
-              <Text style={{fontSize:28, marginBottom:4}}>🖼️</Text>
               <Text style={{color:C.text2, fontSize:13, fontWeight:"800"}}>Gallery</Text>
               <Text style={{color:C.text4, fontSize:11}}>Choose from library</Text>
             </TouchableOpacity>
