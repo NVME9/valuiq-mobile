@@ -186,21 +186,7 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
           <Text style={s.liveTime}>{activity.time}</Text>
         </TouchableOpacity>
 
-        {/* STATS */}
-        {stats && stats.totalScans > 0 && (
-          <View style={s.statsRow}>
-            {[
-              [stats.totalScans, "Total Scans"],
-              [`$${Math.round(stats.profitFound)}`, "Profit Found"],
-              [stats.buys, "BUY Finds"],
-            ].map(([val, label]) => (
-              <View key={label as string} style={s.statCard}>
-                <Text style={[s.statVal, {color:C.green}]}>{val}</Text>
-                <Text style={s.statLbl}>{label}</Text>
-              </View>
-            ))}
-          </View>
-        )}
+
 
         {/* FREE UPGRADE NUDGE */}
         {isFree && (

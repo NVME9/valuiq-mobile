@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Image } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Image, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { C } from "../lib/theme";
@@ -82,7 +82,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack }: Props) {
     try {
       const d = await analyzeSpecialty(token, selectedCat.id, fields, photos);
       if (!d.success) throw new Error(d.error || "Analysis failed");
-      setResult(d);
+      setResult(d.result || d);
     } catch (e: any) { setError(e.message || "Analysis failed. Try again."); }
     setLoading(false);
   }
@@ -127,85 +127,99 @@ export default function SpecialtyScreen({ token, onNavigate, onBack }: Props) {
           <Text style={s.catBadgeText}>{selectedCat.label}</Text>
         </View>
 
-        {/* Value Card */}
+        {/* Value + real comps */}
         <View style={s.valCard}>
-          <Text style={s.valLabel}>ESTIMATED VALUE</Text>
-          <Text style={s.valAmount}>{result.valueRange || result.estimatedValue || "See analysis"}</Text>
-          {result.confidence && <Text style={s.valSub}>Confidence: {result.confidence}</Text>}
-          {result.trend && <Text style={[s.valSub, { color: result.trend === "rising" ? C.green : result.trend === "falling" ? C.red : C.yellow, marginTop: 4 }]}>
-            {result.trend === "rising" ? "📈 Market trending up" : result.trend === "falling" ? "📉 Market trending down" : "→ Market stable"}
-          </Text>}
+          <Text style={s.valLabel}>{result.identification || selectedCat.label}</Text>
+          <Text style={s.valAmount}>{result.value || "See analysis"}</Text>
+          <View style={{flexDirection:"row", gap:14, marginTop:6, flexWrap:"wrap"}}>
+            {result.payUpTo ? <Text style={s.valSub}>Pay up to <Text style={{color:C.green, fontWeight:"800"}}>{result.payUpTo}</Text></Text> : null}
+            {result.confidence ? <Text style={s.valSub}>Confidence: {result.confidence}</Text> : null}
+          </View>
+          {result._ebay && result._ebay.count > 0 ? (
+            <Text style={[s.valSub, {marginTop:6, color:C.green}]}>{result._ebay.count} real eBay sold comps {"\u00B7"} ${result._ebay.min}-${result._ebay.max} (median ${result._ebay.median})</Text>
+          ) : (
+            <Text style={[s.valSub, {marginTop:6, color:C.text4}]}>Estimate {"\u2014"} no live eBay comps found, verify below</Text>
+          )}
         </View>
 
         {/* Decision */}
-        {result.decision && (
+        {result.decision ? (
           <View style={[s.decCard, { borderColor: (result.decision === "BUY" ? C.green : result.decision === "WATCH" ? C.yellow : C.red) + "40" }]}>
             <Text style={[s.decText, { color: result.decision === "BUY" ? C.green : result.decision === "WATCH" ? C.yellow : C.red }]}>
-              {result.decision === "BUY" ? "💰 BUY IT" : result.decision === "WATCH" ? "👀 WATCH IT" : "🚫 PASS"}
+              {result.decision === "BUY" ? "BUY IT" : result.decision === "WATCH" ? "WATCH IT" : "PASS"}
             </Text>
-            {result.maxPayPrice && <Text style={{ color: C.text2, fontSize: 13, marginTop: 6 }}>Max pay: <Text style={{ color: C.green, fontWeight: "800" }}>{result.maxPayPrice}</Text></Text>}
           </View>
-        )}
+        ) : null}
 
-        {/* Platform Prices */}
-        {result.platformPrices && result.platformPrices.length > 0 && (
-          <View style={s.infoCard}>
-            <Text style={s.infoLabel}>💰 Platform Prices</Text>
-            {result.platformPrices.map((p: any, i: number) => (
-              <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6, borderBottomWidth: i < result.platformPrices.length - 1 ? 1 : 0, borderBottomColor: C.border }}>
-                <Text style={{ color: C.text2, fontSize: 13 }}>{p.platform}</Text>
-                <Text style={{ color: C.green, fontSize: 13, fontWeight: "800" }}>{p.price}</Text>
-              </View>
-            ))}
+        {/* Variant check */}
+        {result.variantCheck ? (
+          <View style={[s.infoCard, {borderColor:C.green+"30"}]}>
+            <Text style={[s.infoLabel,{color:C.green}]}>Variant check {"\u2014"} this matters</Text>
+            <Text style={s.infoText}>{result.variantCheck}</Text>
           </View>
-        )}
+        ) : null}
 
-        {/* Analysis */}
-        {result.analysis && (
-          <View style={s.infoCard}><Text style={s.infoLabel}>🧠 Expert Analysis</Text><Text style={s.infoText}>{result.analysis}</Text></View>
-        )}
+        {/* Condition / grade curve */}
+        {result.conditionCurve ? (
+          <View style={s.infoCard}><Text style={s.infoLabel}>Condition &amp; grade value</Text><Text style={s.infoText}>{result.conditionCurve}</Text></View>
+        ) : null}
 
-        {/* Sell Strategy */}
-        {result.sellStrategy && (
-          <View style={s.infoCard}><Text style={s.infoLabel}>🎯 How To Sell It</Text><Text style={s.infoText}>{result.sellStrategy}</Text></View>
-        )}
-
-        {/* Authenticity Check */}
-        {result.authenticityFlags && (
+        {/* Authenticity flags */}
+        {result.authFlags && result.authFlags.length > 0 ? (
           <View style={[s.infoCard, { borderColor: C.red + "30", backgroundColor: "#1a0505" }]}>
-            <Text style={[s.infoLabel, { color: C.red }]}>🔍 Authenticity Check</Text>
-            <Text style={s.infoText}>{result.authenticityFlags}</Text>
-          </View>
-        )}
-
-        {/* Watch Out */}
-        {result.watchOut && (
-          <View style={[s.infoCard, { borderColor: C.yellow + "30", backgroundColor: "#1a1508" }]}>
-            <Text style={[s.infoLabel, { color: C.yellow }]}>⚠️ Watch Out For</Text>
-            <Text style={s.infoText}>{result.watchOut}</Text>
-          </View>
-        )}
-
-        {/* Timing */}
-        {result.bestTimeToSell && (
-          <View style={s.infoCard}><Text style={s.infoLabel}>📅 Best Time To Sell</Text><Text style={s.infoText}>{result.bestTimeToSell}</Text></View>
-        )}
-
-        {/* Pro Tips */}
-        {result.proTips && result.proTips.length > 0 && (
-          <View style={s.infoCard}>
-            <Text style={s.infoLabel}>⚡ Pro Tips</Text>
-            {result.proTips.map((tip: string, i: number) => (
+            <Text style={[s.infoLabel, { color: C.red }]}>Authenticity / provenance flags</Text>
+            {result.authFlags.map((flag: string, i: number) => (
               <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
-                <Text style={{ color: C.green, fontSize: 13 }}>→</Text>
-                <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, flex: 1 }}>{tip}</Text>
+                <Text style={{ color: C.red, fontSize: 13 }}>{"\u2022"}</Text>
+                <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, flex: 1 }}>{flag}</Text>
               </View>
             ))}
           </View>
-        )}
+        ) : null}
+
+        {/* Value-add moves */}
+        {result.valueAddMoves ? (
+          <View style={[s.infoCard, {borderColor:C.green+"30"}]}><Text style={[s.infoLabel,{color:C.green}]}>Value-add moves</Text><Text style={s.infoText}>{result.valueAddMoves}</Text></View>
+        ) : null}
+
+        {/* Timing / where to sell */}
+        {result.timing ? (
+          <View style={s.infoCard}><Text style={s.infoLabel}>Where &amp; when to sell</Text><Text style={s.infoText}>{result.timing}</Text></View>
+        ) : null}
+
+        {/* Red flags */}
+        {result.redFlags && result.redFlags.length > 0 ? (
+          <View style={[s.infoCard, { borderColor: C.yellow + "30", backgroundColor: "#1a1508" }]}>
+            <Text style={[s.infoLabel, { color: C.yellow }]}>Watch out for</Text>
+            {result.redFlags.map((flag: string, i: number) => (
+              <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
+                <Text style={{ color: C.yellow, fontSize: 13 }}>{"\u2022"}</Text>
+                <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, flex: 1 }}>{flag}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {/* Verify links */}
+        {result.verifyLinks && Object.keys(result.verifyLinks).length > 0 ? (
+          <View style={s.infoCard}>
+            <Text style={s.infoLabel}>Verify on the real market</Text>
+            <View style={{flexDirection:"row", flexWrap:"wrap", gap:8, marginTop:4}}>
+              {Object.entries(result.verifyLinks).map(([name, url]: any, i: number) => (
+                <TouchableOpacity key={i} style={{backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:8, paddingHorizontal:12, paddingVertical:8}} onPress={() => Linking.openURL(url as string)}>
+                  <Text style={{color:C.text1, fontSize:12, fontWeight:"700"}}>{name} {"\u2197"}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {result.listingTitle ? (
+          <View style={s.infoCard}><Text style={s.infoLabel}>Suggested listing title</Text><Text style={s.infoText}>{result.listingTitle}</Text></View>
+        ) : null}
 
         <ShareButton compact
-          message={"🏺 " + selectedCat.label + " scan via ValuIQ\n\n" + (result.itemName || selectedCat.label) + "\nValue: " + (result.valueRange || result.estimatedValue || "See app") + "\n\ngetvaluiq.com"}
+          message={selectedCat.label + " appraisal via ValuIQ\n\n" + (result.identification || selectedCat.label) + "\nValue: " + (result.value || "See app") + "\n\ngetvaluiq.com"}
         />
 
         <TouchableOpacity style={[s.greenBtn, { marginTop: 10 }]} onPress={() => { setResult(null); }}>

@@ -180,9 +180,28 @@ export async function priceBattle(token: string, itemName: string, brand: string
   const r = await fetch(`${API_BASE}/api/price-battle`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, itemName, brand, category, condition, buyPrice}) });
   return r.json();
 }
-export async function analyzeSpecialty(token: string, category: string, fields: Record<string,string>, photoBase64?: string): Promise<any> {
-  const r = await fetch(`${API_BASE}/api/specialty`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, category, fields, photo:photoBase64 ? `data:image/jpeg;base64,${photoBase64}` : undefined}) });
-  return r.json();
+export async function analyzeSpecialty(token: string, category: string, fields: Record<string,string>, photos?: string[]): Promise<any> {
+  // Resize each photo to keep the request small + fast (avoids vision timeout)
+  const images: string[] = [];
+  for (const p of (photos || [])) {
+    const raw = p.startsWith("data:") ? p : `data:image/jpeg;base64,${p}`;
+    try {
+      const t = await ImageManipulator.manipulateAsync(raw, [{ resize: { width: 1024 } }], { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG, base64: true });
+      images.push(`data:image/jpeg;base64,${t.base64}`);
+    } catch { images.push(raw); }
+  }
+  let r: Response;
+  try {
+    r = await fetch(`${API_BASE}/api/specialty`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, category, fields, photos: images}) });
+  } catch {
+    return { success: false, error: "Network error. Check your connection and try again." };
+  }
+  const text = await r.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { success: false, error: r.status === 504 || r.status === 502 ? "Analysis timed out. Try fewer photos or add details by text." : "Analysis failed. Try again." };
+  }
 }
 export async function analyzeManifest(token: string, text: string, imageBase64?: string): Promise<any> {
   const r = await fetch(`${API_BASE}/api/manifest`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, manifest:text, imageData:imageBase64 ? `data:image/jpeg;base64,${imageBase64}` : undefined}) });

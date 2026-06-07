@@ -13,7 +13,7 @@ interface Props {
   onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void;
 }
 
-type HistoryTab = "scans" | "thrift";
+type HistoryTab = "scans" | "thrift" | "specialty";
 
 function verdictColor(v: string) {
   if (v === "BUY") return C.green;
@@ -25,6 +25,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack }: Props
   const [tab, setTab]               = useState<HistoryTab>("scans");
   const [scans, setScans]           = useState<any[]>([]);
   const [thriftRuns, setThriftRuns] = useState<any[]>([]);
+  const [specialtyScans, setSpecialtyScans] = useState<any[]>([]);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showAll, setShowAll]       = useState(false);
@@ -126,14 +127,17 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack }: Props
   }
   const loadData = useCallback(async () => {
     try {
-      const [scanRes, thriftRes] = await Promise.all([
+      const [scanRes, thriftRes, specRes] = await Promise.all([
         fetch(`${API_BASE}/api/scan-history?token=${token}&type=scan&limit=50`),
         fetch(`${API_BASE}/api/thrift-run?token=${token}`),
+        fetch(`${API_BASE}/api/scan-history?token=${token}&type=specialty&limit=50`),
       ]);
       const scanData = await scanRes.json();
       const thriftJson = await thriftRes.json();
+      const specData = await specRes.json();
       setScans(Array.isArray(scanData) ? scanData : []);
       setThriftRuns(thriftJson && thriftJson.success && Array.isArray(thriftJson.runs) ? thriftJson.runs : []);
+      setSpecialtyScans(Array.isArray(specData) ? specData : []);
     } catch {}
     setLoading(false);
     setRefreshing(false);
@@ -299,10 +303,10 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack }: Props
 
       {/* Tabs */}
       <View style={s.tabs}>
-        {(["scans","thrift"] as HistoryTab[]).map(t => (
+        {(["scans","thrift","specialty"] as HistoryTab[]).map(t => (
           <TouchableOpacity key={t} style={[s.tabBtn, tab===t && s.tabActive]} onPress={() => setTab(t)}>
             <Text style={[s.tabTxt, tab===t && s.tabActiveTxt]}>
-              {t==="scans" ? "Scans" : "Thrift Runs"}
+              {t==="scans" ? "Scans" : t==="thrift" ? "Thrift Runs" : "Specialty"}
             </Text>
           </TouchableOpacity>
         ))}
@@ -571,6 +575,94 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack }: Props
               )}
             </>
           )}
+
+          {tab === "specialty" && (
+            <>
+              {specialtyScans.length === 0 ? (
+                <View style={s.emptyWrap}>
+                  <Text style={s.emptyText}>No specialty appraisals yet.</Text>
+                  <Text style={s.emptySub}>Run the Specialty Scanner to appraise sneakers, watches, wine, cards and more.</Text>
+                </View>
+              ) : (
+                specialtyScans.map(item => {
+                  const isSel = !!selected[item.id];
+                  let appr: any = {};
+                  try { appr = JSON.parse(item.specialty_data || "{}"); } catch { appr = {}; }
+                  const decColor = item.decision === "BUY" ? C.green : item.decision === "WATCH" ? C.yellow : C.red;
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[s.card, isSel && s.cardSelected]}
+                      onPress={() => selectMode ? toggleSelect(item.id) : setExpanded(expanded === item.id ? null : item.id)}
+                      activeOpacity={0.85}
+                    >
+                      <View style={s.cardHeader}>
+                        {selectMode && (
+                          <View style={[s.checkbox, isSel && s.checkboxOn]}>
+                            {isSel && <Text style={s.checkboxTick}>{"\u2713"}</Text>}
+                          </View>
+                        )}
+                        <View style={[s.thumb, {backgroundColor:"#0a1500", alignItems:"center", justifyContent:"center"}]}>
+                          <Text style={{fontSize:18, color:C.green, fontWeight:"900"}}>{"\u2605"}</Text>
+                        </View>
+                        <View style={{flex:1}}>
+                          <Text style={s.cardName} numberOfLines={1}>{item.item_name || "Appraisal"}</Text>
+                          <Text style={s.cardMeta}>{new Date(item.created_at).toLocaleDateString()}</Text>
+                          <Text style={s.cardPlatform}>{appr.value || ("$" + (item.sell_price||0))}</Text>
+                        </View>
+                        <View style={[s.verdictBadge, {backgroundColor: decColor + "20"}]}>
+                          <Text style={[s.verdictTxt, {color: decColor}]}>{item.decision || "WATCH"}</Text>
+                        </View>
+                      </View>
+
+                      {!selectMode && expanded === item.id && (
+                        <View style={s.expanded}>
+                          {appr._ebay && appr._ebay.count > 0 ? (
+                            <Text style={{color:C.green, fontSize:12, marginBottom:10}}>{appr._ebay.count} live eBay listings {"\u00B7"} ${appr._ebay.min}-${appr._ebay.max} (median ${appr._ebay.median})</Text>
+                          ) : null}
+                          {appr.variantCheck ? (
+                            <View style={s.apprSection}><Text style={[s.apprLabel,{color:C.green}]}>Variant check</Text><Text style={s.apprText}>{appr.variantCheck}</Text></View>
+                          ) : null}
+                          {appr.conditionCurve ? (
+                            <View style={s.apprSection}><Text style={s.apprLabel}>Condition & grade value</Text><Text style={s.apprText}>{appr.conditionCurve}</Text></View>
+                          ) : null}
+                          {appr.authFlags && appr.authFlags.length > 0 ? (
+                            <View style={s.apprSection}>
+                              <Text style={[s.apprLabel,{color:C.red}]}>Authenticity flags</Text>
+                              {appr.authFlags.map((fl: string, i: number) => (
+                                <Text key={i} style={s.apprBullet}>{"\u2022"} {fl}</Text>
+                              ))}
+                            </View>
+                          ) : null}
+                          {appr.valueAddMoves ? (
+                            <View style={s.apprSection}><Text style={[s.apprLabel,{color:C.green}]}>Value-add moves</Text><Text style={s.apprText}>{appr.valueAddMoves}</Text></View>
+                          ) : null}
+                          {appr.timing ? (
+                            <View style={s.apprSection}><Text style={s.apprLabel}>Where & when to sell</Text><Text style={s.apprText}>{appr.timing}</Text></View>
+                          ) : null}
+                          {appr.verifyLinks && Object.keys(appr.verifyLinks).length > 0 ? (
+                            <View style={{flexDirection:"row", flexWrap:"wrap", gap:8, marginTop:4, marginBottom:8}}>
+                              {Object.entries(appr.verifyLinks).map(([name, url]: any, i: number) => (
+                                <TouchableOpacity key={i} style={{backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:8, paddingHorizontal:12, paddingVertical:8}} onPress={() => Linking.openURL(url as string)}>
+                                  <Text style={{color:C.text1, fontSize:12, fontWeight:"700"}}>{name} {"\u2197"}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          ) : null}
+                          <TouchableOpacity
+                            style={[s.actionBtn, {backgroundColor:"#ff5a5a15", borderColor:"#ff5a5a30", marginTop:6}]}
+                            onPress={() => deleteItem(item.id, "scan", item.item_name||"Appraisal")}
+                          >
+                            <Text style={[s.actionBtnTxt, {color:C.red}]}>Delete</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </>
+          )}
         </ScrollView>
       )}
     </SafeAreaView>
@@ -633,4 +725,13 @@ const s = StyleSheet.create({
   actionBtnTxt:  { color:C.green, fontSize:12, fontWeight:"700" },
   showMore:      { alignItems:"center", paddingVertical:14 },
   showMoreTxt:   { color:C.green, fontSize:13, fontWeight:"600" },
+  emptyWrap:     { alignItems:"center", paddingVertical:50, paddingHorizontal:30 },
+  emptyText:     { color:C.text2, fontSize:15, fontWeight:"700", marginBottom:6 },
+  emptySub:      { color:C.text4, fontSize:13, textAlign:"center", lineHeight:19 },
+  apprSection:   { marginBottom:12 },
+  apprLabel:     { color:C.text2, fontSize:12, fontWeight:"800", textTransform:"uppercase", marginBottom:4 },
+  apprText:      { color:C.text2, fontSize:13, lineHeight:20 },
+  apprBullet:    { color:C.text2, fontSize:13, lineHeight:20, marginBottom:2 },
+  verdictBadge:  { paddingHorizontal:10, paddingVertical:5, borderRadius:8 },
+  verdictTxt:    { fontSize:12, fontWeight:"800" },
 });
