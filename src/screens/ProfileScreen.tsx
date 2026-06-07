@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  StatusBar, ActivityIndicator, TextInput, Linking, Image, Modal, Pressable } from "react-native";
+  StatusBar, ActivityIndicator, TextInput, Linking, Image, Modal, Pressable, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { C } from "../lib/theme";
 import { isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric, getBiometricLabel } from "../lib/biometrics";
-import { API_BASE } from "../lib/api";
+import { API_BASE, deleteAccount } from "../lib/api";
 
 const EMOJIS = ["🛍️","💰","🔥","⚡","🏆","👑","💎","🦁","🐉","🎯","🚀","💪","🌟","🦊","😎","🤑","🏅","🌊","🎪","🦅"];
 
@@ -77,6 +77,28 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
   const [profile, setProfile]       = useState<any>(null);
   const [stats, setStats]           = useState<any>(null);
   const [earnedIds, setEarnedIds]   = useState<Set<string>>(new Set());
+  const [deleting, setDeleting]     = useState(false);
+
+  function confirmDeleteAccount() {
+    Alert.alert(
+      "Delete Account?",
+      "This permanently deletes your account and all your scans, history, and data. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete Forever", style: "destructive", onPress: async () => {
+          setDeleting(true);
+          const res = await deleteAccount(token);
+          setDeleting(false);
+          if (res && res.success) {
+            Alert.alert("Account Deleted", "Your account and all data have been removed.");
+            onLogout();
+          } else {
+            Alert.alert("Could not delete", (res && res.error) || "Please try again.");
+          }
+        }},
+      ]
+    );
+  }
   const [loading, setLoading]       = useState(false);
   const [editing, setEditing]       = useState(false);
   const [editName, setEditName]     = useState("");
@@ -484,9 +506,9 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
                 To delete your account and all data, contact us at support@getvaluiq.com or use the link below.
               </Text>
               <TouchableOpacity
-                onPress={()=>Linking.openURL("mailto:support@getvaluiq.com?subject=Delete, My Account")}
+                onPress={confirmDeleteAccount}
                 style={{backgroundColor:"#1a0505",borderWidth:1,borderColor:C.red+"40",borderRadius:10,padding:12,alignItems:"center"}}>
-                <Text style={{color:C.red,fontSize:13,fontWeight:"700"}}>Request account deletion</Text>
+                <Text style={{color:C.red,fontSize:13,fontWeight:"700"}}>Delete Account</Text>
               </TouchableOpacity>
             </View>
 
@@ -645,10 +667,10 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
 
           {/* Delete account - ALL users */}
           <TouchableOpacity
-            onPress={()=>Linking.openURL("mailto:support@getvaluiq.com?subject=Delete%20My%20Account&body=Please%20delete%20my%20ValuIQ%20account%20and%20all%20associated%20data.")}
+            onPress={confirmDeleteAccount}
             style={s.deleteBtn}
           >
-            <Text style={s.deleteBtnTxt}>🗑️ Request Account Deletion</Text>
+            <Text style={s.deleteBtnTxt}>{deleting ? "Deleting..." : "Delete Account"}</Text>
           </TouchableOpacity>
           <Text style={s.accountNote}>
             To delete your account and all data, tap above to email our support team. We process all requests within 24 hours.

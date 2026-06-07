@@ -117,6 +117,16 @@ export async function updateThriftItem(token: string, payload: any): Promise<any
   });
   return r.json();
 }
+export async function deleteAccount(token: string): Promise<any> {
+  try {
+    const r = await fetch(`${API_BASE}/api/delete-account`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userToken: token }),
+    });
+    return await r.json();
+  } catch {
+    return { success: false, error: "Network error" };
+  }
+}
 export async function updateScan(token: string, id: string, updates: any): Promise<any> {
   const r = await fetch(`${API_BASE}/api/scan-history?token=${token}&id=${id}`, {
     method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updates),
