@@ -108,7 +108,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // - PERMISSION -
   useEffect(() => {
     if (step !== "loading") return;
-    const msgs = ["Identifying your item...","Reading brand & model details...","Searching eBay sold listings...","Comparing 12+ marketplaces...","Calculating profit & fees...","Finding the best place to sell..."];
+    const msgs = ["Identifying your item...","Reading brand & model details...","Pulling real eBay sold comps...","Estimating prices across platforms...","Calculating profit & fees...","Finding the best place to sell..."];
     const id = setInterval(() => setLoadMsg(m => (m + 1) % msgs.length), 1800);
     return () => clearInterval(id);
   }, [step]);
@@ -136,7 +136,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           <Text style={s.logoText}>ValuIQ</Text>
         </View>
         <ActivityIndicator size="large" color={C.green} style={{ marginTop: 40, marginBottom: 16 }} />
-        <Text style={s.h2}>{["Identifying your item...","Reading brand & model details...","Searching eBay sold listings...","Comparing 12+ marketplaces...","Calculating profit & fees...","Finding the best place to sell..."][loadMsg]}</Text>
+        <Text style={s.h2}>{["Identifying your item...","Reading brand & model details...","Pulling real eBay sold comps...","Estimating prices across platforms...","Calculating profit & fees...","Finding the best place to sell..."][loadMsg]}</Text>
         <Text style={s.body}>This usually takes a few seconds</Text>
       </View>
     </SafeAreaView>

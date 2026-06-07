@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImageManipulator from "expo-image-manipulator";
 
 export const SUPABASE_URL = "https://tylrcmczbvcvxkbuwnhf.supabase.co";
 export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR5bHJjbWN6YnZjdnhrYnV3bmhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4OTMxMDgsImV4cCI6MjA5MDQ2OTEwOH0.RkllmmOBfdfhzC9s_3PyKrhFre9QpvzFVC-aY2xhsN4";
@@ -110,6 +111,42 @@ export async function getPlan(token: string): Promise<string> {
 export async function getScanCount(token: string): Promise<number> {
   try { return (await fetch(`${API_BASE}/api/scan-count?token=${token}`).then(r=>r.json()))?.count ?? 0; } catch { return 0; }
 }
+export async function updateThriftItem(token: string, payload: any): Promise<any> {
+  const r = await fetch(`${API_BASE}/api/thrift-run?token=${token}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  return r.json();
+}
+export async function updateScan(token: string, id: string, updates: any): Promise<any> {
+  const r = await fetch(`${API_BASE}/api/scan-history?token=${token}&id=${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updates),
+  });
+  return r.json();
+}
+export async function rerunScan(token: string, opts: { itemName: string; brand?: string; category?: string; condition?: string; buyPrice?: number; extraDescription?: string; newPhotosBase64?: string[]; }): Promise<any> {
+  const body: any = {
+    userToken: token,
+    textInput: `${opts.brand ? opts.brand + " " : ""}${opts.itemName}`,
+    extraDescription: opts.extraDescription || undefined,
+    buyPrice: opts.buyPrice || 0,
+    confirmedIdentification: true,
+    isReanalyze: true,
+    confirmedItem: {
+      itemName: opts.itemName,
+      brand: opts.brand || "Unknown",
+      category: opts.category || "Other",
+      condition: opts.condition || "Good",
+      size: null,
+    },
+  };
+  if (opts.newPhotosBase64 && opts.newPhotosBase64.length > 0) {
+    body.images = opts.newPhotosBase64.map(b => b.startsWith("data:") ? b : `data:image/jpeg;base64,${b}`);
+  }
+  const r = await fetch(`${API_BASE}/api/lens`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  return r.json();
+}
 export async function getScanHistory(token: string): Promise<any[]> {
   try { const d = await fetch(`${API_BASE}/api/scan-history?token=${token}`).then(r=>r.json()); return Array.isArray(d) ? d : []; } catch { return []; }
 }
@@ -120,6 +157,14 @@ export async function scanImage(token: string, base64: string, description?: str
     textInput: description || "",
     buyPrice: buyPrice || 0,
   };
+  try {
+    const t = await ImageManipulator.manipulateAsync(
+      `data:image/jpeg;base64,${base64}`,
+      [{ resize: { width: 200 } }],
+      { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+    );
+    if (t.base64) body.thumb = `data:image/jpeg;base64,${t.base64}`;
+  } catch {}
   const r = await fetch(`${API_BASE}/api/lens`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

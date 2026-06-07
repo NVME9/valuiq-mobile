@@ -127,7 +127,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
         {/* Stats bar on last slide */}
         {(slide as any).isLast && (
           <View style={s.statsRow}>
-            {[["12+","Platforms"],["24/7","Deal Hunter"],["$0","To Start"]].map(([val,lbl]) => (
+            {[["Real","eBay Data"],["24/7","Deal Hunter"],["$0","To Start"]].map(([val,lbl]) => (
               <View key={lbl} style={s.stat}>
                 <Text style={[s.statVal, { color: slide.accent }]}>{val}</Text>
                 <Text style={s.statLbl}>{lbl}</Text>

@@ -396,11 +396,11 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
                 ["$"+Math.round(stats.totalProfit||0),"Profit Found","💰",C.green],
                 [(stats.scanStreak||0)+"🔥","Day Streak","",C.orange],
               ].map(([val,label,icon,color])=>(
-                <View key={label as string} style={s.statCard}>
+                <TouchableOpacity key={label as string} style={s.statCard} activeOpacity={0.8} onPress={()=>onNavigate("history")}>
                   {icon ? <Text style={{fontSize:22,marginBottom:6}}>{icon as string}</Text> : null}
                   <Text style={[s.statVal,{color:color as string}]}>{val as string}</Text>
                   <Text style={s.statLabel}>{label as string}</Text>
-                </View>
+                </TouchableOpacity>
               ))}
             </View>
             <TouchableOpacity style={s.communityBtn} onPress={()=>onNavigate("community")}>

@@ -114,14 +114,15 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
 
   async function loadData() {
     try {
-      const r = await fetch(`${API_BASE}/api/scan-history?token=${token}&limit=5`);
+      const r = await fetch(`${API_BASE}/api/scan-history?token=${token}&type=scan&limit=5`);
       const d = await r.json();
-      if (d.scans) {
-        setScans(d.scans);
-        const buys = d.scans.filter((s: any) => s.decision === "BUY");
+      const list = Array.isArray(d) ? d : (d.scans || []);
+      if (list.length >= 0) {
+        setScans(list);
+        const buys = list.filter((s: any) => (s.verdict || s.decision) === "BUY");
         setStats({
-          totalScans: d.total || d.scans.length,
-          profitFound: buys.reduce((sum: number, s: any) => sum + (s.net_profit || 0), 0),
+          totalScans: list.length,
+          profitFound: buys.reduce((sum: number, s: any) => sum + (s.profit || s.net_profit || 0), 0),
           buys: buys.length,
         });
       }
@@ -330,8 +331,8 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
               <>
                 {scans.map((scan: any, i: number) => (
                   <TouchableOpacity key={i} style={s.scanRow} onPress={() => onNavigate("history")} activeOpacity={0.8}>
-                    {scan.photo_url ? (
-                      <Image source={{uri: scan.photo_url}} style={s.scanThumb}/>
+                    {scan.image_url ? (
+                      <Image source={{uri: scan.image_url}} style={s.scanThumb}/>
                     ) : (
                       <View style={[s.scanThumb, {backgroundColor:C.surface, alignItems:"center", justifyContent:"center"}]}>
                         <Text style={{fontSize:20}}>📷</Text>
