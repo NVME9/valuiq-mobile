@@ -284,9 +284,8 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
           </TouchableOpacity>
         )}
 
-        {/* COMING SOON - collapsible */}
-        <SectionHeader title="COMING SOON" expanded={showSoon} onToggle={() => setShowSoon(v => !v)}/>
-        {showSoon && (
+        {/* COMING SOON - hidden for App Store (Guideline 2.1: no unreleased features advertised) */}
+        {false && (
           <View style={{marginBottom:14}}>
             {COMING_SOON.map((item, i) => (
               <View key={i} style={[s.csCard, {borderColor:item.color+"25"}]}>

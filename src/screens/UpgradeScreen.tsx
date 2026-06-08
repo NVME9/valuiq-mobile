@@ -184,7 +184,7 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
         </View>
 
         {/* ── PLAN, CARDS ── */}
-        {PLANS.map(p => {
+        {PLANS.filter(p => !(p as any).comingSoon).map(p => {
           const cur = isCurrent(p.id);
           const showAnnual = billing==="annual" && p.id!=="free" && p.id!=="lifetime";
           const displayPrice = showAnnual ? (p as any).annualPrice : p.price;

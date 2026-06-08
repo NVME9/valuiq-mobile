@@ -286,15 +286,6 @@ export default function App() {
             try { await AsyncStorage.setItem("@valuiq_ai_consent","true"); } catch {}
             setAiConsented(true);
           }} />
-        ) : plan === "titan" ? (
-          <BusinessApp
-            token={session.access_token}
-            plan={plan}
-            userEmail={session.user?.email || ""}
-            scansLeft={scansLeft}
-            setScansLeft={setScansLeft}
-            onLogout={handleLogout}
-          />
         ) : (
           <View style={s.root}>
             <View style={{flex:1}}>{SCREENS[screen]}</View>
