@@ -9,7 +9,7 @@ interface Props { onComplete: () => void; }
 const SLIDES = [
   { emoji:"📷", title:"Point. Shoot. Profit.", body:"Scan any item — AI identifies it instantly and tells you exactly what it sells for, where to list it, and how much you keep.", accent:C.green, bg:"#060806", cta:"Let's go →" },
   { emoji:"⚡", title:"Every Platform. Every Fee.", body:"eBay, Poshmark, Mercari, Whatnot, Etsy — see net profit after every fee on every platform in seconds.", accent:C.yellow, bg:"#080700", cta:"Keep going →" },
-  { emoji:"🤖", title:"Deals Find You.", body:"Deal Hunter AI monitors 17+ sourcing sites 24/7. Get alerted before anyone else when a profitable flip goes live.", accent:"#ff8c42", bg:"#080500", cta:"Start for free →", isLast:true },
+  { emoji:"🤖", title:"Like a Pro Appraiser.", body:"Specialty mode appraises sneakers, watches, handbags, cards, wine and more \u2014 with real eBay listing data, condition grading, and authenticity checks.", accent:"#ff8c42", bg:"#080500", cta:"Start for free →", isLast:true },
 ];
 
 function ValuIQLogo({ accent, size = 48 }: { accent: string; size?: number }) {
@@ -127,7 +127,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
         {/* Stats bar on last slide */}
         {(slide as any).isLast && (
           <View style={s.statsRow}>
-            {[["Real","eBay Data"],["24/7","Deal Hunter"],["$0","To Start"]].map(([val,lbl]) => (
+            {[["Real","eBay Data"],["12+","Tools"],["$0","To Start"]].map(([val,lbl]) => (
               <View key={lbl} style={s.stat}>
                 <Text style={[s.statVal, { color: slide.accent }]}>{val}</Text>
                 <Text style={s.statLbl}>{lbl}</Text>
@@ -162,17 +162,17 @@ const s = StyleSheet.create({
   topRow:     { flexDirection:"row", justifyContent:"space-between", paddingHorizontal:24, paddingTop:8 },
   skipBtn:    { padding:8 },
   skipTxt:    { color:C.text4, fontSize:14 },
-  content:    { flex:1, alignItems:"center", justifyContent:"center", paddingHorizontal:28 },
+  content:    { flex:1, alignItems:"center", justifyContent:"center", paddingHorizontal:28, paddingVertical:12 },
   iconWrap:   { width:140, height:140, borderRadius:38, borderWidth:1.5, alignItems:"center", justifyContent:"center", marginBottom:20, shadowOpacity:0.4, shadowRadius:24, shadowOffset:{width:0,height:0}, elevation:12 },
   iconBg:     { width:128, height:128, borderRadius:32, alignItems:"center", justifyContent:"center" },
-  brandRow:   { flexDirection:"row", alignItems:"center", gap:10, marginBottom:28 },
+  brandRow:   { flexDirection:"row", alignItems:"center", gap:10, marginBottom:20 },
   brandName:  { color:C.text1, fontSize:28, fontWeight:"900", letterSpacing:-1 },
   badgePill:  { borderWidth:1, borderRadius:100, paddingHorizontal:10, paddingVertical:4 },
   badgeTxt:   { fontSize:11, fontWeight:"800", letterSpacing:0.5 },
   slideEmoji: { fontSize:52, marginBottom:12 },
   title:      { fontSize:26, fontWeight:"900", letterSpacing:-0.5, textAlign:"center", marginBottom:14 },
   body:       { color:C.text2, fontSize:15, lineHeight:24, textAlign:"center" },
-  statsRow:   { flexDirection:"row", gap:0, marginTop:24, backgroundColor:"rgba(255,255,255,0.04)", borderRadius:16, overflow:"hidden" },
+  statsRow:   { flexDirection:"row", gap:0, marginTop:16, backgroundColor:"rgba(255,255,255,0.04)", borderRadius:16, overflow:"hidden" },
   stat:       { flex:1, alignItems:"center", paddingVertical:14, borderRightWidth:1, borderRightColor:"rgba(255,255,255,0.06)" },
   statVal:    { fontSize:20, fontWeight:"900" },
   statLbl:    { color:C.text4, fontSize:10, fontWeight:"700", marginTop:2 },

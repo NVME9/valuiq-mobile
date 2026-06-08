@@ -130,7 +130,9 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
     setRefresh(false);
   }
 
-  const myTools    = TOOLS.filter(t => t.minPlan <= level);
+  // Tools hidden for launch (backend not ready). Remove an id here to re-enable after launch.
+  const LAUNCH_HIDDEN = ["deal-hunter"];
+  const myTools    = TOOLS.filter(t => t.minPlan <= level && !LAUNCH_HIDDEN.includes(t.id));
   const lockedTools = TOOLS.filter(t => t.minPlan > level);
   const activity   = LIVE_FEED[liveIdx];
 
