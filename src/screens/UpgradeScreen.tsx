@@ -157,7 +157,7 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
         <Text style={s.headline}>Upgrade ValuIQ</Text>
-        <Text style={s.sub}>No contracts. Cancel anytime. Not happy? Email team@getvaluiq.com within 30 days.</Text>
+        <Text style={s.sub}>No contracts. Cancel anytime. Not happy? Email team@getvaluiq.com within 7 days.</Text>
 
         {/* ── BILLING, TOGGLE ── */}
         <View style={s.toggleWrap}>
@@ -288,7 +288,7 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
             { q:"Is the profit data accurate?", a:"ValuIQ uses real sold listing data from eBay and other platforms. Results are estimates — actual prices vary by condition, timing, and demand." },
             { q:"Does Lifetime include future features?", a:"Yes. Every feature we add to the Pro tier is automatically included in your Lifetime plan, forever, at no extra cost." },
             { q:"When does Titan launch?", a:"Coming Q3 2026. Join the waitlist to lock in the $79/month Titan founding rate — it goes to $149/month after the first 50 subscribers." },
-            { q:"How does the 30-day guarantee work?", a:"If you're not happy in your first 30 days, email team@getvaluiq.com and we'll refund you. No forms, no hassle." },
+            { q:"How does the 7-day guarantee work?", a:"If you're not happy in your first 7 days, email team@getvaluiq.com and we'll refund you. No forms, no hassle." },
           ].map((faq, i) => (
             <TouchableOpacity key={i} style={s.faqItem} onPress={() => setOpenFaq(openFaq === i ? null : i)} activeOpacity={0.8}>
               <View style={{flexDirection:"row", justifyContent:"space-between", alignItems:"center"}}>

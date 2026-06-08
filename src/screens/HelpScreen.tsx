@@ -29,7 +29,7 @@ const FAQS = [
   },
   {
     q: "Are refunds available?",
-    a: "We offer a 30-day money-back guarantee on your first subscription payment. Contact support@getvaluiq.com within 30 days of your first charge. Subsequent charges are non-refundable. Lifetime plans are non-refundable after 30 days.",
+    a: "We offer a 7-day money-back guarantee on your first subscription payment. Contact support@getvaluiq.com within 7 days of your first charge. Subsequent charges are non-refundable. Lifetime plans are non-refundable after 7 days.",
   },
   {
     q: "Can I use ValuIQ for liquidation buying?",

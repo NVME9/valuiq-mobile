@@ -48,7 +48,7 @@ const FAQS = [
       },
       {
         q: "Do you offer refunds?",
-        a: "All sales are final. We offer a 30-day money-back guarantee if the app doesn't work as described — contact support@getvaluiq.com within 30 days of your first payment."
+        a: "All sales are final. We offer a 7-day money-back guarantee if the app doesn't work as described — contact support@getvaluiq.com within 7 days of your first payment."
       },
       {
         q: "Is there an annual discount?",
