@@ -25,6 +25,7 @@ import InventoryScreen from "./src/screens/InventoryScreen";
 import ProfitTrackerScreen from "./src/screens/ProfitTrackerScreen";
 import DealHunterScreen from "./src/screens/DealHunterScreen";
 import OnboardingScreen from "./src/screens/OnboardingScreen";
+import AIConsentScreen from "./src/screens/AIConsentScreen";
 import AICoachScreen from "./src/screens/AICoachScreen";
 import HistoryScreen from "./src/screens/HistoryScreen";
 import FAQScreen from "./src/screens/FAQScreen";
@@ -152,6 +153,7 @@ export default function App() {
   const [appReady, setAppReady]     = useState(false);
   const [splashDone, setSplashDone] = useState(false);
   const [onboarded, setOnboarded] = useState(false);
+  const [aiConsented, setAiConsented] = useState(false);
   const fadeIn = useRef(new Animated.Value(0)).current;
 
   
@@ -169,6 +171,8 @@ export default function App() {
     try {
       const seen = await AsyncStorage.getItem("@valuiq_onboarded");
       if (seen === "true") setOnboarded(true);
+      const consent = await AsyncStorage.getItem("@valuiq_ai_consent");
+      if (consent === "true") setAiConsented(true);
     } catch {}
     const saved = await loadSession();
     if (saved) {
@@ -277,6 +281,11 @@ export default function App() {
                 setOnboarded(true);
               }} />
               : <LoginScreen onLogin={handleLogin} />
+        ) : !aiConsented ? (
+          <AIConsentScreen onAgree={async () => {
+            try { await AsyncStorage.setItem("@valuiq_ai_consent","true"); } catch {}
+            setAiConsented(true);
+          }} />
         ) : plan === "titan" ? (
           <BusinessApp
             token={session.access_token}

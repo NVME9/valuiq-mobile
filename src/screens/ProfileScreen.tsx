@@ -503,13 +503,22 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
             <View style={s.deleteAccountCard}>
               <Text style={{color:C.text1,fontSize:14,fontWeight:"700",marginBottom:6}}>Account</Text>
               <Text style={{color:C.text3,fontSize:12,lineHeight:18,marginBottom:12}}>
-                To delete your account and all data, contact us at support@getvaluiq.com or use the link below.
+                Permanently delete your account and all your data. This cannot be undone.
               </Text>
               <TouchableOpacity
                 onPress={confirmDeleteAccount}
-                style={{backgroundColor:"#1a0505",borderWidth:1,borderColor:C.red+"40",borderRadius:10,padding:12,alignItems:"center"}}>
-                <Text style={{color:C.red,fontSize:13,fontWeight:"700"}}>Delete Account</Text>
+                disabled={deleting}
+                style={{backgroundColor:"#1a0505",borderWidth:1,borderColor:C.red+"40",borderRadius:10,padding:12,alignItems:"center",opacity: deleting ? 0.5 : 1}}>
+                <Text style={{color:C.red,fontSize:13,fontWeight:"700"}}>{deleting ? "Deleting..." : "Delete Account"}</Text>
               </TouchableOpacity>
+              <View style={{flexDirection:"row",justifyContent:"center",gap:18,marginTop:14}}>
+                <TouchableOpacity onPress={()=>Linking.openURL("https://www.getvaluiq.com/privacy")}>
+                  <Text style={{color:C.text4,fontSize:12,textDecorationLine:"underline"}}>Privacy Policy</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={()=>Linking.openURL("https://www.getvaluiq.com/terms")}>
+                  <Text style={{color:C.text4,fontSize:12,textDecorationLine:"underline"}}>Terms of Service</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {plan!=="free" && (
