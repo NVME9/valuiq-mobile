@@ -14,11 +14,11 @@ import {
   getBiometricRefreshToken, saveBiometricRefreshToken,
 } from "../lib/biometrics";
 import {
-  signIn, signUp, resetPasswordForEmail,
+  signIn, signUp, resetPasswordForEmail, confirmPasswordReset,
   saveSession, Session, API_BASE, refreshSessionWithToken,
 } from "../lib/api";
 
-type Mode = "signin" | "signup" | "forgot";
+type Mode = "signin" | "signup" | "forgot" | "reset";
 
 interface Props {
   onLogin: (session: Session) => void;
@@ -33,6 +33,8 @@ export default function LoginScreen({ onLogin }: Props) {
   const [loading, setLoading]           = useState(false);
   const [forgotLoading, setForgotLoad]  = useState(false);
   const [forgotSent, setForgotSent]     = useState(false);
+  const [resetCode, setResetCode]       = useState("");
+  const [newPassword, setNewPassword]   = useState("");
   const [error, setError]               = useState("");
   const [biometricType, setBioType]     = useState<"face"|"fingerprint"|"none">("none");
   const [biometricEnabled, setBioEn]    = useState(false);
@@ -132,9 +134,25 @@ export default function LoginScreen({ onLogin }: Props) {
     setForgotLoad(true); setError("");
     try {
       await resetPasswordForEmail(email.trim());
-      setForgotSent(true);
+      setMode("reset");
     } catch (e: any) {
-      setError(e?.message || "Failed to send reset email. Try again.");
+      setError(e?.message || "Failed to send reset code. Try again.");
+    }
+    setForgotLoad(false);
+  }
+
+  async function handleConfirmReset() {
+    if (!resetCode.trim()) { setError("Enter the 6-digit code from your email."); return; }
+    if (newPassword.length < 6) { setError("New password must be at least 6 characters."); return; }
+    setForgotLoad(true); setError("");
+    try {
+      await confirmPasswordReset(email.trim(), resetCode.trim(), newPassword);
+      setMode("signin");
+      setResetCode(""); setNewPassword(""); setPassword("");
+      setError("");
+      Alert.alert("Password Reset", "Your password has been updated. Sign in with your new password.");
+    } catch (e: any) {
+      setError(e?.message || "Could not reset password. Check your code and try again.");
     }
     setForgotLoad(false);
   }
@@ -178,13 +196,13 @@ export default function LoginScreen({ onLogin }: Props) {
             <Text style={s.logoText}>ValuIQ</Text>
           </View>
 
-          <Text style={s.h2}>{mode === "signup" ? "Create Account" : mode === "forgot" ? "Reset Password" : "Welcome Back"}</Text>
-          <Text style={s.sub}>{mode === "signup" ? "Start finding profitable flips today." : mode === "forgot" ? "Enter your email to receive a reset link." : "Sign in to your account."}</Text>
+          <Text style={s.h2}>{mode === "signup" ? "Create Account" : mode === "forgot" ? "Reset Password" : mode === "reset" ? "Enter Reset Code" : "Welcome Back"}</Text>
+          <Text style={s.sub}>{mode === "signup" ? "Start finding profitable flips today." : mode === "forgot" ? "Enter your email to receive a 6-digit code." : mode === "reset" ? "Enter the code we emailed you and your new password." : "Sign in to your account."}</Text>
 
           {error ? <View style={s.errorBox}><Text style={s.errorTxt}>{error}</Text></View> : null}
 
           {/* Social buttons - only on sign in/up */}
-          {mode !== "forgot" && (
+          {mode !== "forgot" && mode !== "reset" && (
             <>
               <TouchableOpacity style={s.appleBtn} onPress={() => handleSocialSignIn("apple")} activeOpacity={0.85}>
                 <AppleLogo size={18} color="#fff"/>
@@ -203,7 +221,7 @@ export default function LoginScreen({ onLogin }: Props) {
           )}
 
           {/* Email */}
-          <TextInput
+          {mode !== "reset" && <TextInput
             style={s.input}
             placeholder="Email address"
             placeholderTextColor={C.text4}
@@ -212,10 +230,41 @@ export default function LoginScreen({ onLogin }: Props) {
             autoCapitalize="none"
             keyboardType="email-address"
             autoCorrect={false}
-          />
+          />}
 
-          {/* Password - not shown for forgot */}
-          {mode !== "forgot" && (
+          {/* Reset code + new password - reset mode only */}
+          {mode === "reset" && (
+            <>
+              <TextInput
+                style={s.input}
+                placeholder="6-digit code"
+                placeholderTextColor={C.text4}
+                value={resetCode}
+                onChangeText={setResetCode}
+                keyboardType="number-pad"
+                maxLength={6}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <View style={s.pwdRow}>
+                <TextInput
+                  style={s.pwdInput}
+                  placeholder="New password"
+                  placeholderTextColor={C.text4}
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  secureTextEntry={!showPw}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity style={s.eyeBtn} onPress={() => setShowPw(v => !v)}>
+                  <Text style={s.eyeIcon}>{showPw ? "Hide" : "Show"}</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+
+          {/* Password - not shown for forgot or reset */}
+          {mode !== "forgot" && mode !== "reset" && (
             <View style={s.pwdRow}>
               <TextInput
                 style={s.pwdInput}
@@ -253,7 +302,14 @@ export default function LoginScreen({ onLogin }: Props) {
             <TouchableOpacity style={s.btn} onPress={handleForgotPassword} disabled={forgotLoading} activeOpacity={0.88}>
               {forgotLoading
                 ? <ActivityIndicator color={C.greenDark} size="small"/>
-                : <Text style={s.btnTxt}>Send Reset Link →</Text>
+                : <Text style={s.btnTxt}>Send Code</Text>
+              }
+            </TouchableOpacity>
+          ) : mode === "reset" ? (
+            <TouchableOpacity style={s.btn} onPress={handleConfirmReset} disabled={forgotLoading} activeOpacity={0.88}>
+              {forgotLoading
+                ? <ActivityIndicator color={C.greenDark} size="small"/>
+                : <Text style={s.btnTxt}>Reset Password</Text>
               }
             </TouchableOpacity>
           ) : (

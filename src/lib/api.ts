@@ -54,6 +54,15 @@ export async function signUp(email: string, password: string): Promise<Session> 
   if (!d.access_token) throw new Error("Check your email to confirm your account, then sign in.");
   return d;
 }
+export async function confirmPasswordReset(email: string, code: string, password: string): Promise<void> {
+  const r = await fetch(`${API_BASE}/api/confirm-reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, code, password }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "Could not reset password. Check your code and try again.");
+}
 export async function resetPasswordForEmail(email: string): Promise<void> {
   // Use our web API which sends via Resend (instant) instead of Supabase's slow email
   const r = await fetch(`${API_BASE}/api/request-reset`, {
