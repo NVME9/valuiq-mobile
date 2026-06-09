@@ -414,9 +414,9 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
             <View style={s.statsGrid}>
               {[
                 [String(stats.totalScans||0),"Total Scans","📷",C.text1],
-                [String(stats.totalBuys||0),"BUY Finds","✅",C.green],
+                [String(stats.buyCount||0),"BUY Finds","✅",C.green],
                 ["$"+Math.round(stats.totalProfit||0),"Profit Found","💰",C.green],
-                [(stats.scanStreak||0)+"🔥","Day Streak","",C.orange],
+                [(stats.streak||0)+"🔥","Day Streak","",C.orange],
               ].map(([val,label,icon,color])=>(
                 <TouchableOpacity key={label as string} style={s.statCard} activeOpacity={0.8} onPress={()=>onNavigate("history")}>
                   {icon ? <Text style={{fontSize:22,marginBottom:6}}>{icon as string}</Text> : null}
