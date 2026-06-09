@@ -42,7 +42,7 @@ const PLANS = [
     id:"pro", tierLabel:"PRO", label:"🔥 Pro", price:"$34.99", sub:"/month", color:C.orange,
     annualPrice:"$259", annualSub:"/year", annualSavings:"Save $109",
     headline:"Where serious money is made",
-    pitch:"Deal Hunter AI runs 24/7 across 17 platforms. One alert pays for 3 months. Plus 6 exclusive AI tools.",
+    pitch:"Unlimited scans plus the full Specialty Scanner for sneakers, watches, handbags, trading cards and more. Dealer-grade appraisals on every category.",
     badge:"RECOMMENDED", badgeBg:C.orange,
     features:[
       "Unlimited scans",

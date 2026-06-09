@@ -146,6 +146,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
       }
       const payload = JSON.parse(decoded);
       if (payload.email) setUserEmail(payload.email);
+      if (payload.sub) buildReferralLink(payload.sub);
     } catch {}
   }, [token]);
   const [copied, setCopied] = useState(false);
@@ -186,6 +187,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
       if (d.success) {
         setProfile(d.profile || {});
         setStats(d.stats || {});
+        if (d.profile?.user_id && !referralLink) buildReferralLink(d.profile.user_id);
         setEarnedIds(new Set((d.badges || []).map((b:any) => b.id)));
         // Get email from profile or decode from JWT token
         const emailFromProfile = d.profile?.email || "";
