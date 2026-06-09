@@ -28,11 +28,7 @@
           }
         ]
       },
-      "entitlements": {
-        "com.apple.developer.applesignin": [
-          "Default"
-        ]
-      },
+
       "jsEngine": "jsc"
     },
     "android": {

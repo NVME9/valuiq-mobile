@@ -6,8 +6,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
-import AppleLogo from "../components/AppleLogo";
-import GoogleLogo from "../components/GoogleLogo";
 import {
   isBiometricAvailable, isBiometricEnabled, enableBiometric,
   authenticateWithBiometrics, getBiometricEmail, getBiometricLabel,
@@ -157,9 +155,6 @@ export default function LoginScreen({ onLogin }: Props) {
     setForgotLoad(false);
   }
 
-  function handleSocialSignIn(provider: "apple" | "google") {
-    setError(`${provider === "apple" ? "Apple" : "Google"} Sign In requires the installed app. Please use email/password below.`);
-  }
 
   // ── FORGOT SENT SCREEN ──────────────────────────────────────────
   if (forgotSent) return (
@@ -200,25 +195,6 @@ export default function LoginScreen({ onLogin }: Props) {
           <Text style={s.sub}>{mode === "signup" ? "Start finding profitable flips today." : mode === "forgot" ? "Enter your email to receive a 6-digit code." : mode === "reset" ? "Enter the code we emailed you and your new password." : "Sign in to your account."}</Text>
 
           {error ? <View style={s.errorBox}><Text style={s.errorTxt}>{error}</Text></View> : null}
-
-          {/* Social buttons - only on sign in/up */}
-          {mode !== "forgot" && mode !== "reset" && (
-            <>
-              <TouchableOpacity style={s.appleBtn} onPress={() => handleSocialSignIn("apple")} activeOpacity={0.85}>
-                <AppleLogo size={18} color="#fff"/>
-                <Text style={s.appleBtnTxt}>Sign in with Apple</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.googleBtn} onPress={() => handleSocialSignIn("google")} activeOpacity={0.85}>
-                <GoogleLogo size={20}/>
-                <Text style={s.googleBtnTxt}>Sign in with Google</Text>
-              </TouchableOpacity>
-              <View style={s.divider}>
-                <View style={s.dividerLine}/>
-                <Text style={s.dividerTxt}>or</Text>
-                <View style={s.dividerLine}/>
-              </View>
-            </>
-          )}
 
           {/* Email */}
           {mode !== "reset" && <TextInput
