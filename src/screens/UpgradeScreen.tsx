@@ -286,8 +286,7 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
             { q:"Can I cancel anytime?", a:"Yes. Email team@getvaluiq.com and we cancel immediately. No penalties, no questions asked." },
             { q:"What happens to my data if I cancel?", a:"Your scan history and inventory stay in your account. You keep access until the end of your billing period." },
             { q:"Is the profit data accurate?", a:"ValuIQ uses real sold listing data from eBay and other platforms. Results are estimates — actual prices vary by condition, timing, and demand." },
-            { q:"Does Lifetime include future features?", a:"Yes. Every feature we add to the Pro tier is automatically included in your Lifetime plan, forever, at no extra cost." },
-            { q:"When does Titan launch?", a:"Coming Q3 2026. Join the waitlist to lock in the $79/month Titan founding rate — it goes to $149/month after the first 50 subscribers." },
+            { q:"What does Lifetime include?", a:"Lifetime gives you everything in the Pro tier, one time, with no monthly fees." },
             { q:"How does the 7-day guarantee work?", a:"If you're not happy in your first 7 days, email team@getvaluiq.com and we'll refund you. No forms, no hassle." },
           ].map((faq, i) => (
             <TouchableOpacity key={i} style={s.faqItem} onPress={() => setOpenFaq(openFaq === i ? null : i)} activeOpacity={0.8}>
