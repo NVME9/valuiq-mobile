@@ -247,8 +247,8 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
           </View>
         )}
 
-        {/* AI UNFAIR ADVANTAGE - collapsible, Pro+ only */}
-        {isPro ? (
+        {/* AI UNFAIR ADVANTAGE - HIDDEN for App Store (Guideline 2.1: unreleased tools). Restore in V2. */}
+        {false && (isPro ? (
           <>
             <SectionHeader title="⚡ AI UNFAIR ADVANTAGE" expanded={showAI} onToggle={() => setShowAI(v => !v)}/>
             {showAI && (
@@ -284,7 +284,7 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
             </View>
             <Text style={{color:"#b066ff", fontSize:18, marginLeft:12}}>→</Text>
           </TouchableOpacity>
-        )}
+        ))}
 
         {/* COMING SOON - hidden for App Store (Guideline 2.1: no unreleased features advertised) */}
         {false && (
