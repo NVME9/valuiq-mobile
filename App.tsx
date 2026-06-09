@@ -95,8 +95,15 @@ function SplashScreen({ onDone }: { onDone:()=>void }) {
 
       {/* Logo block */}
       <Animated.View style={{ alignItems:"center", transform:[{ scale }] }}>
-        <View style={ss.logoBox}>
-          <Text style={ss.logoV}>V</Text>
+        <View style={{ width:120, height:120, alignItems:"center", justifyContent:"center", marginBottom:6 }}>
+          {/* scope corners */}
+          <View style={{ position:"absolute", top:0, left:0, width:22, height:22, borderTopWidth:3, borderLeftWidth:3, borderColor:C.green }}/>
+          <View style={{ position:"absolute", top:0, right:0, width:22, height:22, borderTopWidth:3, borderRightWidth:3, borderColor:C.green }}/>
+          <View style={{ position:"absolute", bottom:0, left:0, width:22, height:22, borderBottomWidth:3, borderLeftWidth:3, borderColor:C.green }}/>
+          <View style={{ position:"absolute", bottom:0, right:0, width:22, height:22, borderBottomWidth:3, borderRightWidth:3, borderColor:C.green }}/>
+          <View style={ss.logoBox}>
+            <Text style={ss.logoV}>V</Text>
+          </View>
         </View>
         <Text style={ss.logoName}>ValuIQ</Text>
       </Animated.View>
