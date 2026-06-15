@@ -155,11 +155,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           <Text style={s.dealOld}>$497 regular price</Text>
           <View style={s.dealInner}>
             <Text style={s.dealBadge}> FIRST 100 ONLY - EARLY-BIRD</Text>
-            <Text style={s.dealPrice}>$197</Text>
+            <Text style={s.dealPrice}>$149</Text>
             <Text style={s.dealSub}>one time - Pro features forever</Text>
           </View>
           <TouchableOpacity style={s.dealBtn} onPress={() => onNavigate('upgrade')}>
-            <Text style={s.dealBtnText}>Get Lifetime $197 ></Text>
+            <Text style={s.dealBtnText}>Get Lifetime $149 ></Text>
           </TouchableOpacity>
         </View>
         <View style={{ flexDirection: "row", gap: 10, marginBottom: 16 }}>
