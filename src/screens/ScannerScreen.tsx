@@ -121,7 +121,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         <Text style={s.h2}>Camera Required</Text>
         <Text style={[s.body, { textAlign: "center", marginBottom: 24 }]}>ValuIQ needs camera access to scan items for resale value.</Text>
         <TouchableOpacity style={s.greenBtn} onPress={requestPermission}>
-          <Text style={s.greenBtnText}>Grant Camera Access</Text>
+          <Text style={s.greenBtnText}>Continue</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
