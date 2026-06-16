@@ -9,6 +9,7 @@ import * as ImagePicker from "expo-image-picker";
 import { C } from "../lib/theme";
 import ShareButton from "../components/ShareButton";
 import { API_BASE, scanImage, scanBarcode } from "../lib/api";
+import { scheduleSaleCheckIn } from "../lib/notifications";
 
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
@@ -97,6 +98,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       }
       if (!d.success) throw new Error(d.error || "Analysis failed");
       setResult(d);
+      // SALE-CAPTURE MOAT: schedule a BUY check-in
+      try {
+        if (d && d.decision === "BUY") {
+          const sid = d.id || d.scanId || d.scan_id;
+          if (sid) scheduleSaleCheckIn(String(sid), d.itemName || d.item_name || "your item");
+        }
+      } catch {}
       setStep("result");
       if (plan === "free") setScansLeft(n => n !== null ? Math.max(0, n - 1) : null);
     } catch (e: any) {
