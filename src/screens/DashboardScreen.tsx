@@ -6,6 +6,7 @@ import {
 } from "react-native";
 import { SafeAreaView as SAV } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import SaleCapturePrompt from "../components/SaleCapturePrompt";
 import { API_BASE } from "../lib/api";
 
 const { width } = Dimensions.get("window");
@@ -166,6 +167,8 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
           onRefresh={() => { setRefresh(true); loadData(); }}/>}
       >
 
+        {/* SALE-CAPTURE MOAT: ask about aging BUY scans */}
+        <SaleCapturePrompt token={token} />
         {/* HERO SCAN BUTTON */}
         <Animated.View style={{transform:[{scale:scanPulse}]}}>
           <TouchableOpacity style={s.hero} onPress={() => onNavigate("scanner")} activeOpacity={0.9}>
