@@ -297,6 +297,23 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 </Text>
               </View>
 
+              {/* VELOCITY ENGINE badge */}
+              {result.velocity && result.velocity.tier !== "unknown" && (() => {
+                const vt = result.velocity.tier;
+                const vColor = vt === "fast" ? C.green : vt === "steady" ? C.yellow : C.orange;
+                const vLabel = vt === "fast" ? "Fast mover" : vt === "steady" ? "Steady seller" : "Slow mover";
+                return (
+                  <View style={[s.veloBadge, { borderColor: vColor + "40", backgroundColor: vColor + "12" }]}>
+                    <Text style={[s.veloText, { color: vColor }]}>
+                      {vLabel}{result.velocity.estDaysToSale ? "  -  ~" + result.velocity.estDaysToSale + " days to sell" : ""}
+                    </Text>
+                    {result.velocity.sellThrough !== null && (
+                      <Text style={s.veloSub}>{result.velocity.sellThrough}% of listings sell{result.velocity.soldCount ? " (" + result.velocity.soldCount + " recent sales)" : ""}</Text>
+                    )}
+                  </View>
+                );
+              })()}
+
               {/* Key numbers - compact row */}
               <View style={s.numbersCard}>
                 {([
@@ -790,6 +807,9 @@ const s = StyleSheet.create({
   profitCard:     { backgroundColor: "rgba(0,0,0,0.35)", borderWidth: 2, borderRadius: 20, padding: 20, marginBottom: 10, alignItems: "center" },
   profitLabel:    { color: C.text3, fontSize: 10, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 },
   profitAmount:   { fontWeight: "900", letterSpacing: -2, lineHeight: 68, marginBottom: 6 },
+  veloBadge: { borderWidth: 1, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16, marginTop: 12, alignItems: "center" },
+  veloText: { fontSize: 16, fontWeight: "800" },
+  veloSub: { fontSize: 12, color: C.text3, marginTop: 3 },
   profitSub:      { color: C.text2, fontSize: 13, textAlign: "center" },
   noDataCard:     { backgroundColor: "rgba(0,0,0,0.3)", borderWidth: 1, borderColor: C.border, borderRadius: 20, padding: 20, marginBottom: 10 },
   numbersCard:    { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 14, flexDirection: "row", marginBottom: 10, overflow: "hidden" },
