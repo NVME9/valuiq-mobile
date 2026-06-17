@@ -4,6 +4,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import { API_BASE } from "../lib/api";
+import { configurePurchases, getOfferings, purchasePackage, restorePurchases, refreshEntitlements } from "../lib/purchases";
 
 interface Props {
   token: string; plan: string;
@@ -119,27 +120,53 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
 
   const isPaid = plan !== "free";
   const isCurrent = (id: string) => plan === id;
+  React.useEffect(() => { try { configurePurchases(); refreshEntitlements(token); } catch {} }, []);
 
   async function subscribe(priceId: string, planId: string) {
-    if (!priceId) return;
-    if (planId === "titan") {
-      require("react-native").Linking.openURL("mailto:team@getvaluiq.com?subject=ValuIQ%20Titan%20Waitlist");
-      return;
-    }
+    // Native Apple In-App Purchase via RevenueCat (no external checkout).
+    if (planId === "free") return;
     setLoading(planId);
     try {
-      const r = await fetch(`${API_BASE}/api/create-checkout`, {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ token, priceId, plan: planId }) });
-      const d = await r.json();
-      if (d.url) {
-        require("react-native").Linking.openURL(d.url);
+      const offering = await getOfferings();
+      if (!offering) { Alert.alert("Unavailable", "Plans are loading. Please try again in a moment."); setLoading(null); return; }
+      const wanted =
+        planId === "pro" ? "com.valuiq.pro.monthly" :
+        planId === "seller" ? "com.valuiq.seller.monthly" :
+        planId === "lifetime" ? "com.valuiq.lifetime" : "";
+      const pkg = offering.availablePackages.find(
+        (pk: any) => pk.product?.identifier === wanted
+      ) || offering.availablePackages.find(
+        (pk: any) => (pk.product?.identifier || "").includes(planId)
+      );
+      if (!pkg) { Alert.alert("Unavailable", "This plan isn't available right now."); setLoading(null); return; }
+      const res = await purchasePackage(token, pkg);
+      if (res.cancelled) { setLoading(null); return; }
+      if (res.plan && res.plan !== "free") {
+        Alert.alert("You're in!", "Your plan is now active. Enjoy ValuIQ!", [
+          { text: "OK", onPress: () => onNavigate("dashboard") }
+        ]);
       } else {
-        Alert.alert("Error", d.error || "Could not start checkout");
+        Alert.alert("Purchase issue", "We couldn't confirm the purchase. If you were charged, tap Restore Purchases.");
       }
-    } catch {
-      Alert.alert("Error", "Check your connection and try again.");
+    } catch (e: any) {
+      Alert.alert("Purchase failed", e?.message || "Please try again.");
+    }
+    setLoading(null);
+  }
+
+  async function handleRestore() {
+    setLoading("restore");
+    try {
+      const restored = await restorePurchases(token);
+      if (restored && restored !== "free") {
+        Alert.alert("Restored", "Your plan is active again.", [
+          { text: "OK", onPress: () => onNavigate("dashboard") }
+        ]);
+      } else {
+        Alert.alert("Nothing to restore", "We didn't find a previous purchase on this Apple ID.");
+      }
+    } catch (e: any) {
+      Alert.alert("Restore failed", e?.message || "Please try again.");
     }
     setLoading(null);
   }
@@ -159,30 +186,10 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
         <Text style={s.headline}>Upgrade ValuIQ</Text>
         <Text style={s.sub}>No contracts. Cancel anytime. Not happy? Email team@getvaluiq.com within 7 days.</Text>
 
-        {/* ── BILLING, TOGGLE ── */}
-        <View style={s.toggleWrap}>
-          <View style={s.toggleRow}>
-            <TouchableOpacity
-              style={[s.toggleBtn, billing==="monthly" && s.toggleActive]}
-              onPress={()=>setBilling("monthly")}
-            >
-              <Text style={[s.toggleTxt, billing==="monthly" && s.toggleActiveTxt]}>Monthly</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.toggleBtn, billing==="annual" && s.toggleActive]}
-              onPress={()=>setBilling("annual")}
-            >
-              <Text style={[s.toggleTxt, billing==="annual" && s.toggleActiveTxt]}>Annual</Text>
-              {billing==="annual" && <Text style={[s.toggleActiveTxt, {fontSize:10}]}> · 2 mo free</Text>}
-            </TouchableOpacity>
-          </View>
-          {billing==="monthly" && (
-            <TouchableOpacity onPress={()=>setBilling("annual")}>
-              <Text style={s.switchAnnualHint}>Switch to annual and get 2 months free →</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
+        {/* RESTORE PURCHASES (Apple-required) */}
+        <TouchableOpacity onPress={handleRestore} disabled={loading==="restore"} style={s.restoreBtn}>
+          <Text style={s.restoreTxt}>{loading==="restore" ? "Restoring..." : "Restore Purchases"}</Text>
+        </TouchableOpacity>
         {/* ── PLAN, CARDS ── */}
         {PLANS.filter(p => !(p as any).comingSoon).map(p => {
           const cur = isCurrent(p.id);
@@ -329,6 +336,8 @@ const s = StyleSheet.create({
   toggleTxt:       { color:C.text3, fontSize:14, fontWeight:"700" as any },
   toggleActiveTxt: { color:C.greenDark, fontSize:13, fontWeight:"900" as any },
   switchAnnualHint:{ color:C.green, fontSize:12, textAlign:"center" as any, marginTop:8, fontWeight:"600" as any },
+  restoreBtn: { alignSelf: "center", paddingVertical: 10, paddingHorizontal: 18, marginBottom: 8 },
+  restoreTxt: { color: "#a09b94", fontSize: 14, fontWeight: "600", textDecorationLine: "underline" },
 
   // Card,
   card:            { backgroundColor:C.surface, borderWidth:1.5, borderRadius:18, marginBottom:16 },

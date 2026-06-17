@@ -35,7 +35,7 @@ export async function resetPasswordForEmail(email: string): Promise<void> {
     body: JSON.stringify({ email, redirect_to: "https://www.getvaluiq.com/reset-password" }),
   });
   // Supabase returns 200 even 
-  if email not found (security by design)
+  // if email not found (security by design)
   // Only  throw on server errors
   if (r.status >= 500) throw new Error("Server error. Please try again.");
 }
