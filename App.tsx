@@ -18,6 +18,7 @@ import ProfileScreen from "./src/screens/ProfileScreen";
 import UpgradeScreen from "./src/screens/UpgradeScreen";
 import RelisterScreen from "./src/screens/RelisterScreen";
 import HotNowScreen from "./src/screens/HotNowScreen";
+import DemandRadarScreen from "./src/screens/DemandRadarScreen";
 import ArbitrageScreen from "./src/screens/ArbitrageScreen";
 import BundleBuilderScreen from "./src/screens/BundleBuilderScreen";
 import SourcingAlertsScreen from "./src/screens/SourcingAlertsScreen";
@@ -249,6 +250,7 @@ export default function App() {
     "upgrade":      <UpgradeScreen token={token} plan={plan} onNavigate={navigate} onBack={goBack} />,
     "relist":       <RelisterScreen {...props} />,
     "hot-now":      <HotNowScreen {...props} />,
+      "demand-radar": <DemandRadarScreen {...props} />,
     "arbitrage":    <ArbitrageScreen {...props} />,
     "bundle":       <BundleBuilderScreen {...props} />,
     "alerts":       <SourcingAlertsScreen {...props} />,
