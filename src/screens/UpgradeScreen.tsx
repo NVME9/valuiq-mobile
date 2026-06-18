@@ -307,11 +307,17 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
         </View>
 
 <View style={s.footerBox}>
-          <Text style={s.footerTxt}>🔒 Secured by Stripe · 256-bit encryption</Text>
-          <Text style={s.footerTxt}>
-            <Text onPress={()=>require("react-native").Linking.openURL("https://getvaluiq.com/terms")} style={{color:C.green}}>Terms of Service</Text> · <Text onPress={()=>require("react-native").Linking.openURL("mailto:team@getvaluiq.com")} style={{color:C.green}}>Contact Support</Text>
+          <Text style={s.footerTerms}>
+            Seller ($14.99/month) and Pro ($34.99/month) are auto-renewable subscriptions. Lifetime ($149) is a one-time purchase. Payment is charged to your Apple ID at confirmation. Subscriptions automatically renew at the same price unless cancelled at least 24 hours before the end of the current period. Manage or cancel anytime in your App Store account settings.
           </Text>
-          <Text style={s.footerTxt}>Cancel anytime · manage from your Profile</Text>
+          <Text style={s.footerTxt}>
+            <Text onPress={()=>require("react-native").Linking.openURL("https://www.getvaluiq.com/terms")} style={{color:C.green}}>Terms of Use (EULA)</Text>
+            {"  |  "}
+            <Text onPress={()=>require("react-native").Linking.openURL("https://www.getvaluiq.com/privacy")} style={{color:C.green}}>Privacy Policy</Text>
+          </Text>
+          <Text style={s.footerTxt}>
+            <Text onPress={()=>require("react-native").Linking.openURL("mailto:team@getvaluiq.com")} style={{color:C.green}}>Contact Support</Text>
+          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -383,5 +389,6 @@ const s = StyleSheet.create({
   faqQ:          { color:C.text1, fontSize:13, fontWeight:"700" as any, marginBottom:4 },
   faqA:          { color:C.text3, fontSize:12, lineHeight:18 },
   footerBox:       { marginTop:16, padding:14, backgroundColor:C.surface, borderRadius:12, borderWidth:1, borderColor:C.border, gap:6 },
+    footerTerms:     { color:C.text4, fontSize:11, lineHeight:16, textAlign:"center" as any, marginBottom:12 },
   footerTxt:       { color:C.text4, fontSize:11, textAlign:"center" as any, lineHeight:17 },
   footer:          { color:C.text4, fontSize:11, textAlign:"center" as any, marginTop:8, lineHeight:18 } });
