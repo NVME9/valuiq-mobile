@@ -19,6 +19,7 @@ import UpgradeScreen from "./src/screens/UpgradeScreen";
 import RelisterScreen from "./src/screens/RelisterScreen";
 import HotNowScreen from "./src/screens/HotNowScreen";
 import DemandRadarScreen from "./src/screens/DemandRadarScreen";
+import ResellerGPSScreen from "./src/screens/ResellerGPSScreen";
 import ArbitrageScreen from "./src/screens/ArbitrageScreen";
 import BundleBuilderScreen from "./src/screens/BundleBuilderScreen";
 import SourcingAlertsScreen from "./src/screens/SourcingAlertsScreen";
@@ -251,6 +252,7 @@ export default function App() {
     "relist":       <RelisterScreen {...props} />,
     "hot-now":      <HotNowScreen {...props} />,
       "demand-radar": <DemandRadarScreen {...props} />,
+      "reseller-gps": <ResellerGPSScreen {...props} />,
     "arbitrage":    <ArbitrageScreen {...props} />,
     "bundle":       <BundleBuilderScreen {...props} />,
     "alerts":       <SourcingAlertsScreen {...props} />,
