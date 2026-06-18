@@ -22,6 +22,7 @@ import DemandRadarScreen from "./src/screens/DemandRadarScreen";
 import ResellerGPSScreen from "./src/screens/ResellerGPSScreen";
 import CashFlowScreen from "./src/screens/CashFlowScreen";
 import ListingWriterScreen from "./src/screens/ListingWriterScreen";
+import ViralContentScreen from "./src/screens/ViralContentScreen";
 import ArbitrageScreen from "./src/screens/ArbitrageScreen";
 import BundleBuilderScreen from "./src/screens/BundleBuilderScreen";
 import SourcingAlertsScreen from "./src/screens/SourcingAlertsScreen";
@@ -257,6 +258,7 @@ export default function App() {
       "reseller-gps": <ResellerGPSScreen {...props} />,
       "cashflow": <CashFlowScreen {...props} />,
       "listing-writer": <ListingWriterScreen {...props} />,
+      "viral-content": <ViralContentScreen {...props} />,
     "arbitrage":    <ArbitrageScreen {...props} />,
     "bundle":       <BundleBuilderScreen {...props} />,
     "alerts":       <SourcingAlertsScreen {...props} />,

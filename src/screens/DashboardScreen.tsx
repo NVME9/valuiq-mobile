@@ -52,6 +52,7 @@ const TOOLS = [
   { id:"reseller-gps",  icon:"🗺", name:"Reseller GPS",    desc:"What to hunt & where this week",        minPlan:2, accent:C.green   },
   { id:"cashflow",      icon:"💰", name:"Cash Flow Oracle",desc:"30/60/90 day cash forecast",            minPlan:2, accent:C.yellow  },
   { id:"listing-writer",icon:"✍️", name:"Listing Writer",  desc:"AI writes platform-perfect listings",     minPlan:2, accent:"#b066ff" },
+  { id:"viral-content", icon:"📱", name:"Viral Content",   desc:"Turn flips into TikToks & posts",        minPlan:1, accent:"#ff6b6b" },
   { id:"relist",        icon:"✏️",  name:"Auto-Relist",      desc:"Refresh dying listings",               minPlan:1, accent:C.orange  },
   { id:"deal-hunter",   icon:"🤖", name:"Deal Hunter AI",   desc:"24/7 alerts from 17 sources",           minPlan:2, accent:"#b066ff" },
   { id:"manifest",      icon:"📋", name:"Manifest Analyzer",desc:"Score liquidation lots",                minPlan:2, accent:C.yellow  },
