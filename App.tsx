@@ -20,6 +20,7 @@ import RelisterScreen from "./src/screens/RelisterScreen";
 import HotNowScreen from "./src/screens/HotNowScreen";
 import DemandRadarScreen from "./src/screens/DemandRadarScreen";
 import ResellerGPSScreen from "./src/screens/ResellerGPSScreen";
+import CashFlowScreen from "./src/screens/CashFlowScreen";
 import ArbitrageScreen from "./src/screens/ArbitrageScreen";
 import BundleBuilderScreen from "./src/screens/BundleBuilderScreen";
 import SourcingAlertsScreen from "./src/screens/SourcingAlertsScreen";
@@ -253,6 +254,7 @@ export default function App() {
     "hot-now":      <HotNowScreen {...props} />,
       "demand-radar": <DemandRadarScreen {...props} />,
       "reseller-gps": <ResellerGPSScreen {...props} />,
+      "cashflow": <CashFlowScreen {...props} />,
     "arbitrage":    <ArbitrageScreen {...props} />,
     "bundle":       <BundleBuilderScreen {...props} />,
     "alerts":       <SourcingAlertsScreen {...props} />,
