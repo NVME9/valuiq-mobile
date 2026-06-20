@@ -6,6 +6,7 @@ import {
 } from "react-native";
 import { SafeAreaView as SAV } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import SaleCapturePrompt from "../components/SaleCapturePrompt";
 import { API_BASE } from "../lib/api";
 
 const { width } = Dimensions.get("window");
@@ -47,6 +48,16 @@ const TOOLS = [
   { id:"thrift-run",    icon:"🛍️", name:"Thrift Run",       desc:"Rapid-scan a full store",               minPlan:1, accent:C.green   },
   { id:"deathpile",     icon:"💀", name:"Death Pile",       desc:"Diagnose stuck inventory",              minPlan:1, accent:"#a09b94" },
   { id:"hot-now",       icon:"🔥", name:"Hot Right Now",    desc:"What's selling best this week",         minPlan:1, accent:C.red     },
+  { id:"demand-radar",  icon:"🚀", name:"Demand Radar",    desc:"Rising before prices spike",            minPlan:2, accent:"#b066ff" },
+  { id:"reseller-gps",  icon:"🗺", name:"Reseller GPS",    desc:"What to hunt & where this week",        minPlan:2, accent:C.green   },
+  { id:"cashflow",      icon:"💰", name:"Cash Flow Oracle",desc:"30/60/90 day cash forecast",            minPlan:2, accent:C.yellow  },
+  { id:"listing-writer",icon:"✍️", name:"Listing Writer",  desc:"AI writes platform-perfect listings",     minPlan:2, accent:"#b066ff" },
+  { id:"viral-content", icon:"📱", name:"Viral Content",   desc:"Turn flips into TikToks & posts",        minPlan:1, accent:"#ff6b6b" },
+  { id:"price-battle",  icon:"⚔️", name:"Price Battle",     desc:"Best platform to sell, after fees",      minPlan:1, accent:C.red     },
+  { id:"negotiate",     icon:"🤝", name:"Negotiator",       desc:"Exact words to talk sellers down",       minPlan:1, accent:"#3665f3" },
+  { id:"sourcing-intel",icon:"🔬", name:"Sourcing Intel",   desc:"Deep market brief on any item",          minPlan:2, accent:"#b066ff" },
+  { id:"bundle-builder",icon:"📦", name:"Bundle Builder",   desc:"Group stuck items into fast bundles",    minPlan:1, accent:C.orange  },
+  { id:"flip-score",    icon:"🎯", name:"Flip Score",       desc:"Your reseller report card",             minPlan:1, accent:C.green   },
   { id:"relist",        icon:"✏️",  name:"Auto-Relist",      desc:"Refresh dying listings",               minPlan:1, accent:C.orange  },
   { id:"deal-hunter",   icon:"🤖", name:"Deal Hunter AI",   desc:"24/7 alerts from 17 sources",           minPlan:2, accent:"#b066ff" },
   { id:"manifest",      icon:"📋", name:"Manifest Analyzer",desc:"Score liquidation lots",                minPlan:2, accent:C.yellow  },
@@ -131,7 +142,7 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
   }
 
   // Tools hidden for launch (backend not ready). Remove an id here to re-enable after launch.
-  const LAUNCH_HIDDEN = ["deal-hunter", "hot-now"];
+  const LAUNCH_HIDDEN = ["deal-hunter"];
   const myTools    = TOOLS.filter(t => t.minPlan <= level && !LAUNCH_HIDDEN.includes(t.id));
   const lockedTools = TOOLS.filter(t => t.minPlan > level && !LAUNCH_HIDDEN.includes(t.id));
   const activity   = LIVE_FEED[liveIdx];
@@ -166,6 +177,8 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
           onRefresh={() => { setRefresh(true); loadData(); }}/>}
       >
 
+        {/* SALE-CAPTURE MOAT: ask about aging BUY scans */}
+        <SaleCapturePrompt token={token} />
         {/* HERO SCAN BUTTON */}
         <Animated.View style={{transform:[{scale:scanPulse}]}}>
           <TouchableOpacity style={s.hero} onPress={() => onNavigate("scanner")} activeOpacity={0.9}>

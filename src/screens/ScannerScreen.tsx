@@ -8,7 +8,8 @@ import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-ca
 import * as ImagePicker from "expo-image-picker";
 import { C } from "../lib/theme";
 import ShareButton from "../components/ShareButton";
-import { API_BASE, scanImage, scanBarcode } from "../lib/api";
+import { API_BASE, scanImage, scanBarcode , getProfitOracle } from "../lib/api";
+import { scheduleSaleCheckIn } from "../lib/notifications";
 
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
@@ -36,6 +37,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [description, setDescription] = useState("");
   const [buyPrice, setBuyPrice] = useState("");
   const [result, setResult] = useState<any>(null);
+  const [oracle, setOracle] = useState<any>(null);
+  useEffect(() => {
+    let alive = true;
+    setOracle(null);
+    const r = result;
+    if (r && !r._error && (r.itemName || r.item_name)) {
+      getProfitOracle(token, {
+        category: r.category,
+        brand: r.brand,
+        itemName: r.itemName || r.item_name,
+        buyPrice: Number(buyPrice) || 0,
+      }).then((d) => { if (alive && d && d.success) setOracle(d); });
+    }
+    return () => { alive = false; };
+  }, [result]);
   const [barcodeScanned, setBarcodeScanned] = useState(false);
   const cameraRef        = useRef<any>(null);
   const [showAnalysis,   setShowAnalysis]   = useState(false);
@@ -97,6 +113,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       }
       if (!d.success) throw new Error(d.error || "Analysis failed");
       setResult(d);
+      // SALE-CAPTURE MOAT: schedule a BUY check-in
+      try {
+        if (d && d.decision === "BUY") {
+          const sid = d.id || d.scanId || d.scan_id;
+          if (sid) scheduleSaleCheckIn(String(sid), d.itemName || d.item_name || "your item");
+        }
+      } catch {}
       setStep("result");
       if (plan === "free") setScansLeft(n => n !== null ? Math.max(0, n - 1) : null);
     } catch (e: any) {
@@ -288,6 +311,49 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   {hasLimitedData?" - verify before buying":""}
                 </Text>
               </View>
+
+              {/* VELOCITY ENGINE badge */}
+              {result.velocity && result.velocity.tier !== "unknown" && (() => {
+                const vt = result.velocity.tier;
+                const vColor = vt === "fast" ? C.green : vt === "steady" ? C.yellow : C.orange;
+                const vLabel = vt === "fast" ? "Fast mover" : vt === "steady" ? "Steady seller" : "Slow mover";
+                return (
+                  <View style={[s.veloBadge, { borderColor: vColor + "40", backgroundColor: vColor + "12" }]}>
+                    <Text style={[s.veloText, { color: vColor }]}>
+                      {vLabel}{result.velocity.estDaysToSale ? "  -  ~" + result.velocity.estDaysToSale + " days to sell" : ""}
+                    </Text>
+                    {result.velocity.sellThrough !== null && (
+                      <Text style={s.veloSub}>{result.velocity.sellThrough}% of listings sell{result.velocity.soldCount ? " (" + result.velocity.soldCount + " recent sales)" : ""}</Text>
+                    )}
+                  </View>
+                );
+              })()}
+
+              {/* PROFIT ORACLE â€” real-outcome prediction */}
+              {oracle && oracle.prediction && (
+                <View style={s.oracleCard}>
+                  <Text style={s.oracleLabel}>
+                    {oracle.dataMode === "crowd-led" ? "\ud83d\udd2e PROFIT ORACLE \u00b7 REAL DATA" : "\ud83d\udd2e PROFIT ORACLE"}
+                  </Text>
+                  <Text style={s.oracleHead}>{oracle.prediction.headline}</Text>
+                  {oracle.dataMode === "crowd-led" && (
+                    <View style={s.oracleStats}>
+                      {oracle.prediction.sellRate != null && (
+                        <View style={s.oracleStat}><Text style={s.oracleVal}>{oracle.prediction.sellRate}%</Text><Text style={s.oracleLbl}>sold</Text></View>
+                      )}
+                      {oracle.prediction.medianProfit != null && (
+                        <View style={s.oracleStat}><Text style={[s.oracleVal,{color:C.green}]}>${oracle.prediction.medianProfit}</Text><Text style={s.oracleLbl}>real profit</Text></View>
+                      )}
+                      {oracle.prediction.medianDays != null && (
+                        <View style={s.oracleStat}><Text style={s.oracleVal}>~{oracle.prediction.medianDays}d</Text><Text style={s.oracleLbl}>to sell</Text></View>
+                      )}
+                    </View>
+                  )}
+                  {oracle.prediction.overpayWarning ? (
+                    <Text style={s.oracleWarn}>\u26a0\ufe0f {oracle.prediction.overpayWarning}</Text>
+                  ) : null}
+                </View>
+              )}
 
               {/* Key numbers - compact row */}
               <View style={s.numbersCard}>
@@ -782,6 +848,17 @@ const s = StyleSheet.create({
   profitCard:     { backgroundColor: "rgba(0,0,0,0.35)", borderWidth: 2, borderRadius: 20, padding: 20, marginBottom: 10, alignItems: "center" },
   profitLabel:    { color: C.text3, fontSize: 10, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 },
   profitAmount:   { fontWeight: "900", letterSpacing: -2, lineHeight: 68, marginBottom: 6 },
+  veloBadge: { borderWidth: 1, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16, marginTop: 12, alignItems: "center" },
+  veloText: { fontSize: 16, fontWeight: "800" },
+    oracleCard: { backgroundColor: "#1a1424", borderColor: "#b066ff40", borderWidth: 1, borderRadius: 12, padding: 14, marginTop: 12 },
+  oracleLabel: { color: "#b066ff", fontSize: 11, fontWeight: "800", letterSpacing: 0.5, marginBottom: 6 },
+  oracleHead: { color: C.text1, fontSize: 14, fontWeight: "700", lineHeight: 20, marginBottom: 8 },
+  oracleStats: { flexDirection: "row", gap: 20, marginBottom: 6 },
+  oracleStat: {},
+  oracleVal: { color: C.text1, fontSize: 18, fontWeight: "800" },
+  oracleLbl: { color: C.text4, fontSize: 11, marginTop: 1 },
+  oracleWarn: { color: C.yellow, fontSize: 13, fontWeight: "600", marginTop: 4 },
+veloSub: { fontSize: 12, color: C.text3, marginTop: 3 },
   profitSub:      { color: C.text2, fontSize: 13, textAlign: "center" },
   noDataCard:     { backgroundColor: "rgba(0,0,0,0.3)", borderWidth: 1, borderColor: C.border, borderRadius: 20, padding: 20, marginBottom: 10 },
   numbersCard:    { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 14, flexDirection: "row", marginBottom: 10, overflow: "hidden" },
