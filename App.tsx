@@ -265,6 +265,7 @@ export default function App() {
       "price-battle": <PriceBattleScreen {...props} />,
       "negotiate": <NegotiateScreen {...props} />,
       "sourcing-intel": <SourcingIntelScreen {...props} />,
+      "bundle-builder": <BundleBuilderScreen {...props} />,
     "arbitrage":    <ArbitrageScreen {...props} />,
     "bundle":       <BundleBuilderScreen {...props} />,
     "alerts":       <SourcingAlertsScreen {...props} />,
