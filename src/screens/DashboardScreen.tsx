@@ -57,6 +57,7 @@ const TOOLS = [
   { id:"negotiate",     icon:"🤝", name:"Negotiator",       desc:"Exact words to talk sellers down",       minPlan:1, accent:"#3665f3" },
   { id:"sourcing-intel",icon:"🔬", name:"Sourcing Intel",   desc:"Deep market brief on any item",          minPlan:2, accent:"#b066ff" },
   { id:"bundle-builder",icon:"📦", name:"Bundle Builder",   desc:"Group stuck items into fast bundles",    minPlan:1, accent:C.orange  },
+  { id:"flip-score",    icon:"🎯", name:"Flip Score",       desc:"Your reseller report card",             minPlan:1, accent:C.green   },
   { id:"relist",        icon:"✏️",  name:"Auto-Relist",      desc:"Refresh dying listings",               minPlan:1, accent:C.orange  },
   { id:"deal-hunter",   icon:"🤖", name:"Deal Hunter AI",   desc:"24/7 alerts from 17 sources",           minPlan:2, accent:"#b066ff" },
   { id:"manifest",      icon:"📋", name:"Manifest Analyzer",desc:"Score liquidation lots",                minPlan:2, accent:C.yellow  },

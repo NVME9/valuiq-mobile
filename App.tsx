@@ -28,6 +28,7 @@ import NegotiateScreen from "./src/screens/NegotiateScreen";
 import SourcingIntelScreen from "./src/screens/SourcingIntelScreen";
 import ArbitrageScreen from "./src/screens/ArbitrageScreen";
 import BundleBuilderScreen from "./src/screens/BundleBuilderScreen";
+import FlipScoreScreen from "./src/screens/FlipScoreScreen";
 import SourcingAlertsScreen from "./src/screens/SourcingAlertsScreen";
 import InventoryScreen from "./src/screens/InventoryScreen";
 import ProfitTrackerScreen from "./src/screens/ProfitTrackerScreen";
@@ -266,6 +267,7 @@ export default function App() {
       "negotiate": <NegotiateScreen {...props} />,
       "sourcing-intel": <SourcingIntelScreen {...props} />,
       "bundle-builder": <BundleBuilderScreen {...props} />,
+      "flip-score": <FlipScoreScreen {...props} />,
     "arbitrage":    <ArbitrageScreen {...props} />,
     "bundle":       <BundleBuilderScreen {...props} />,
     "alerts":       <SourcingAlertsScreen {...props} />,
