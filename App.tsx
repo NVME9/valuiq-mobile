@@ -24,6 +24,7 @@ import CashFlowScreen from "./src/screens/CashFlowScreen";
 import ListingWriterScreen from "./src/screens/ListingWriterScreen";
 import ViralContentScreen from "./src/screens/ViralContentScreen";
 import PriceBattleScreen from "./src/screens/PriceBattleScreen";
+import NegotiateScreen from "./src/screens/NegotiateScreen";
 import ArbitrageScreen from "./src/screens/ArbitrageScreen";
 import BundleBuilderScreen from "./src/screens/BundleBuilderScreen";
 import SourcingAlertsScreen from "./src/screens/SourcingAlertsScreen";
@@ -261,6 +262,7 @@ export default function App() {
       "listing-writer": <ListingWriterScreen {...props} />,
       "viral-content": <ViralContentScreen {...props} />,
       "price-battle": <PriceBattleScreen {...props} />,
+      "negotiate": <NegotiateScreen {...props} />,
     "arbitrage":    <ArbitrageScreen {...props} />,
     "bundle":       <BundleBuilderScreen {...props} />,
     "alerts":       <SourcingAlertsScreen {...props} />,
