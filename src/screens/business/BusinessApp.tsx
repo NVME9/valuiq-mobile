@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { B } from "../../lib/businessTheme";
 import BusinessDashboard from "./BusinessDashboard";
 import ManifestBeast from "./ManifestBeast";
+import ResellerCFO from "./ResellerCFO";
 
 // Consumer screens - Business users get ALL of them too,
 import ScannerScreen from "../ScannerScreen";
@@ -31,7 +32,7 @@ interface Props {
   onLogout: () => void;
 }
 
-type BizScreen = "biz-dashboard" | "manifest-beast" | 
+type BizScreen = "biz-dashboard" | "manifest-beast" | "reseller-cfo" | 
   "scanner"|"dashboard"|"price-battle"|"thrift-run"|"deathpile"|
   "deal-hunter"|"manifest"|"arbitrage"|"specialty"|"profile"|
   "history"|"faq"|"ai-coach"|"inventory"|"community";
@@ -56,7 +57,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
   token, plan, scansLeft, setScansLeft,
     onNavigate: navigate, onBack: goBack, onLogout };
 
-  const isBizScreen = screen === "biz-dashboard" || screen === "manifest-beast";
+  const isBizScreen = screen === "biz-dashboard" || screen === "manifest-beast" || screen === "reseller-cfo";
 
   return (
     <View style={s.container}>
@@ -84,6 +85,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
       {/* Business screens */}
       {screen === "biz-dashboard" && <BusinessDashboard token={token} plan={plan} userEmail={userEmail} onNavigate={navigate} onLogout={onLogout}/>}
       {screen === "manifest-beast" && <ManifestBeast token={token} onBack={goBack}/>}
+      {screen === "reseller-cfo" && <ResellerCFO token={token} onBack={goBack}/>}
       
       {/* Consumer screens - full access for Business users */}
       {screen === "scanner"      && <ScannerScreen   {...consumerProps}/>}

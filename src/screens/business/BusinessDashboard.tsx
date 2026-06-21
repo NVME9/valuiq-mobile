@@ -14,6 +14,7 @@ const TOOLS = [
   { id:"fake-detector",  icon:"🛡️", title:"Fake, Detector",        desc:"Photo authentication — prevent account bans", badge:"🔥" as const, isDiamond:true },
   // ⚔️ CORE, WEAPONS,
   { id:"manifest-beast", icon:"📋", title:"Manifest Beast",        desc:"5,000+ items analyzed overnight",             badge:"LIVE" as const },
+  { id:"reseller-cfo",  icon:"💰", title:"The Reseller's CFO",   desc:"Your true margin by category + month-end forecast", badge:"NEW" as const, isDiamond:true },
   { id:"autoscout",      icon:"🤖", title:"Auto-Scout",            desc:"24/7 personalized deal hunting",              badge:"ON" as const },
   { id:"cashflow",       icon:"💰", title:"Cash, Flow Oracle",       desc:"30/60/90 day forecast",                       badge:null },
   { id:"competitor",     icon:"🏹", title:"Competitor Destroyer",  desc:"Monitor rival sellers in real time",          badge:null },
