@@ -204,6 +204,39 @@ export default function ManifestBeast({ token, onBack }: Props) {
                     <View style={s.rStat}><Text style={s.rVal}>{job.result.totalItems||0}</Text><Text style={s.rLbl}>Total</Text></View>
                     <View style={s.rStat}><Text style={[s.rVal,{color:B.profit}]}>${Math.round(job.result.totalProfit||0)}</Text><Text style={s.rLbl}>Est. Profit</Text></View>
                   </View>
+                  {job.result.lot && (
+                    <View style={s.lotCard}>
+                      <View style={s.lotVerdictRow}>
+                        <Text style={s.lotVerdictLabel}>LOT VERDICT</Text>
+                        <View style={[s.lotBadge,
+                          job.result.lot.lotVerdict==="STRONG"?{backgroundColor:"#00d08420"}:
+                          job.result.lot.lotVerdict==="FAIR"?{backgroundColor:B.orangeBg}:
+                          job.result.lot.lotVerdict==="RISKY"?{backgroundColor:"#ffb02020"}:
+                          {backgroundColor:"#ff453a20"}]}>
+                          <Text style={[s.lotBadgeTxt,
+                            job.result.lot.lotVerdict==="STRONG"?{color:B.profit}:
+                            job.result.lot.lotVerdict==="FAIR"?{color:B.orange}:
+                            job.result.lot.lotVerdict==="RISKY"?{color:"#ffb020"}:
+                            {color:"#ff453a"}]}>{job.result.lot.lotVerdict}</Text>
+                        </View>
+                      </View>
+                      <View style={s.lotNetRow}>
+                        <View style={{flex:1}}>
+                          <Text style={s.lotNetVal}>${(job.result.lot.projectedNet||0).toLocaleString()}</Text>
+                          <Text style={s.lotNetLbl}>Projected Net</Text>
+                        </View>
+                        <View style={{flex:1}}>
+                          <Text style={s.lotGrossVal}>${(job.result.lot.projectedGrossResale||0).toLocaleString()}</Text>
+                          <Text style={s.lotNetLbl}>Gross Resale</Text>
+                        </View>
+                      </View>
+                      <Text style={s.maxBidLabel}>YOUR MAX BID</Text>
+                      <View style={s.bidRow}><Text style={s.bidName}>Safe</Text><Text style={s.bidRoi}>75% ROI</Text><Text style={s.bidVal}>${(job.result.lot.maxBid?.safe||0).toLocaleString()}</Text></View>
+                      <View style={[s.bidRow,s.bidRowTarget]}><Text style={[s.bidName,{color:B.orange,fontWeight:"900"}]}>Target</Text><Text style={s.bidRoi}>40% ROI</Text><Text style={[s.bidVal,{color:B.orange}]}>${(job.result.lot.maxBid?.target||0).toLocaleString()}</Text></View>
+                      <View style={s.bidRow}><Text style={s.bidName}>Aggressive</Text><Text style={s.bidRoi}>20% ROI</Text><Text style={s.bidVal}>${(job.result.lot.maxBid?.aggressive||0).toLocaleString()}</Text></View>
+                      {job.result.lot.confidenceNote ? <Text style={s.lotNote}>{job.result.lot.confidenceNote}</Text> : null}
+                    </View>
+                  )}
                   {(job.result.topItems||[]).slice(0,3).map((item:any,j:number)=>(
                     <View key={j} style={s.topItem}>
                       <Text style={s.topItemName} numberOfLines={1}>{item.name}</Text>
@@ -238,6 +271,22 @@ const s = StyleSheet.create({
   uploadNote:  {color:B.text4,fontSize:11,textAlign:"center" as any,marginTop:10,lineHeight:16},
   returnsCard: {backgroundColor:B.surface,borderWidth:1,borderColor:B.border,borderRadius:14,padding:16,marginBottom:16},
   returnsTitle:{color:B.text1,fontSize:13,fontWeight:"800" as any,marginBottom:10},
+  lotCard:     {backgroundColor:B.bg,borderWidth:1.5,borderColor:B.orangeBorder,borderRadius:14,padding:14,marginTop:12,marginBottom:6},
+  lotVerdictRow:{flexDirection:"row",alignItems:"center",justifyContent:"space-between",marginBottom:12},
+  lotVerdictLabel:{color:B.text3,fontSize:11,fontWeight:"800" as any,letterSpacing:1},
+  lotBadge:    {paddingHorizontal:10,paddingVertical:4,borderRadius:8},
+  lotBadgeTxt: {fontSize:12,fontWeight:"900" as any,letterSpacing:0.5},
+  lotNetRow:   {flexDirection:"row",marginBottom:14,paddingBottom:14,borderBottomWidth:1,borderBottomColor:B.border},
+  lotNetVal:   {color:B.profit,fontSize:24,fontWeight:"900" as any},
+  lotGrossVal: {color:B.text1,fontSize:24,fontWeight:"900" as any},
+  lotNetLbl:   {color:B.text4,fontSize:11,marginTop:2},
+  maxBidLabel: {color:B.text1,fontSize:12,fontWeight:"900" as any,letterSpacing:1,marginBottom:8},
+  bidRow:      {flexDirection:"row",alignItems:"center",paddingVertical:7,paddingHorizontal:10,borderRadius:8,marginBottom:4},
+  bidRowTarget:{backgroundColor:B.orangeBg},
+  bidName:     {color:B.text2,fontSize:13,fontWeight:"700" as any,flex:1},
+  bidRoi:      {color:B.text4,fontSize:11,flex:1,textAlign:"center" as any},
+  bidVal:      {color:B.text1,fontSize:16,fontWeight:"900" as any,flex:1,textAlign:"right" as any},
+  lotNote:     {color:B.text4,fontSize:10,marginTop:8,fontStyle:"italic" as any,lineHeight:14},
   returnItem:  {color:B.text2,fontSize:13,lineHeight:22},
   secTit:      {color:B.text3,fontSize:9,fontWeight:"800" as any,letterSpacing:2,textTransform:"uppercase" as any,marginBottom:10},
   emptyJobs:   {alignItems:"center",paddingVertical:40},
