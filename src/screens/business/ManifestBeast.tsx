@@ -2,6 +2,10 @@ import React, { useState, useEffect } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system";
+import Papa from "papaparse";
+import * as XLSX from "xlsx";
 import { B } from "../../lib/businessTheme";
 import { API_BASE } from "../../lib/api";
 
@@ -49,6 +53,73 @@ export default function ManifestBeast({ token, onBack }: Props) {
     setUploading(false);
   }
 
+  // Auto-detect which columns hold name / qty / retail from messy manifest headers.
+  function mapRows(rawRows: any[]): {name:string;qty:number;retail:number}[] {
+    if (!rawRows.length) return [];
+    const headers = Object.keys(rawRows[0] || {});
+    const find = (cands: string[]) =>
+      headers.find(h => cands.some(c => h.toLowerCase().replace(/[^a-z]/g,"").includes(c)));
+    const nameCol   = find(["itemname","productname","description","title","item","product","name","desc"]);
+    const qtyCol    = find(["qty","quantity","units","count","cases","pack"]);
+    const retailCol = find(["retail","msrp","price","unitprice","extretail","value","cost"]);
+    return rawRows.map(r => ({
+      name:   String(nameCol ? r[nameCol] : (Object.values(r)[0] || "")).trim(),
+      qty:    parseInt(qtyCol ? r[qtyCol] : "1") || 1,
+      retail: parseFloat(String(retailCol ? r[retailCol] : "0").replace(/[^0-9.]/g,"")) || 0,
+    })).filter(x => x.name.length > 1);
+  }
+
+  async function uploadSpreadsheet() {
+    try {
+      const pick = await DocumentPicker.getDocumentAsync({
+        type: ["text/csv","text/comma-separated-values",
+               "application/vnd.ms-excel",
+               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+        copyToCacheDirectory: true,
+      });
+      if (pick.canceled || !pick.assets?.[0]) return;
+      const file = pick.assets[0];
+      setUploading(true);
+
+      let rows: any[] = [];
+      const lower = (file.name || "").toLowerCase();
+
+      if (lower.endsWith(".csv")) {
+        const text = await FileSystem.readAsStringAsync(file.uri);
+        const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+        rows = mapRows(parsed.data as any[]);
+      } else {
+        // Excel: read as base64 -> XLSX
+        const b64 = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
+        const wb = XLSX.read(b64, { type: "base64" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+        rows = mapRows(json as any[]);
+      }
+
+      if (!rows.length) {
+        Alert.alert("No items found", "We couldn't read item rows from that file. Make sure it has a header row with item names.");
+        setUploading(false); return;
+      }
+
+      const r = await fetch(`${API_BASE}/api/business/manifest-upload-csv`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, rows }),
+      });
+      const d = await r.json();
+      if (d.jobId) {
+        Alert.alert("Manifest Uploaded", `Analyzing ${d.estimatedItems || rows.length} items.\n\nEstimated time: ${d.estimatedMinutes || 5} minutes.`);
+        loadJobs();
+      } else {
+        Alert.alert("Upload Failed", d.error || "Please try again.");
+      }
+    } catch (e:any) {
+      Alert.alert("Error", e?.message || "Could not read that file.");
+    }
+    setUploading(false);
+  }
+
   return (
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" backgroundColor={B.bg}/>
@@ -66,7 +137,10 @@ export default function ManifestBeast({ token, onBack }: Props) {
           <TouchableOpacity style={[s.uploadBtn, uploading && {opacity:0.7}]} onPress={uploadManifest} disabled={uploading}>
             {uploading ? <ActivityIndicator color="#000" size="small"/> : <Text style={s.uploadBtnTxt}>📸 Upload Manifest Photo</Text>}
           </TouchableOpacity>
-          <Text style={s.uploadNote}>Supports: photo of manifest, PDF scan, Excel screenshot, handwritten list</Text>
+          <TouchableOpacity style={[s.uploadBtn, {backgroundColor:"transparent", borderWidth:1, borderColor:B.orange, marginTop:10}, uploading && {opacity:0.7}]} onPress={uploadSpreadsheet} disabled={uploading}>
+            <Text style={[s.uploadBtnTxt, {color:B.orange}]}>Upload Spreadsheet (CSV/Excel)</Text>
+          </TouchableOpacity>
+          <Text style={s.uploadNote}>Photo or PDF of a manifest, or a CSV/Excel liquidation manifest file</Text>
         </View>
 
         {/* What you get */}
