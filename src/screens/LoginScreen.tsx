@@ -44,6 +44,11 @@ export default function LoginScreen({ onLogin }: Props) {
         setBioType(type as any);
         const en = await isBiometricEnabled();
         setBioEn(en);
+        if (en) {
+          const storedEmail = await getBiometricEmail();
+          const storedToken = await getBiometricRefreshToken();
+          if (storedEmail && storedToken) { handleBiometric(); }
+        }
       }
     })();
   }, []);
