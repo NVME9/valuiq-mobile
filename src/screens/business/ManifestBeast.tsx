@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, Alert } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, Alert, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
@@ -17,6 +17,7 @@ export default function ManifestBeast({ token, onBack }: Props) {
   const [jobs, setJobs]       = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [lotCost, setLotCost] = useState("");
 
   useEffect(() => { loadJobs(); const t = setInterval(loadJobs, 8000); return ()=>clearInterval(t); }, []);
 
@@ -41,7 +42,7 @@ export default function ManifestBeast({ token, onBack }: Props) {
       const r = await fetch(`${API_BASE}/api/business/manifest-upload`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, imageBase64: base64, mimeType: "image/jpeg" }) });
+        body: JSON.stringify({ token, imageBase64: base64, mimeType: "image/jpeg", costMode: lotCost ? "total" : "auto", lotCost: parseFloat(lotCost) || 0 }) });
       const d = await r.json();
       if (d.jobId) {
         Alert.alert("✅ Manifest, Uploaded", `Job started. ValuIQ is analyzing your manifest.\n\nEstimated time: ${d.estimatedMinutes||10} minutes for ${d.estimatedItems||"your"} items.\n\nWe'll notify you when it's complete.`);
@@ -105,11 +106,11 @@ export default function ManifestBeast({ token, onBack }: Props) {
       const r = await fetch(`${API_BASE}/api/business/manifest-upload-csv`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, rows }),
+        body: JSON.stringify({ token, rows, costMode: lotCost ? "total" : "auto", lotCost: parseFloat(lotCost) || 0 }),
       });
       const d = await r.json();
       if (d.jobId) {
-        Alert.alert("Manifest Uploaded", `Analyzing ${d.estimatedItems || rows.length} items.\n\nEstimated time: ${d.estimatedMinutes || 5} minutes.`);
+        Alert.alert("Manifest Analyzed", d.sampled ? `Analyzed a ${d.analyzedItems}-item sample of ${d.totalItems} items. Your lot projection scales from this sample.` : `Analyzed all ${d.totalItems} items. See your report below.`);
         loadJobs();
       } else {
         Alert.alert("Upload Failed", d.error || "Please try again.");
@@ -132,8 +133,16 @@ export default function ManifestBeast({ token, onBack }: Props) {
       <ScrollView contentContainerStyle={s.scroll}>
         {/* Hero */}
         <View style={s.hero}>
-          <Text style={s.heroTitle}>5,000+ items analyzed. Overnight. Automatically.</Text>
-          <Text style={s.heroSub}>Upload any manifest — photo, PDF scan, or CSV. OCR extracts every item. AI prices each one with real eBay data. You wake up to a complete profit report.</Text>
+          <Text style={s.heroTitle}>Any manifest. Real eBay prices. Your max bid.</Text>
+          <Text style={s.heroSub}>Upload any manifest - photo or CSV/Excel. We price each item against real eBay sold data and give you a risk-adjusted lot value plus your maximum profitable bid.</Text>
+          <View style={s.costBox}>
+            <Text style={s.costLbl}>What you'll pay for the whole lot (optional)</Text>
+            <View style={s.costInputRow}>
+              <Text style={s.costDollar}>$</Text>
+              <TextInput style={s.costInput} value={lotCost} onChangeText={setLotCost} keyboardType="numeric" placeholder="e.g. 1800" placeholderTextColor={B.text4} />
+            </View>
+            <Text style={s.costHint}>Leave blank and we'll estimate cost at 25% of retail.</Text>
+          </View>
           <TouchableOpacity style={[s.uploadBtn, uploading && {opacity:0.7}]} onPress={uploadManifest} disabled={uploading}>
             {uploading ? <ActivityIndicator color="#000" size="small"/> : <Text style={s.uploadBtnTxt}>📸 Upload Manifest Photo</Text>}
           </TouchableOpacity>
@@ -264,6 +273,12 @@ const s = StyleSheet.create({
   navTitle:    {color:B.text1,fontSize:15,fontWeight:"800" as any},
   scroll:      {padding:16,paddingBottom:60},
   hero:        {backgroundColor:B.surface,borderWidth:1.5,borderColor:B.orangeBorder,borderRadius:16,padding:18,marginBottom:12},
+  costBox:     {marginTop:14,marginBottom:4},
+  costLbl:     {color:B.text2,fontSize:12,fontWeight:"700" as any,marginBottom:6},
+  costInputRow:{flexDirection:"row",alignItems:"center",backgroundColor:B.bg,borderWidth:1,borderColor:B.border2,borderRadius:10,paddingHorizontal:12},
+  costDollar:  {color:B.text2,fontSize:16,fontWeight:"800" as any,marginRight:4},
+  costInput:   {flex:1,color:B.text1,fontSize:15,paddingVertical:11},
+  costHint:    {color:B.text4,fontSize:11,marginTop:5},
   heroTitle:   {color:B.text1,fontSize:18,fontWeight:"900" as any,lineHeight:24,marginBottom:8},
   heroSub:     {color:B.text3,fontSize:13,lineHeight:19,marginBottom:16},
   uploadBtn:   {backgroundColor:B.orange,borderRadius:13,padding:15,alignItems:"center"},
