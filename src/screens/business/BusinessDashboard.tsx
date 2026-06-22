@@ -8,24 +8,19 @@ interface Props { token:string; plan:string; userEmail:string; onNavigate:(s:str
 
 const TOOLS = [
   // 💎 THE, DIAMONDS — Features no other app has,
-  { id:"local-spider",   icon:"📍", title:"Local, Deal Spider",     desc:"Finds local deals in minutes of posting",    badge:"🔥" as const, isDiamond:true },
   { id:"vendor-intel",   icon:"🔬", title:"Vendor, Intelligence",   desc:"Know if a vendor over-grades before buying",  badge:"🔥" as const, isDiamond:true },
   { id:"trend-predictor",icon:"📈", title:"Trend Predictor",       desc:"Know what's hot BEFORE everyone else",        badge:"🔥" as const, isDiamond:true },
   { id:"fake-detector",  icon:"🛡️", title:"Fake, Detector",        desc:"Photo authentication — prevent account bans", badge:"🔥" as const, isDiamond:true },
   // ⚔️ CORE, WEAPONS,
   { id:"manifest-beast", icon:"📋", title:"Manifest Beast",        desc:"5,000+ items analyzed overnight",             badge:"LIVE" as const },
   { id:"reseller-cfo",  icon:"💰", title:"The Reseller's CFO",   desc:"Your true margin by category + month-end forecast", badge:"NEW" as const, isDiamond:true },
-  { id:"autoscout",      icon:"🤖", title:"Auto-Scout",            desc:"24/7 personalized deal hunting",              badge:"ON" as const },
   { id:"cashflow",       icon:"💰", title:"Cash, Flow Oracle",       desc:"30/60/90 day forecast",                       badge:null },
-  { id:"competitor",     icon:"🏹", title:"Competitor Destroyer",  desc:"Monitor rival sellers in real time",          badge:null },
-  { id:"prophet",        icon:"🔮", title:"Pallet Prophet",        desc:"Predict lot ROI before wiring money",         badge:null },
-  { id:"pulse",          icon:"📡", title:"Market, Pulse",          desc:"What's selling hot right now",                badge:"LIVE" as const },
+  { id:"competitor",     icon:"🏹", title:"Competitor Destroyer",  desc:"Analyze top sellers in your category",          badge:null },
   // 🏢 TEAM & OPERATIONS,
-  { id:"team",           icon:"👥", title:"Team, Center",           desc:"Manage up to 10 team members",               badge:null },
   { id:"tax",            icon:"📊", title:"Tax, Export",            desc:"Schedule C ready — accountant-approved",      badge:null },
   // 📱 CONSUMER, TOOLS (full access)
   { id:"scanner",        icon:"📷", title:"Item, Scanner",          desc:"Scan any item",                               badge:null },
-  { id:"deal-hunter",    icon:"🤖", title:"Deal Hunter",           desc:"17 sources monitored",                        badge:null },
+  { id:"deal-hunter",    icon:"🤖", title:"Deal Hunter",           desc:"Find deals across marketplaces",                        badge:null },
   { id:"viral-content",  icon:"📱", title:"Viral, Content Engine",  desc:"TikTok scripts from your finds",              badge:"NEW" as const },
   { id:"sourcing-trip",  icon:"🗺️", title:"Sourcing, Trip Planner", desc:"Optimal daily route with scores",             badge:"NEW" as const },
   { id:"bundle",         icon:"📦", title:"Bundle, Intelligence",   desc:"Bundle items for higher margins",             badge:null },
@@ -82,18 +77,9 @@ export default function BusinessDashboard({ token, userEmail, onNavigate, onLogo
           ))}
         </ScrollView>
 
-        {/* Scout, Status */}
-        <TouchableOpacity style={s.scoutBar} onPress={()=>onNavigate("autoscout")}>
-          <View style={s.dot}/>
-          <View style={{flex:1}}>
-            <Text style={s.scoutTit}>Auto-Scout is live</Text>
-            <Text style={s.scoutSub}>Monitoring 17 sources · alerts when score ≥80 matches your profile</Text>
-          </View>
-          <Text style={{color:B.orange,fontSize:18}}>→</Text>
-        </TouchableOpacity>
 
         {/* Tools */}
-        <Text style={s.secTit}>YOUR 10 WEAPONS</Text>
+        <Text style={s.secTit}>YOUR TITAN TOOLKIT</Text>
         <View style={s.grid}>
           {TOOLS.map(t=>(
             <TouchableOpacity key={t.id} style={[(t as any).isDiamond ? s.diamondCard : s.toolCard]} onPress={()=>onNavigate(t.id)} activeOpacity={0.8}>
@@ -118,7 +104,7 @@ export default function BusinessDashboard({ token, userEmail, onNavigate, onLogo
           <>
             <Text style={s.secTit}>LATEST INTELLIGENCE</Text>
             {stats.recentDeals.slice(0,3).map((d:any,i:number)=>(
-              <TouchableOpacity key={i} style={s.dealCard} onPress={()=>onNavigate("autoscout")}>
+              <TouchableOpacity key={i} style={s.dealCard} onPress={()=>onNavigate("deal-hunter")}>
                 <View style={[s.score,{backgroundColor:d.score>=85?B.profit+"20":B.warning+"15"}]}>
                   <Text style={[s.scoreNum,{color:d.score>=85?B.profit:B.warning}]}>{d.score}</Text>
                 </View>

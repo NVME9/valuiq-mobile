@@ -5,6 +5,10 @@ import { B } from "../../lib/businessTheme";
 import BusinessDashboard from "./BusinessDashboard";
 import ManifestBeast from "./ManifestBeast";
 import ResellerCFO from "./ResellerCFO";
+import VendorIntel from "./VendorIntel";
+import CashFlowScreen from "../CashFlowScreen";
+import ViralContentScreen from "../ViralContentScreen";
+import BundleBuilderScreen from "../BundleBuilderScreen";
 
 // Consumer screens - Business users get ALL of them too,
 import ScannerScreen from "../ScannerScreen";
@@ -32,10 +36,10 @@ interface Props {
   onLogout: () => void;
 }
 
-type BizScreen = "biz-dashboard" | "manifest-beast" | "reseller-cfo" | 
+type BizScreen = "biz-dashboard" | "manifest-beast" | "reseller-cfo" | "vendor-intel" | 
   "scanner"|"dashboard"|"price-battle"|"thrift-run"|"deathpile"|
   "deal-hunter"|"manifest"|"arbitrage"|"specialty"|"profile"|
-  "history"|"faq"|"ai-coach"|"inventory"|"community";
+  "history"|"faq"|"ai-coach"|"inventory"|"community"|"cashflow"|"viral-content"|"bundle";
 
 export default function BusinessApp({ token, plan, userEmail, scansLeft, setScansLeft, onLogout }: Props) {
   const [screen, setScreen]   = useState<BizScreen>("biz-dashboard");
@@ -57,7 +61,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
   token, plan, scansLeft, setScansLeft,
     onNavigate: navigate, onBack: goBack, onLogout };
 
-  const isBizScreen = screen === "biz-dashboard" || screen === "manifest-beast" || screen === "reseller-cfo";
+  const isBizScreen = screen === "biz-dashboard" || screen === "manifest-beast" || screen === "reseller-cfo" || screen === "vendor-intel";
 
   return (
     <View style={s.container}>
@@ -86,6 +90,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
       {screen === "biz-dashboard" && <BusinessDashboard token={token} plan={plan} userEmail={userEmail} onNavigate={navigate} onLogout={onLogout}/>}
       {screen === "manifest-beast" && <ManifestBeast token={token} onBack={goBack}/>}
       {screen === "reseller-cfo" && <ResellerCFO token={token} onBack={goBack}/>}
+      {screen === "vendor-intel" && <VendorIntel token={token} onBack={goBack}/>}
       
       {/* Consumer screens - full access for Business users */}
       {screen === "scanner"      && <ScannerScreen   {...consumerProps}/>}
@@ -101,6 +106,9 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
       {screen === "history"      && <HistoryScreen    {...consumerProps}/>}
       {screen === "faq"          && <FAQScreen        {...consumerProps}/>}
       {screen === "ai-coach"     && <AICoachScreen    {...consumerProps}/>}
+      {screen === "cashflow"      && <CashFlowScreen     {...consumerProps}/>}
+      {screen === "viral-content" && <ViralContentScreen {...consumerProps}/>}
+      {screen === "bundle"        && <BundleBuilderScreen {...consumerProps}/>}
       {screen === "inventory"    && <InventoryScreen  {...consumerProps}/>}
       {screen === "community"    && <CommunityScreen  {...consumerProps}/>}
     </View>
