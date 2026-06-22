@@ -6,6 +6,8 @@ import BusinessDashboard from "./BusinessDashboard";
 import ManifestBeast from "./ManifestBeast";
 import ResellerCFO from "./ResellerCFO";
 import VendorIntel from "./VendorIntel";
+import CompetitorIntel from "./CompetitorIntel";
+import TrendPredictor from "./TrendPredictor";
 import CashFlowScreen from "../CashFlowScreen";
 import ViralContentScreen from "../ViralContentScreen";
 import BundleBuilderScreen from "../BundleBuilderScreen";
@@ -36,7 +38,7 @@ interface Props {
   onLogout: () => void;
 }
 
-type BizScreen = "biz-dashboard" | "manifest-beast" | "reseller-cfo" | "vendor-intel" | 
+type BizScreen = "biz-dashboard" | "manifest-beast" | "reseller-cfo" | "vendor-intel" | "competitor" | "trend-predictor" | 
   "scanner"|"dashboard"|"price-battle"|"thrift-run"|"deathpile"|
   "deal-hunter"|"manifest"|"arbitrage"|"specialty"|"profile"|
   "history"|"faq"|"ai-coach"|"inventory"|"community"|"cashflow"|"viral-content"|"bundle";
@@ -61,7 +63,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
   token, plan, scansLeft, setScansLeft,
     onNavigate: navigate, onBack: goBack, onLogout };
 
-  const isBizScreen = screen === "biz-dashboard" || screen === "manifest-beast" || screen === "reseller-cfo" || screen === "vendor-intel";
+  const isBizScreen = screen === "biz-dashboard" || screen === "manifest-beast" || screen === "reseller-cfo" || screen === "vendor-intel" || screen === "competitor" || screen === "trend-predictor";
 
   return (
     <View style={s.container}>
@@ -91,6 +93,8 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
       {screen === "manifest-beast" && <ManifestBeast token={token} onBack={goBack}/>}
       {screen === "reseller-cfo" && <ResellerCFO token={token} onBack={goBack}/>}
       {screen === "vendor-intel" && <VendorIntel token={token} onBack={goBack}/>}
+      {screen === "competitor" && <CompetitorIntel token={token} onBack={goBack}/>}
+      {screen === "trend-predictor" && <TrendPredictor token={token} onBack={goBack}/>}
       
       {/* Consumer screens - full access for Business users */}
       {screen === "scanner"      && <ScannerScreen   {...consumerProps}/>}
