@@ -22,7 +22,7 @@ const TOOLS = [
   { id:"scanner",        icon:"📷", title:"Item, Scanner",          desc:"Scan any item",                               badge:null },
   { id:"deal-hunter",    icon:"🤖", title:"Deal Hunter",           desc:"Find deals across marketplaces",                        badge:null },
   { id:"viral-content",  icon:"📱", title:"Viral, Content Engine",  desc:"TikTok scripts from your finds",              badge:"NEW" as const },
-  { id:"sourcing-trip",  icon:"🗺️", title:"Sourcing, Trip Planner", desc:"Optimal daily route with scores",             badge:"NEW" as const },
+  { id:"sourcing-trip",  icon:"🗺️", title:"Sourcing Intel",        desc:"Where and what to source for profit",             badge:"NEW" as const },
   { id:"bundle",         icon:"📦", title:"Bundle, Intelligence",   desc:"Bundle items for higher margins",             badge:null },
   { id:"ai-coach",       icon:"🎯", title:"AI Coach",              desc:"Personal analysis from your data",            badge:null },
 ];

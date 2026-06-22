@@ -8,6 +8,9 @@ import ResellerCFO from "./ResellerCFO";
 import VendorIntel from "./VendorIntel";
 import CompetitorIntel from "./CompetitorIntel";
 import TrendPredictor from "./TrendPredictor";
+import FakeDetector from "./FakeDetector";
+import TaxExport from "./TaxExport";
+import SourcingIntelScreen from "../SourcingIntelScreen";
 import CashFlowScreen from "../CashFlowScreen";
 import ViralContentScreen from "../ViralContentScreen";
 import BundleBuilderScreen from "../BundleBuilderScreen";
@@ -38,10 +41,10 @@ interface Props {
   onLogout: () => void;
 }
 
-type BizScreen = "biz-dashboard" | "manifest-beast" | "reseller-cfo" | "vendor-intel" | "competitor" | "trend-predictor" | 
+type BizScreen = "biz-dashboard" | "manifest-beast" | "reseller-cfo" | "vendor-intel" | "competitor" | "trend-predictor" | "fake-detector" | "tax" | 
   "scanner"|"dashboard"|"price-battle"|"thrift-run"|"deathpile"|
   "deal-hunter"|"manifest"|"arbitrage"|"specialty"|"profile"|
-  "history"|"faq"|"ai-coach"|"inventory"|"community"|"cashflow"|"viral-content"|"bundle";
+  "history"|"faq"|"ai-coach"|"inventory"|"community"|"cashflow"|"viral-content"|"bundle"|"sourcing-trip";
 
 export default function BusinessApp({ token, plan, userEmail, scansLeft, setScansLeft, onLogout }: Props) {
   const [screen, setScreen]   = useState<BizScreen>("biz-dashboard");
@@ -63,7 +66,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
   token, plan, scansLeft, setScansLeft,
     onNavigate: navigate, onBack: goBack, onLogout };
 
-  const isBizScreen = screen === "biz-dashboard" || screen === "manifest-beast" || screen === "reseller-cfo" || screen === "vendor-intel" || screen === "competitor" || screen === "trend-predictor";
+  const isBizScreen = screen === "biz-dashboard" || screen === "manifest-beast" || screen === "reseller-cfo" || screen === "vendor-intel" || screen === "competitor" || screen === "trend-predictor" || screen === "fake-detector" || screen === "tax";
 
   return (
     <View style={s.container}>
@@ -95,6 +98,8 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
       {screen === "vendor-intel" && <VendorIntel token={token} onBack={goBack}/>}
       {screen === "competitor" && <CompetitorIntel token={token} onBack={goBack}/>}
       {screen === "trend-predictor" && <TrendPredictor token={token} onBack={goBack}/>}
+      {screen === "fake-detector" && <FakeDetector token={token} onBack={goBack}/>}
+      {screen === "tax" && <TaxExport token={token} onBack={goBack}/>}
       
       {/* Consumer screens - full access for Business users */}
       {screen === "scanner"      && <ScannerScreen   {...consumerProps}/>}
@@ -113,6 +118,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
       {screen === "cashflow"      && <CashFlowScreen     {...consumerProps}/>}
       {screen === "viral-content" && <ViralContentScreen {...consumerProps}/>}
       {screen === "bundle"        && <BundleBuilderScreen {...consumerProps}/>}
+      {screen === "sourcing-trip" && <SourcingIntelScreen {...consumerProps}/>}
       {screen === "inventory"    && <InventoryScreen  {...consumerProps}/>}
       {screen === "community"    && <CommunityScreen  {...consumerProps}/>}
     </View>
