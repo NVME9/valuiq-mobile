@@ -203,9 +203,14 @@ export default function App() {
   }
 
   async function loadUserData(token:string) {
-    const [p, count] = await Promise.all([getPlan(token), getScanCount(token)]);
-    setPlan(p);
-    setScansLeft(["seller","pro","lifetime"].includes(p) ? null : Math.max(0, 10 - count));
+    let p = await getPlan(token);
+    if (p === null) { await new Promise(r=>setTimeout(r,1200)); p = await getPlan(token); }
+    const count = await getScanCount(token);
+    if (p !== null) {
+      setPlan(p);
+      const paid = ["seller","pro","lifetime","titan"].includes(p);
+      setScansLeft(paid ? null : Math.max(0, 10 - count));
+    }
   }
 
   async function handleLogin(s:Session) {
