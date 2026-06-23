@@ -130,6 +130,7 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
       const offering = await getOfferings();
       if (!offering) { Alert.alert("Unavailable", "Plans are loading. Please try again in a moment."); setLoading(null); return; }
       const wanted =
+        planId === "titan" ? `com.valuiq.titan.${(billing === "annual") ? "annual" : "monthly"}` :
         planId === "pro" ? `com.valuiq.pro.${(billing === "annual") ? "annual" : "monthly"}` :
         planId === "seller" ? `com.valuiq.seller.${(billing === "annual") ? "annual" : "monthly"}` :
         planId === "lifetime" ? "com.valuiq.lifetime" : "";
