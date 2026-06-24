@@ -84,7 +84,7 @@ const PLANS = [
       "Bundle Builder - move dead stock fast",
     ],
     missing:[],
-    cta:"Join Founding Waitlist →",
+    cta:"Unlock Titan",
     priceId_monthly:"price_1TccFjDa11MSShNknD0s3juW",
     priceId_annual:"price_1TanAWDa11MSShNk9GdeHg5n" },
 ];

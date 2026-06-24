@@ -318,7 +318,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
             {profile?.bio ? <Text style={s.bio}>{profile.bio}</Text> : null}
             <View style={{flexDirection:"row",alignItems:"center",gap:8,marginTop:8}}>
               <Text style={{fontSize:18}}>{rank.e}</Text>
-              <Text style={[s.rankLabel,{color:rank.c}]}>{rank.l}</Text>
+              <Text numberOfLines={1} adjustsFontSizeToFit style={[s.rankLabel,{color:rank.c}]}>{rank.l}</Text>
               <Text style={s.xpText}>{xp} XP</Text>
             </View>
           </View>
@@ -390,7 +390,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
         {/* XP bar */}
         <View style={s.xpCard}>
           <View style={{flexDirection:"row",justifyContent:"space-between",marginBottom:8}}>
-            <Text style={[s.rankLabel,{color:rank.c}]}>{rank.e} {rank.l}</Text>
+            <Text numberOfLines={1} adjustsFontSizeToFit style={[s.rankLabel,{color:rank.c}]}>{rank.e} {rank.l}</Text>
             {rank.next && <Text style={{color:C.text4,fontSize:11}}>{rank.next.e} {rank.next.l} at {rank.next.min} XP</Text>}
           </View>
           <View style={s.xpBarBg}>
@@ -435,7 +435,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
               </View>
               <Text style={{color:C.green,fontSize:18}}>→</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={s.communityBtn} onPress={()=>onNavigate("upgrade")}>
+            <TouchableOpacity style={s.communityBtn} onPress={()=>Linking.openURL(`${API_BASE}/partners`)}>
               <Text style={{fontSize:20}}>🔗</Text>
               <View style={{flex:1,paddingHorizontal:12}}>
                 <Text style={{color:C.text1,fontSize:14,fontWeight:"700"}}>Refer a Friend</Text>
@@ -722,7 +722,7 @@ const s = StyleSheet.create({
   avatarDefaultText: { color:C.text1, fontSize:32, fontWeight:"900" },
   displayName:       { color:C.text1, fontSize:22, fontWeight:"900", letterSpacing:-0.5, marginBottom:4 },
   bio:               { color:C.text3, fontSize:13, textAlign:"center", lineHeight:19 },
-  rankLabel:         { fontSize:13, fontWeight:"800" },
+  rankLabel:         { fontSize:13, fontWeight:"800", flexShrink:1 },
   xpText:            { color:C.text4, fontSize:11 },
 
   // Edit mode,
