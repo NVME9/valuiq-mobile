@@ -22,7 +22,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
   const [items, setItems] = useState<RunItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<RunItem|null>(null);
   const cameraRef = useRef<any>(null);
-  const isPaid = ["seller","pro","lifetime"].includes(plan);
+  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
 
   async function takePhoto() {
     if (!cameraRef.current) return;

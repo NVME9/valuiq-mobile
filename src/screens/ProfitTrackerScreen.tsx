@@ -11,7 +11,7 @@ export default function ProfitTrackerScreen({ token, plan, onNavigate, onBack }:
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [period, setPeriod] = useState<"week"|"month"|"year"|"all">("month");
-  const isPaid = ["seller","pro","lifetime"].includes(plan);
+  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
 
   useEffect(()=>{ if(isPaid) load(); else setLoading(false); },[period]);
 

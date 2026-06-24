@@ -43,6 +43,7 @@ const LIVE_FEED = [
 ];
 
 const TOOLS = [
+  { id:"titan", icon:"T", name:"Titan Business Suite", desc:"Manifest Beast, vendor intel, CFO & more", minPlan:0, accent:"#ff8c42" },
   { id:"scanner",       icon:"📷", name:"Scan Item",        desc:"Point camera → instant profit",         minPlan:0, accent:C.green   },
   { id:"community",     icon:"🏆", name:"Community",        desc:"Top flips from real resellers",         minPlan:0, accent:"#ff6b6b" },
   { id:"thrift-run",    icon:"🛍️", name:"Thrift Run",       desc:"Rapid-scan a full store",               minPlan:1, accent:C.green   },
@@ -59,7 +60,7 @@ const TOOLS = [
   { id:"bundle-builder",icon:"📦", name:"Bundle Builder",   desc:"Group stuck items into fast bundles",    minPlan:1, accent:C.orange  },
   { id:"flip-score",    icon:"🎯", name:"Flip Score",       desc:"Your reseller report card",             minPlan:1, accent:C.green   },
   { id:"relist",        icon:"✏️",  name:"Auto-Relist",      desc:"Refresh dying listings",               minPlan:1, accent:C.orange  },
-  { id:"deal-hunter",   icon:"🤖", name:"Deal Hunter AI",   desc:"24/7 alerts from 17 sources",           minPlan:2, accent:"#b066ff" },
+  { id:"deal-hunter",   icon:"🤖", name:"Deal Hunter AI",   desc:"Deal alerts across marketplaces",           minPlan:2, accent:"#b066ff" },
   { id:"manifest",      icon:"📋", name:"Manifest Analyzer",desc:"Score liquidation lots",                minPlan:2, accent:C.yellow  },
   { id:"specialty",     icon:"🎯", name:"Specialty Scanner",desc:"Sneakers, cards, vinyl & luxury",       minPlan:2, accent:"#b066ff" },
   { id:"arbitrage",     icon:"📈", name:"Arbitrage Finder", desc:"Underpriced items hiding in plain sight",minPlan:2, accent:C.green  },

@@ -14,7 +14,7 @@ export default function ArbitrageScreen({ token, plan, onNavigate, onBack }: Pro
   const [summary, setSummary] = useState("");
   const [error, setError] = useState("");
 
-  const isPaid = ["seller","pro","lifetime"].includes(plan);
+  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
 
   async function search() {
     if (!query.trim()) { setError("Enter what to search for."); return; }

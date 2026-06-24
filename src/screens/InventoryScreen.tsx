@@ -22,7 +22,7 @@ export default function InventoryScreen({ token, plan, onNavigate, onBack }: Pro
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ itemName:"", boughtPrice:"", targetPrice:"", platform:"eBay", status:"unlisted" as Status, notes:"" });
   const [saving, setSaving] = useState(false);
-  const isPaid = ["seller","pro","lifetime"].includes(plan);
+  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
 
   useEffect(()=>{ if(isPaid) load(); else setLoading(false); },[]);
 

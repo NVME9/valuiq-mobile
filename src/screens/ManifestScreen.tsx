@@ -33,7 +33,7 @@ export default function ManifestScreen({ token, plan, onNavigate, onBack }: Prop
 
   function reset() { setText(""); setPhoto(null); setResult(null); setError(""); }
 
-  const isPaid = ["seller","pro","lifetime"].includes(plan);
+  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
 
   return (
     <SafeAreaView style={s.safe}>

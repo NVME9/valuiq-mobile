@@ -17,7 +17,7 @@ export default function AICoachScreen({ token, plan, onNavigate, onBack }: Props
   const [data, setData]   = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const isPaid = ["seller","pro","lifetime"].includes(plan);
+  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
 
   useEffect(() => { if (isPaid) load(); else setLoading(false); }, []);
 

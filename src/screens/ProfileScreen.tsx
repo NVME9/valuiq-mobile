@@ -484,7 +484,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
           <View style={{gap:10}}>
             <View style={[s.currentPlan,{borderColor:planColor+"50"}]}>
               <Text style={[s.currentPlanName,{color:planColor}]}>
-                {plan==="lifetime"?"♾️ Lifetime":plan==="pro"?"🔥 Pro":plan==="seller"?"💪 Seller":"Free"} Plan,
+                {plan==="lifetime"?"♾️ Lifetime":plan==="titan"?"Titan":plan==="pro"?"🔥 Pro":plan==="seller"?"💪 Seller":"Free"} Plan,
               </Text>
               <View style={[s.currentPlanBadge,{backgroundColor:planColor+"20",borderColor:planColor+"50"}]}>
                 <Text style={[{color:planColor,fontSize:10,fontWeight:"700"}]}>ACTIVE</Text>
@@ -617,7 +617,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
         </TouchableOpacity>
 
         {/* ── REFERRAL, PROGRAM ── */}
-        {["seller","pro","lifetime"].includes(plan) && (
+        {["seller","pro","lifetime","titan"].includes(plan) && (
           <View style={ps.refCard}>
             <View style={ps.refHeader}>
               <Text style={ps.refTitle}>💰 Your Referral Link</Text>

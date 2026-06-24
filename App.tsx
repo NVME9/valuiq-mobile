@@ -53,7 +53,7 @@ const { height } = Dimensions.get("window");
 
 // ── PLAN, DISPLAY HELPERS ─────────────────────────────────────
 const PLAN_LABEL: Record<string,string> = {
-  free:"Free", seller:"Seller", pro:"Pro", lifetime:"Lifetime ♾️"
+  free:"Free", seller:"Seller", pro:"Pro", titan:"Titan", lifetime:"Lifetime ♾️"
 };
 const PLAN_COLOR: Record<string,string> = {
   free:C.text4, seller:C.green, pro:C.orange, lifetime:C.yellow,
@@ -285,7 +285,7 @@ export default function App() {
     "history":      <HistoryScreen {...props} />,
     "faq":          <FAQScreen {...props} />,
     "admin":        <AdminScreen {...props} />,
-    "titan":     <BusinessScreen {...props} />,
+    "titan":     plan === "titan" ? <BusinessApp token={token} plan={plan} userEmail={session?.user?.email || ""} scansLeft={scansLeft} setScansLeft={setScansLeft} onLogout={handleLogout} /> : <BusinessScreen {...props} />,
   };
 
   const TAB_SCREENS: Screen[] = ["scanner","dashboard","community","profile"];

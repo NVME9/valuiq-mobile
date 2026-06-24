@@ -55,7 +55,7 @@ export default function DealHunterScreen({ token, plan, onNavigate, onBack }: Pr
   const [expanded, setExpanded]   = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<string>("");
 
-  const isPro = ["pro","lifetime"].includes(plan);
+  const isPro = ["pro","lifetime","titan"].includes(plan);
 
   const load = useCallback(async (forceRefresh = false) => {
     try {

@@ -22,7 +22,7 @@ export default function RelisterScreen({ token, plan, onNavigate, onBack }: Prop
   const [error, setError] = useState("");
   const [copied, setCopied] = useState("");
 
-  const isPaid = ["seller","pro","lifetime"].includes(plan);
+  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
 
   async function generate() {
     if (!itemName.trim()) { setError("Enter an item name."); return; }

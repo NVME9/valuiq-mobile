@@ -17,7 +17,7 @@ export default function SourcingAlertsScreen({ token, plan, onNavigate, onBack }
   const [minProfit, setMinProfit] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const isPaid = ["seller","pro","lifetime"].includes(plan);
+  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
 
   useEffect(()=>{ if(isPaid) load(); else setLoading(false); },[]);
 

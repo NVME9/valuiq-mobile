@@ -37,7 +37,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
   const [error, setError]             = useState("");
   const [activeTab, setActiveTab]     = useState<"rescue"|"listing"|"cascade"|"bundle">("rescue");
 
-  const isPaid = ["seller","pro","lifetime"].includes(plan);
+  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
 
   async function analyze() {
     if (!itemName.trim()) { setError("Enter the item name"); return; }
