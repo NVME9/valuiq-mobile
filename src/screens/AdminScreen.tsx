@@ -19,7 +19,7 @@ const SUPER_ADMINS = [
   "Natev9@comcast.net","natev9@comcast.net",
   "NathanRussell9@outlook.com","nathanrussell9@outlook.com",
 ];
-const PLANS = ["free","seller","pro","lifetime","titan","tester"];
+const PLANS = ["free","seller","pro","titan","lifetime","vip","tester"];
 const PLAN_COLORS: Record<string,string> = { free:C.text4, seller:C.green, pro:C.orange, lifetime:"#ff6b6b", titan:"#c084fc" };
 type Tab = "metrics"|"users"|"refunds"|"access";
 

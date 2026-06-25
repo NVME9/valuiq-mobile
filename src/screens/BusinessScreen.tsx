@@ -4,7 +4,7 @@ import {
   StatusBar, ActivityIndicator, Linking, TextInput, Animated, Dimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
-import { API_BASE } from "../lib/api";
+import { API_BASE, hasTitanAccess } from "../lib/api";
 
 interface Props {
   token:string; plan:string; scansLeft:number|null;
@@ -89,7 +89,7 @@ export default function BusinessScreen({ token, plan, onNavigate, onBack }: Prop
   const [activeWeapon, setActiveWeapon] = useState<number|null>(null);
   const spotsAnim = useRef(new Animated.Value(1)).current;
 
-  const isBusiness = plan === "titan";
+  const isBusiness = hasTitanAccess(plan);
 
   useEffect(() => {
     // Pulse animation for spots counter,

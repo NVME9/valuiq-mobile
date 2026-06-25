@@ -18,7 +18,7 @@ interface Props {
 }
 
 function planLevel(p: string) {
-  if (p === "titan") return 4;
+  if (p === "titan" || p === "lifetime" || p === "vip") return 4;
   if (p === "lifetime") return 3;
   if (p === "pro") return 2;
   if (p === "seller") return 1;

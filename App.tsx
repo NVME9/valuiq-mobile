@@ -285,7 +285,7 @@ export default function App() {
     "history":      <HistoryScreen {...props} />,
     "faq":          <FAQScreen {...props} />,
     "admin":        <AdminScreen {...props} />,
-    "titan":     plan === "titan" ? <BusinessApp token={token} plan={plan} userEmail={session?.user?.email || ""} scansLeft={scansLeft} setScansLeft={setScansLeft} onLogout={handleLogout} /> : <BusinessScreen {...props} />,
+    "titan":     hasTitanAccess(plan) ? <BusinessApp token={token} plan={plan} userEmail={session?.user?.email || ""} scansLeft={scansLeft} setScansLeft={setScansLeft} onLogout={handleLogout} /> : <BusinessScreen {...props} />,
   };
 
   const TAB_SCREENS: Screen[] = ["scanner","dashboard","community","profile"];

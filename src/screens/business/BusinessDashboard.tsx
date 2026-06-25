@@ -8,22 +8,22 @@ interface Props { token:string; plan:string; userEmail:string; onNavigate:(s:str
 
 const TOOLS = [
   // 💎 THE, DIAMONDS — Features no other app has,
-  { id:"vendor-intel",   icon:"🔬", title:"Vendor, Intelligence",   desc:"Know if a vendor over-grades before buying",  badge:"🔥" as const, isDiamond:true },
+  { id:"vendor-intel",   icon:"🔬", title:"Vendor Intelligence",   desc:"Know if a vendor over-grades before buying",  badge:"🔥" as const, isDiamond:true },
   { id:"trend-predictor",icon:"📈", title:"Trend Predictor",       desc:"Know what's hot BEFORE everyone else",        badge:"🔥" as const, isDiamond:true },
-  { id:"fake-detector",  icon:"🛡️", title:"Fake, Detector",        desc:"Photo authentication — prevent account bans", badge:"🔥" as const, isDiamond:true },
+  { id:"fake-detector",  icon:"🛡️", title:"Fake Detector",        desc:"Photo authentication — prevent account bans", badge:"🔥" as const, isDiamond:true },
   // ⚔️ CORE, WEAPONS,
-  { id:"manifest-beast", icon:"📋", title:"Manifest Beast",        desc:"5,000+ items analyzed overnight",             badge:"LIVE" as const },
+  { id:"manifest-beast", icon:"📋", title:"Manifest Beast",        desc:"Score whole lots, get your max bid",             badge:"LIVE" as const },
   { id:"reseller-cfo",  icon:"💰", title:"The Reseller's CFO",   desc:"Your true margin by category + month-end forecast", badge:"NEW" as const, isDiamond:true },
-  { id:"cashflow",       icon:"💰", title:"Cash, Flow Oracle",       desc:"30/60/90 day forecast",                       badge:null },
-  { id:"competitor",     icon:"🏹", title:"Competitor Destroyer",  desc:"Analyze top sellers in your category",          badge:null },
+  { id:"cashflow",       icon:"💰", title:"Cash Flow Oracle",       desc:"30/60/90 day forecast",                       badge:null },
+  { id:"competitor",     icon:"🏹", title:"Competitor Intel",  desc:"Analyze top sellers in your category",          badge:null },
   // 🏢 TEAM & OPERATIONS,
-  { id:"tax",            icon:"📊", title:"Tax, Export",            desc:"Schedule C ready — accountant-approved",      badge:null },
+  { id:"tax",            icon:"📊", title:"Tax Export",            desc:"Schedule C ready — accountant-approved",      badge:null },
   // 📱 CONSUMER, TOOLS (full access)
-  { id:"scanner",        icon:"📷", title:"Item, Scanner",          desc:"Scan any item",                               badge:null },
+  { id:"scanner",        icon:"📷", title:"Item Scanner",          desc:"Scan any item",                               badge:null },
   { id:"deal-hunter",    icon:"🤖", title:"Deal Hunter",           desc:"Find deals across marketplaces",                        badge:null },
-  { id:"viral-content",  icon:"📱", title:"Viral, Content Engine",  desc:"TikTok scripts from your finds",              badge:"NEW" as const },
+  { id:"viral-content",  icon:"📱", title:"Viral Content Engine",  desc:"TikTok scripts from your finds",              badge:"NEW" as const },
   { id:"sourcing-trip",  icon:"🗺️", title:"Sourcing Intel",        desc:"Where and what to source for profit",             badge:"NEW" as const },
-  { id:"bundle",         icon:"📦", title:"Bundle, Intelligence",   desc:"Bundle items for higher margins",             badge:null },
+  { id:"bundle",         icon:"📦", title:"Bundle Builder",   desc:"Bundle items for higher margins",             badge:null },
   { id:"ai-coach",       icon:"🎯", title:"AI Coach",              desc:"Personal analysis from your data",            badge:null },
 ];
 
@@ -64,10 +64,10 @@ export default function BusinessDashboard({ token, userEmail, onNavigate, onLogo
         {/* KPI, Strip */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingBottom:14}}>
           {[
-            ["Scans, Today",  stats?.scansToday||0,              B.text1],
+            ["Scans Today",  stats?.scansToday||0,              B.text1],
             ["Profit Found", `$${stats?.profitFound||0}`,        B.profit],
-            ["Active, Jobs",  stats?.activeJobs||0,               B.orange],
-            ["Deals, Today",  stats?.dealsQueued||0,              B.warning],
+            ["Active Jobs",  stats?.activeJobs||0,               B.orange],
+            ["Deals Today",  stats?.dealsQueued||0,              B.warning],
             ["Team",         (stats?.teamCount||1) + " member" + ((stats?.teamCount||1)>1?"s":""), B.info],
           ].map(([l,v,c])=>(
             <View key={l as string} style={s.kpi}>
@@ -84,7 +84,7 @@ export default function BusinessDashboard({ token, userEmail, onNavigate, onLogo
           {TOOLS.map(t=>(
             <TouchableOpacity key={t.id} style={[(t as any).isDiamond ? s.diamondCard : s.toolCard]} onPress={()=>onNavigate(t.id)} activeOpacity={0.8}>
               {(t as any).isDiamond && (
-                <View style={s.diamondBadge}><Text style={s.diamondTxt}>💎 DIAMOND, FEATURE</Text></View>
+                <View style={s.diamondBadge}><Text style={s.diamondTxt}>💎 TITAN FEATURE</Text></View>
               )}
               {t.badge && t.badge !== "🔥" && (
                 <View style={[s.tbadge,t.badge==="LIVE"||t.badge==="ON"?s.tbadgeLive:s.tbadgeNew]}>

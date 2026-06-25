@@ -45,7 +45,7 @@ export default function ManifestBeast({ token, onBack }: Props) {
         body: JSON.stringify({ token, imageBase64: base64, mimeType: "image/jpeg", costMode: lotCost ? "total" : "auto", lotCost: parseFloat(lotCost) || 0 }) });
       const d = await r.json();
       if (d.jobId) {
-        Alert.alert("✅ Manifest, Uploaded", `Job started. ValuIQ is analyzing your manifest.\n\nEstimated time: ${d.estimatedMinutes||10} minutes for ${d.estimatedItems||"your"} items.\n\nWe'll notify you when it's complete.`);
+        Alert.alert("Manifest Analyzed", d.sampled ? `Analyzed a ${d.analyzedItems}-item sample of ${d.totalItems} items. See your report below.` : `Analyzed all ${d.totalItems} items. See your report below.`);
         loadJobs();
       } else {
         Alert.alert("Upload, Failed", d.error || "Please try again.");
@@ -253,7 +253,7 @@ export default function ManifestBeast({ token, onBack }: Props) {
                     </View>
                   ))}
                   <TouchableOpacity style={s.reportBtn}>
-                    <Text style={s.reportBtnTxt}>📄 Download, PDF Report</Text>
+                    <Text style={s.reportBtnTxt}>📄 Download PDF Report</Text>
                   </TouchableOpacity>
                 </View>
               )}
