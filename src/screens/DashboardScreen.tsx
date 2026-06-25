@@ -144,7 +144,7 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
 
   // Tools hidden for launch (backend not ready). Remove an id here to re-enable after launch.
   const LAUNCH_HIDDEN = ["deal-hunter"];
-  const myTools    = TOOLS.filter(t => t.minPlan <= level && !LAUNCH_HIDDEN.includes(t.id));
+  const myTools    = TOOLS.filter(t => t.minPlan <= level && !LAUNCH_HIDDEN.includes(t.id) && t.id !== "titan");
   const lockedTools = TOOLS.filter(t => t.minPlan > level && !LAUNCH_HIDDEN.includes(t.id));
   const activity   = LIVE_FEED[liveIdx];
 
@@ -233,6 +233,19 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
 
         {/* YOUR TOOLS - collapsible */}
         <SectionHeader title="YOUR TOOLS" expanded={showTools} onToggle={() => setShowTools(v => !v)}/>
+        {/* TITAN PREMIUM BANNER - distinct from tool cards */}
+        <TouchableOpacity
+          style={s.titanBanner}
+          activeOpacity={0.9}
+          onPress={() => onNavigate(["titan","lifetime","vip"].includes(plan) ? "titan" : "upgrade")}
+        >
+          <View style={{flex:1}}>
+            <Text style={s.titanBannerLabel}>{["titan","lifetime","vip"].includes(plan) ? "TITAN BUSINESS SUITE" : "UPGRADE TO TITAN"}</Text>
+            <Text style={s.titanBannerTitle}>{["titan","lifetime","vip"].includes(plan) ? "Open your business command center" : "Manifest Beast, Vendor Intel, Reseller CFO & more"}</Text>
+          </View>
+          <Text style={s.titanBannerArrow}>{"\u2192"}</Text>
+        </TouchableOpacity>
+
         {showTools && (
           <View style={s.toolGrid}>
             {myTools.map(tool => (
@@ -421,6 +434,10 @@ const s = StyleSheet.create({
   // Tools
   toolGrid:      { flexDirection:"row", flexWrap:"wrap", gap:8, marginBottom:6 },
   toolCard:      { width:"47.5%", backgroundColor:C.surface, borderWidth:1, borderRadius:14, padding:13 },
+  titanBanner:      { flexDirection:"row", alignItems:"center", backgroundColor:"#1a1206", borderWidth:1.5, borderColor:"#ff8c42", borderRadius:16, padding:16, marginBottom:16 },
+  titanBannerLabel: { color:"#ff8c42", fontSize:11, fontWeight:"900", letterSpacing:1, marginBottom:4 },
+  titanBannerTitle: { color:"#fff", fontSize:15, fontWeight:"700", lineHeight:20 },
+  titanBannerArrow: { color:"#ff8c42", fontSize:24, fontWeight:"900", marginLeft:12 },
   lockedCard:    { opacity:0.5, borderColor:C.border },
   toolIconBox:   { width:40, height:40, borderRadius:11, alignItems:"center", justifyContent:"center", marginBottom:8 },
   toolName:      { color:C.text1, fontSize:12, fontWeight:"800", marginBottom:3 },
