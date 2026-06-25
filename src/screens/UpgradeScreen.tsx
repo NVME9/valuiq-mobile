@@ -65,12 +65,12 @@ const PLANS = [
     priceId_monthly:"price_1TamU7Da11MSShNkVbs7o6Pf",
     priceId_annual:"price_1Tan96Da11MSShNknDTWp54n" },
   {
-    id:"lifetime", tierLabel:"LIFETIME", label:"♾️ Lifetime", price:"$149", sub:"one-time", color:C.yellow,
-    regularPrice:"$497",
-    headline:"Pay once. Pro forever.",
-    pitch:"$149 locks in everything in Pro — every AI tool, every future feature — no monthly fees, ever. At 100 subscribers this becomes $497.",
-    badge:"EARLY BIRD", badgeBg:C.yellow, earlyBird:true,
-    urgency:"⚡ Only available until 100 subscribers",
+    id:"titan", tierLabel:"TITAN", label:"Titan", price:"$79", sub:"/month", color:"#ff8c42",
+    annualPrice:"$790", annualSub:"/year", annualSavings:"2 months free",
+    regularPrice:"$149/mo",
+    headline:"Built for serious volume.",
+    pitch:"Everything in Pro plus the business suite: score whole liquidation lots, spot over-graded vendors, and run your numbers like a real operation.",
+    badge:"FOUNDER RATE", badgeBg:"#ff8c42", isFounder:true,
     features:[
       "Everything in Pro - unlimited",
       "Manifest Beast - score whole lots, get your max bid",
@@ -84,9 +84,22 @@ const PLANS = [
       "Bundle Builder - move dead stock fast",
     ],
     missing:[],
-    cta:"Unlock Titan",
-    priceId_monthly:"price_1TccFjDa11MSShNknD0s3juW",
-    priceId_annual:"price_1TanAWDa11MSShNk9GdeHg5n" },
+    cta:"Unlock Titan" },
+  {
+    id:"lifetime", tierLabel:"LIFETIME", label:"Lifetime", price:"$149", sub:"one-time", color:C.yellow,
+    regularPrice:"$497",
+    headline:"Pay once. Everything forever.",
+    pitch:"One payment locks in full access - every tool in Titan, every future feature, no monthly fees ever. Capped at the first 100 founders, then it becomes $497.",
+    badge:"EARLY BIRD", badgeBg:C.yellow, earlyBird:true,
+    urgency:"Only available until 100 founders",
+    features:[
+      "Everything in Titan - forever",
+      "All business tools (Manifest Beast, Vendor Intel, CFO)",
+      "Every future feature, no monthly fees",
+      "Founder pricing locked permanently",
+    ],
+    missing:[],
+    cta:"Become a Founder" },
 ];
 
 export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props) {
@@ -180,7 +193,7 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
           return (
             <View key={p.id} style={[
               s.card,
-              {borderColor: p.color+(p.badge?"":" 30")},
+              {borderColor: p.badge ? p.color : p.color+"30"},
               p.badge && !cur && s.highlightCard,
               cur && s.currentCard,
               p.id==="titan" && s.businessCard,
@@ -213,7 +226,7 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
                 <View style={s.priceLeft}>
                   {(p as any).regularPrice && (
                     <Text style={s.crossedPrice}>
-                      {p.id==="lifetime" ? (p as any).regularPrice : (p as any).regularPrice} regular,
+                      {(p as any).regularPrice} regular
                     </Text>
                   )}
                   {showAnnual && (p as any).annualSavings && (
