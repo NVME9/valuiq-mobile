@@ -21,7 +21,6 @@ import DashboardScreen from "../DashboardScreen";
 import PriceBattleScreen from "../PriceBattleScreen";
 import ThriftRunScreen from "../ThriftRunScreen";
 import DeathPileScreen from "../DeathPileScreen";
-import DealHunterScreen from "../DealHunterScreen";
 import ManifestScreen from "../ManifestScreen";
 import ArbitrageScreen from "../ArbitrageScreen";
 import SpecialtyScreen from "../SpecialtyScreen";
@@ -43,7 +42,7 @@ interface Props {
 
 type BizScreen = "biz-dashboard" | "manifest-beast" | "reseller-cfo" | "vendor-intel" | "competitor" | "trend-predictor" | "fake-detector" | "tax" | 
   "scanner"|"dashboard"|"price-battle"|"thrift-run"|"deathpile"|
-  "deal-hunter"|"manifest"|"arbitrage"|"specialty"|"profile"|
+  "manifest"|"arbitrage"|"specialty"|"profile"|
   "history"|"faq"|"ai-coach"|"inventory"|"community"|"cashflow"|"viral-content"|"bundle"|"sourcing-trip";
 
 export default function BusinessApp({ token, plan, userEmail, scansLeft, setScansLeft, onLogout }: Props) {
@@ -107,7 +106,6 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
       {screen === "price-battle" && <PriceBattleScreen {...consumerProps}/>}
       {screen === "thrift-run"   && <ThriftRunScreen  {...consumerProps}/>}
       {screen === "deathpile"    && <DeathPileScreen  {...consumerProps}/>}
-      {screen === "deal-hunter"  && <DealHunterScreen {...consumerProps}/>}
       {screen === "manifest"     && <ManifestScreen   {...consumerProps}/>}
       {screen === "arbitrage"    && <ArbitrageScreen  {...consumerProps}/>}
       {screen === "specialty"    && <SpecialtyScreen  {...consumerProps}/>}

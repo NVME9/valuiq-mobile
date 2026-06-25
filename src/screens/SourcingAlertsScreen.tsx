@@ -63,7 +63,7 @@ export default function SourcingAlertsScreen({ token, plan, onNavigate, onBack }
       </View>
       <ScrollView contentContainerStyle={{padding:20,paddingBottom:60}} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>}>
         <Text style={s.h1}>🔔 Sourcing Alerts</Text>
-        <Text style={[s.body,{marginBottom:20}]}>ValuIQ monitors eBay 24/7 and emails you when deals matching your criteria appear.</Text>
+        <Text style={[s.body,{marginBottom:20}]}>ValuIQ checks eBay daily and emails you when deals matching your criteria appear.</Text>
 
         {!isPaid&&<View style={s.lockedCard}><Text style={{fontSize:36,marginBottom:10}}>🔒</Text><Text style={s.lockedTitle}>Seller Plan Required</Text><Text style={s.lockedBody}>Upgrade to set alerts and get notified before anyone else sees the deals.</Text></View>}
 
@@ -103,7 +103,7 @@ export default function SourcingAlertsScreen({ token, plan, onNavigate, onBack }
               </View>
             )}
             {alerts.length===0&&!creating&&(
-              <View style={s.emptyCard}><Text style={{fontSize:36,marginBottom:10}}>🔔</Text><Text style={s.emptyTitle}>No alerts yet</Text><Text style={s.emptyBody}>Tap "+ New Alert" to start monitoring eBay 24/7</Text></View>
+              <View style={s.emptyCard}><Text style={{fontSize:36,marginBottom:10}}>🔔</Text><Text style={s.emptyTitle}>No alerts yet</Text><Text style={s.emptyBody}>Tap "+ New Alert" to start getting deal emails</Text></View>
             )}
             {matches.length>0&&(
               <View>

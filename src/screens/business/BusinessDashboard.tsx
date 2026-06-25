@@ -20,7 +20,6 @@ const TOOLS = [
   { id:"tax",            icon:"📊", title:"Tax Export",            desc:"Schedule C ready — accountant-approved",      badge:null },
   // 📱 CONSUMER, TOOLS (full access)
   { id:"scanner",        icon:"📷", title:"Item Scanner",          desc:"Scan any item",                               badge:null },
-  { id:"deal-hunter",    icon:"🤖", title:"Deal Hunter",           desc:"Find deals across marketplaces",                        badge:null },
   { id:"viral-content",  icon:"📱", title:"Viral Content Engine",  desc:"TikTok scripts from your finds",              badge:"NEW" as const },
   { id:"sourcing-trip",  icon:"🗺️", title:"Sourcing Intel",        desc:"Where and what to source for profit",             badge:"NEW" as const },
   { id:"bundle",         icon:"📦", title:"Bundle Builder",   desc:"Bundle items for higher margins",             badge:null },

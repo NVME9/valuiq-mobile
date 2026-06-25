@@ -13,12 +13,9 @@ const FAQS = [
   },
   {
     q: "What's the difference between Seller and Pro?",
-    a: "Seller is for casual flippers — 100 scans, Thrift Run, Death Pile Rescuer, and Auto-Relister. Pro is for serious resellers — unlimited everything plus Deal Hunter AI (17 live sources), Manifest Analyzer, Arbitrage Search, Specialty Scanner, and AI Coach. If you source from liquidation lots or flip full-time, Pro pays for itself in the first deal.",
+    a: "Seller is for casual flippers — 100 scans, Thrift Run, Death Pile Rescuer, and Auto-Relister. Pro is for serious resellers — unlimited everything plus Manifest Analyzer, Arbitrage Search, Specialty Scanner, and AI Coach. If you source from liquidation lots or flip full-time, Pro pays for itself in the first deal.",
   },
-  {
-    q: "What is Deal Hunter AI?",
-    a: "Deal Hunter AI monitors 17 live sources 24/7 including eBay underpriced listings, auctions ending soon, B-Stock, Craigslist, ShopGoodwill auctions, BULQ liquidation lots, OfferUp, Liquidation.com, Poshmark→eBay arbitrage, GovDeals, AuctionZip, Whatnot, Mercari→eBay, StockX, GOAT, and Direct Liquidation. Every deal is AI-scored 0-100. You only see deals scoring 65+.",
-  },
+  
   {
     q: "Why does my scan show $0 profit?",
     a: "This usually means the item has no resale value (fast fashion, no-name brands) or ValuIQ couldn't identify it clearly. Try adding more detail in the description field, ensuring good lighting, or searching by brand name. Items like H&M, Zara, and Shein are intentionally scored as PASS — they rarely flip profitably.",

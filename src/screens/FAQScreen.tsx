@@ -68,10 +68,6 @@ const FAQS = [
         a: "Thrift Run lets you rapid-scan a whole store in minutes. It's optimized for speed — quick camera captures with instant verdicts so you can move fast while shopping. Seller plan gets 3 Thrift Runs per month, Pro gets unlimited."
       },
       {
-        q: "What is Deal Hunter AI?",
-        a: "Deal Hunter is an automated sourcing engine that monitors 17 sources simultaneously — eBay auctions, B-Stock, BULQ, Craigslist, ShopGoodwill, OfferUp, Liquidation.com, Whatnot, Mercari, StockX, GovDeals, and more. Every opportunity is AI-scored 0-100. Pro exclusive."
-      },
-      {
         q: "What is Death Pile Rescuer?",
         a: "Enter any item that's been sitting unsold and get a complete rescue plan: real market data showing what it actually sells for, the exact price that will sell it, an AI-written listing title and description, a cascade pricing schedule, and bundle suggestions."
       },

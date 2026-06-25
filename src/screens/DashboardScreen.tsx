@@ -37,7 +37,6 @@ const LIVE_FEED = [
   { emoji:"🤑", text:"+$340 profit found on Whatnot", time:"2m" },
   { emoji:"💰", text:"Nike Dunk Low → +$185 on eBay", time:"4m" },
   { emoji:"🔥", text:"Thrift Run: 3 BUY finds in 12 min", time:"7m" },
-  { emoji:"⚡", text:"Deal Hunter: B-Stock electronics 87/100", time:"11m" },
   { emoji:"🏆", text:"Top flipper: $2,840 profit this week", time:"18m" },
   { emoji:"💎", text:"Pyrex set: paid $8 → sells for $145", time:"22m" },
 ];
@@ -60,7 +59,6 @@ const TOOLS = [
   { id:"bundle-builder",icon:"📦", name:"Bundle Builder",   desc:"Group stuck items into fast bundles",    minPlan:1, accent:C.orange  },
   { id:"flip-score",    icon:"🎯", name:"Flip Score",       desc:"Your reseller report card",             minPlan:1, accent:C.green   },
   { id:"relist",        icon:"✏️",  name:"Auto-Relist",      desc:"Refresh dying listings",               minPlan:1, accent:C.orange  },
-  { id:"deal-hunter",   icon:"🤖", name:"Deal Hunter AI",   desc:"Deal alerts across marketplaces",           minPlan:2, accent:"#b066ff" },
   { id:"manifest",      icon:"📋", name:"Manifest Analyzer",desc:"Score liquidation lots",                minPlan:2, accent:C.yellow  },
   { id:"specialty",     icon:"🎯", name:"Specialty Scanner",desc:"Sneakers, cards, vinyl & luxury",       minPlan:2, accent:"#b066ff" },
   { id:"arbitrage",     icon:"📈", name:"Arbitrage Finder", desc:"Underpriced items hiding in plain sight",minPlan:2, accent:C.green  },

@@ -18,7 +18,7 @@ const PLANS = [
     pitch:"10 free scans, no credit card. Most users find their first profitable flip within 3 scans.",
     badge:null,
     features:["10 scans per month","3 Price Battles per month","Community feed","Basic profit calculator"],
-    missing:["More scans","Thrift Run","Death Pile","Deal Hunter AI"],
+    missing:["More scans","Thrift Run","Death Pile"],
     cta:null, priceId_monthly:null, priceId_annual:null },
   {
     id:"seller", tierLabel:"SELLER", label:"💪 Seller", price:"$14.99", sub:"/month", color:C.green,
@@ -35,7 +35,7 @@ const PLANS = [
       "Hot Right Now — weekly trends",
       "Inventory — up to 50 items",
     ],
-    missing:["Unlimited scans","Deal Hunter AI","Manifest Analyzer","AI tools"],
+    missing:["Unlimited scans","Manifest Analyzer","AI tools"],
     cta:"Start Selling More →",
     priceId_monthly:"price_1TamT5Da11MSShNkgUW0ddQM",
     priceId_annual:"price_1Tan7yDa11MSShNkcqT3l3MX" },
@@ -48,7 +48,6 @@ const PLANS = [
     features:[
       "Unlimited scans",
       "Unlimited Price Battles",
-      "🤖 Deal Hunter AI — 24/7, 17 platforms",
       "📋 Manifest Analyzer — 10/month",
       "🎯 Specialty Scanner — unlimited",
       "📈 Arbitrage Finder — unlimited",
