@@ -69,7 +69,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
   const isBizScreen = screen === "biz-dashboard" || screen === "manifest-beast" || screen === "reseller-cfo" || screen === "vendor-intel" || screen === "competitor" || screen === "trend-predictor" || screen === "fake-detector" || screen === "tax";
 
   return (
-    <View style={s.container}>
+    <SafeAreaView style={s.container} edges={["top"]}>
       {/* Mode switcher - always visible at top of business screens */}
       {isBizScreen && (
         <View style={s.modeSwitcher}>
@@ -121,7 +121,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
       {screen === "sourcing-trip" && <SourcingIntelScreen {...consumerProps}/>}
       {screen === "inventory"    && <InventoryScreen  {...consumerProps}/>}
       {screen === "community"    && <CommunityScreen  {...consumerProps}/>}
-    </View>
+    </SafeAreaView>
   );
 }
 
