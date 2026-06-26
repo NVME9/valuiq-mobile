@@ -38,7 +38,6 @@ import AICoachScreen from "./src/screens/AICoachScreen";
 import HistoryScreen from "./src/screens/HistoryScreen";
 import FAQScreen from "./src/screens/FAQScreen";
 import AdminScreen from "./src/screens/AdminScreen";
-import BusinessScreen from "./src/screens/BusinessScreen";
 import BusinessApp from "./src/screens/business/BusinessApp";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
