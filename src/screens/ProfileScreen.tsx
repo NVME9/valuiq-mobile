@@ -99,7 +99,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
       ]
     );
   }
-  const [loading, setLoading]       = useState(false);
+  const [loading, setLoading]       = useState(true);
   const [editing, setEditing]       = useState(false);
   const [editName, setEditName]     = useState("");
   const [editBio, setEditBio]       = useState("");
@@ -181,6 +181,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
   }
 
   async function load() {
+    setLoading(true);
     try {
       const r = await fetch(`${API_BASE}/api/profile?token=${token}`);
       const d = await r.json();
@@ -259,8 +260,16 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
   const previewEmoji = editEmoji || (!editPhoto && currentEmoji);
   const previewInitial = (displayName || "F")[0]?.toUpperCase() || "F";
 
-  return (
-    <SafeAreaView style={[s.safe, {backgroundColor: C.bg}]}>
+  if (loading && !profile) {
+    return (
+      <SafeAreaView style={[s.safe, {backgroundColor: C.bg, alignItems:"center", justifyContent:"center"}]}>
+        <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
+        <ActivityIndicator size="large" color={C.green} />
+      </SafeAreaView>
+    );
+  }
+
+  return (    <SafeAreaView style={[s.safe, {backgroundColor: C.bg}]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
 
       {/* Emoji picker modal */}

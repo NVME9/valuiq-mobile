@@ -3,9 +3,9 @@ import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, RefreshControl, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
-import { API_BASE } from "../lib/api";
+import { API_BASE, getCommunityWins } from "../lib/api";
 
-const MOCK_WINS = [
+const EXAMPLE_WINS = [
   { id:"1", username:"FlipQueen",   item_name:"Coach Leather Crossbody",      profit:67,  platform:"Poshmark", store_name:"Goodwill",        likes:24, created_at:new Date(Date.now()-7200000).toISOString()   },
   { id:"2", username:"ThriftKing",  item_name:"DeWalt 20V Drill, Kit",          profit:112, platform:"eBay",     store_name:"Salvation Army",  likes:41, created_at:new Date(Date.now()-14400000).toISOString()  },
   { id:"3", username:"VintageVibe", item_name:"Pyrex Butterprint Set",         profit:89,  platform:"Etsy",     store_name:"Habitat ReStore", likes:33, created_at:new Date(Date.now()-21600000).toISOString()  },
@@ -49,10 +49,20 @@ interface Props {
 export default function CommunityScreen({ onNavigate, onBack }: Props) {
   const [tab, setTab]           = useState<"wins"|"leaderboard">("wins");
   const [filter, setFilter]     = useState<"hot"|"profit"|"recent">("hot");
-  const [wins, setWins]         = useState(MOCK_WINS);
+  const [wins, setWins]         = useState<any[]>(EXAMPLE_WINS.map(w => ({ ...w, isExample: true })));
   const [liked, setLiked]       = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
-  const [stats, setStats]       = useState({ total: 47, totalProfit: 28340, avgProfit: 94 });
+  const [stats, setStats]       = useState({ total: 0, totalProfit: 0, avgProfit: 0 });
+  useEffect(() => {
+    getCommunityWins().then((real: any[]) => {
+      if (real && real.length) {
+        const realTagged = real.map(w => ({ ...w, isExample: false }));
+        setWins([...realTagged, ...EXAMPLE_WINS.map(w => ({ ...w, isExample: true }))]);
+        const totalProfit = realTagged.reduce((sum, w) => sum + (Number(w.profit) || 0), 0);
+        setStats({ total: realTagged.length, totalProfit, avgProfit: realTagged.length ? Math.round(totalProfit / realTagged.length) : 0 });
+      }
+    }).catch(() => {});
+  }, []);
 
   const sorted = [...wins].sort((a, b) =>
     filter === "profit" ? b.profit - a.profit :
@@ -141,7 +151,7 @@ export default function CommunityScreen({ onNavigate, onBack }: Props) {
                     <Text style={s.avatarTxt}>{win.username[0]}</Text>
                   </View>
                   <View style={{ flex:1 }}>
-                    <Text style={s.username}>{win.username}</Text>
+                    <Text style={s.username}>{win.username}{win.isExample ? "  \u00B7 Example" : ""}</Text>
                     <Text style={s.winMeta}>{win.store_name} · {timeAgo(win.created_at)}</Text>
                   </View>
                   <View style={s.profitBadge}>
