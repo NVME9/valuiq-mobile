@@ -4,6 +4,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 let CameraView: any = null; let useCameraPermissions: any = () => [null, async()=>{}];
 if (require("react-native").Platform.OS !== "web") { try { const c = require("expo-camera"); CameraView = c.CameraView; useCameraPermissions = c.useCameraPermissions; } catch {} }
 import * as ImagePicker from "expo-image-picker";
+import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import ShareButton from "../components/ShareButton";
 import { API_BASE } from "../lib/api";
@@ -29,12 +30,13 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
     if (!isPaid && (scansLeft||0) <= 0) { return; }
     const photo = await cameraRef.current.takePictureAsync({ base64:true, quality:0.65 });
     if (!photo?.base64) return;
+    const small = await compressPhoto(photo.base64);
     const id = Date.now().toString();
-    const newItem: RunItem = { id, photo:photo.base64, status:"scanning" };
+    const newItem: RunItem = { id, photo:small, status:"scanning" };
     setItems(prev=>[newItem,...prev]);
     if (!isPaid) setScansLeft(n=>n!==null?Math.max(0,n-1):null);
     // Analyze in background,
-    analyzeItem(id, photo.base64);
+    analyzeItem(id, small);
   }
 
   async function analyzeItem(id: string, base64: string) {

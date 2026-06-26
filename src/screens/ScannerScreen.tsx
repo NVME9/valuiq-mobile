@@ -6,6 +6,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
+import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import ShareButton from "../components/ShareButton";
 import { API_BASE, scanImage, scanBarcode , getProfitOracle } from "../lib/api";
@@ -72,8 +73,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     if (!cameraRef.current) return;
     const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
     if (photo?.base64) {
+      const small = await compressPhoto(photo.base64);
       setPhotos(p => {
-        const next = [...p, photo.base64!].slice(0, 3);
+        const next = [...p, small].slice(0, 3);
         if (next.length >= 3) setStep("review");
         return next;
       });
@@ -83,7 +85,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   async function pickLibrary() {
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], base64: true, quality: 0.7 });
     if (!res.canceled && res.assets[0]?.base64) {
-      setPhotos(p => [...p, res.assets[0].base64!].slice(0, 3));
+      const small = await compressPhoto(res.assets[0].base64);
+      setPhotos(p => [...p, small].slice(0, 3));
       setStep("review");
     }
   }
@@ -93,7 +96,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setBarcodeScanned(true);
     await analyze(undefined, data);
   }
-
   async function analyze(customPhotos?: string[], barcode?: string) {
     setStep("loading");
     try {

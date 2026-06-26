@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Image, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import { analyzeSpecialty } from "../lib/api";
 import ShareButton from "../components/ShareButton";
@@ -61,8 +62,19 @@ export default function SpecialtyScreen({ token, onNavigate, onBack }: Props) {
 
   async function pickPhoto() {
     if (photos.length >= 5) { setError("Up to 5 photos."); return; }
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], base64: true, quality: 0.7 });
-    if (!res.canceled && res.assets[0]?.base64) setPhotos(prev => [...prev, res.assets[0].base64 as string]);
+    const remaining = 5 - photos.length;
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"], base64: true, quality: 0.7,
+      allowsMultipleSelection: true, selectionLimit: remaining,
+    });
+    if (res.canceled || !res.assets?.length) return;
+    setError("");
+    const picked = res.assets.slice(0, remaining);
+    const compressed: string[] = [];
+    for (const a of picked) {
+      if (a.base64) compressed.push(await compressPhoto(a.base64));
+    }
+    if (compressed.length) setPhotos(prev => [...prev, ...compressed].slice(0, 5));
   }
 
   async function takePhoto() {
@@ -70,7 +82,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack }: Props) {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) { setError("Enable camera access in Settings."); return; }
     const res = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], base64: true, quality: 0.7 });
-    if (!res.canceled && res.assets[0]?.base64) setPhotos(prev => [...prev, res.assets[0].base64 as string]);
+    if (!res.canceled && res.assets[0]?.base64) { const small = await compressPhoto(res.assets[0].base64 as string); setPhotos(prev => [...prev, small]); }
   }
 
   function removePhoto(i: number) { setPhotos(prev => prev.filter((_, idx) => idx !== i)); }

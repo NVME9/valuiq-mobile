@@ -4,6 +4,7 @@ import {
   StatusBar, ActivityIndicator, RefreshControl, Alert, Image, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import { API_BASE, rerunScan, updateScan, updateThriftItem } from "../lib/api";
 
@@ -69,7 +70,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack }: Props
         res = await ImagePicker.launchImageLibraryAsync(opts);
       }
       if (!res.canceled && res.assets && res.assets[0]?.base64) {
-        setEditPhotos(prev => [...prev, `data:image/jpeg;base64,${res.assets[0].base64}`]);
+        const small = await compressPhoto(res.assets[0].base64); setEditPhotos(prev => [...prev, `data:image/jpeg;base64,${small}`]);
       }
     } catch {}
   }

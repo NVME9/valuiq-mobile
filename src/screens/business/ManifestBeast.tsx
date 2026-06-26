@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, Alert, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import { compressPhoto } from "../../lib/image";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import Papa from "papaparse";
@@ -38,7 +39,7 @@ export default function ManifestBeast({ token, onBack }: Props) {
 
     setUploading(true);
     try {
-      const base64 = result.assets[0].base64;
+      const raw = result.assets[0].base64; const base64 = raw ? await compressPhoto(raw) : raw;
       const r = await fetch(`${API_BASE}/api/business/manifest-upload`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
