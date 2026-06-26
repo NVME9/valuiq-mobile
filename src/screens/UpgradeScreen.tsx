@@ -35,7 +35,7 @@ const PLANS = [
       "Hot Right Now — weekly trends",
       "Inventory — up to 50 items",
     ],
-    missing:["Unlimited scans","Manifest Analyzer","AI tools"],
+    missing:["Unlimited scans","Manifest Beast","AI tools"],
     cta:"Start Selling More →",
     priceId_monthly:"price_1TamT5Da11MSShNkgUW0ddQM",
     priceId_annual:"price_1Tan7yDa11MSShNkcqT3l3MX" },
@@ -48,7 +48,7 @@ const PLANS = [
     features:[
       "Unlimited scans",
       "Unlimited Price Battles",
-      "📋 Manifest Analyzer — 10/month",
+      "Manifest Beast - score whole lots",
       "🎯 Specialty Scanner — unlimited",
       "📈 Arbitrage Finder — unlimited",
       "🧠 AI Coach + Profit Tracker",

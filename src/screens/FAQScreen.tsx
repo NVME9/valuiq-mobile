@@ -36,7 +36,7 @@ const FAQS = [
     items: [
       {
         q: "What's the difference between Seller and Pro?",
-        a: "Seller ($19/mo) gives you 100 scans, 30 Price Battles, 3 Thrift Runs, Death Pile Rescuer, and Auto-Relister — everything a part-time reseller needs. Pro ($49/mo) adds unlimited everything plus Deal Hunter AI, Manifest Analyzer, Arbitrage, Search, Specialty Scanner, and AI Coach — the full business toolkit."
+        a: "Seller ($14.99/mo) gives you more scans, Price Battles, Thrift Runs, Death Pile Rescuer, and Auto-Relister — everything a part-time reseller needs. Pro ($34.99/mo) adds unlimited everything plus Manifest Beast, Reseller CFO, Tax Export, Arbitrage, Specialty Scanner, and AI Coach — the full business toolkit."
       },
       {
         q: "What is the Lifetime plan?",
@@ -76,7 +76,7 @@ const FAQS = [
         a: "Specialty Scanner uses category-specific AI for 8 high-knowledge areas: Wine & Spirits, Coins & Currency, Trading, Cards, Vintage, Jewelry, Antiques, Musical, Instruments, Sports, Memorabilia, and Fine, Art. These categories need expert knowledge that a general scanner misses."
       },
       {
-        q: "What is Manifest Analyzer?",
+        q: "What is Manifest Beast?",
         a: "Upload any liquidation manifest (PDF, photo, or spreadsheet) and ValuIQ evaluates every line item — scores the whole lot, identifies the top items to pull, highlights items to skip, and estimates total profit potential. Pro only."
       },
     ]

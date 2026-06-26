@@ -13,7 +13,7 @@ const FAQS = [
   },
   {
     q: "What's the difference between Seller and Pro?",
-    a: "Seller is for casual flippers — 100 scans, Thrift Run, Death Pile Rescuer, and Auto-Relister. Pro is for serious resellers — unlimited everything plus Manifest Analyzer, Arbitrage Search, Specialty Scanner, and AI Coach. If you source from liquidation lots or flip full-time, Pro pays for itself in the first deal.",
+    a: "Seller is for casual flippers — 100 scans, Thrift Run, Death Pile Rescuer, and Auto-Relister. Pro is for serious resellers — unlimited everything plus Manifest Beast, Reseller CFO, Tax Export, Arbitrage, Specialty Scanner, and AI Coach. If you source from liquidation lots or flip full-time, Pro pays for itself in the first deal.",
   },
   
   {
@@ -30,7 +30,7 @@ const FAQS = [
   },
   {
     q: "Can I use ValuIQ for liquidation buying?",
-    a: "Yes — the Manifest Analyzer (Pro) lets you upload any liquidation lot manifest (PDF, photo, or spreadsheet) and scores every line item automatically. Deal Hunter also monitors B-Stock, BULQ, and Liquidation.com for scored lot opportunities. Many Pro users buy $1,000-$10,000+ lots based on ValuIQ scoring.",
+    a: "Yes - Manifest Beast (Pro) lets you upload a liquidation lot manifest (photo or spreadsheet) and scores items against real eBay sold data, then projects the lot and suggests a max bid. Many Pro users evaluate $1,000-$10,000+ lots with it before buying.",
   },
   {
     q: "How does the referral program work?",
@@ -38,7 +38,7 @@ const FAQS = [
   },
   {
     q: "What platforms does ValuIQ cover?",
-    a: "Selling platforms: eBay, Poshmark, Mercari, Depop, Etsy, Whatnot, Facebook Marketplace, OfferUp, Craigslist, StockX, GOAT, and Amazon. Sourcing platforms monitored by Deal Hunter: B-Stock, BULQ, Liquidation.com, Direct Liquidation, Craigslist, ShopGoodwill, OfferUp, GovDeals, AuctionZip, Whatnot, Mercari, StockX, GOAT, and eBay.",
+    a: "Selling platforms: eBay, Poshmark, Mercari, Depop, Etsy, Whatnot, Facebook Marketplace, OfferUp, Craigslist, StockX, GOAT, and Amazon.",
   },
   {
     q: "Is ValuIQ available on Android?",
