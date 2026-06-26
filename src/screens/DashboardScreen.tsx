@@ -33,12 +33,13 @@ function planColor(p: string) {
   return m[p] || C.text3;
 }
 
+// Rotating reseller tips - honest, useful, not fabricated "live activity".
 const LIVE_FEED = [
-  { emoji:"🤑", text:"+$340 profit found on Whatnot", time:"2m" },
-  { emoji:"💰", text:"Nike Dunk Low → +$185 on eBay", time:"4m" },
-  { emoji:"🔥", text:"Thrift Run: 3 BUY finds in 12 min", time:"7m" },
-  { emoji:"🏆", text:"Top flipper: $2,840 profit this week", time:"18m" },
-  { emoji:"💎", text:"Pyrex set: paid $8 → sells for $145", time:"22m" },
+  { emoji:"\uD83D\uDCA1", text:"Scan before you buy - know the resale value first", time:"Tip" },
+  { emoji:"\uD83D\uDCE6", text:"Check sell-through, not just price, on slow categories", time:"Tip" },
+  { emoji:"\uD83C\uDFF7\uFE0F", text:"Price Battle shows your best platform after fees", time:"Tip" },
+  { emoji:"\uD83D\uDD0D", text:"Use Specialty Scanner for cards, sneakers & vinyl", time:"Tip" },
+  { emoji:"\uD83D\uDCCA", text:"Track every flip in Profit Tracker for real P&L", time:"Tip" },
 ];
 
 const TOOLS = [
