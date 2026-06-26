@@ -7,7 +7,7 @@ import {
 import { SafeAreaView as SAV } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import SaleCapturePrompt from "../components/SaleCapturePrompt";
-import { API_BASE } from "../lib/api";
+import { API_BASE, hasProAccess } from "../lib/api";
 
 const { width } = Dimensions.get("window");
 
@@ -42,7 +42,6 @@ const LIVE_FEED = [
 ];
 
 const TOOLS = [
-  { id:"titan", icon:"T", name:"Titan Business Suite", desc:"Manifest Beast, vendor intel, CFO & more", minPlan:0, accent:"#ff8c42" },
   { id:"scanner",       icon:"📷", name:"Scan Item",        desc:"Point camera → instant profit",         minPlan:0, accent:C.green   },
   { id:"community",     icon:"🏆", name:"Community",        desc:"Top flips from real resellers",         minPlan:0, accent:"#ff6b6b" },
   { id:"thrift-run",    icon:"🛍️", name:"Thrift Run",       desc:"Rapid-scan a full store",               minPlan:1, accent:C.green   },
@@ -141,7 +140,7 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
 
   // Tools hidden for launch (backend not ready). Remove an id here to re-enable after launch.
   const LAUNCH_HIDDEN = ["deal-hunter"];
-  const myTools    = TOOLS.filter(t => t.minPlan <= level && !LAUNCH_HIDDEN.includes(t.id) && t.id !== "titan");
+  const myTools    = TOOLS.filter(t => t.minPlan <= level && !LAUNCH_HIDDEN.includes(t.id));
   const lockedTools = TOOLS.filter(t => t.minPlan > level && !LAUNCH_HIDDEN.includes(t.id));
   const activity   = LIVE_FEED[liveIdx];
 
@@ -234,11 +233,11 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
         <TouchableOpacity
           style={s.titanBanner}
           activeOpacity={0.9}
-          onPress={() => onNavigate(["titan","lifetime","vip"].includes(plan) ? "titan" : "upgrade")}
+          onPress={() => onNavigate(hasProAccess(plan) ? "titan" : "upgrade")}
         >
           <View style={{flex:1}}>
-            <Text style={s.titanBannerLabel}>{["titan","lifetime","vip"].includes(plan) ? "TITAN BUSINESS SUITE" : "UPGRADE TO TITAN"}</Text>
-            <Text style={s.titanBannerTitle}>{["titan","lifetime","vip"].includes(plan) ? "Open your business command center" : "Manifest Beast, Vendor Intel, Reseller CFO & more"}</Text>
+            <Text style={s.titanBannerLabel}>{hasProAccess(plan) ? "BUSINESS TOOLS" : "UNLOCK WITH PRO"}</Text>
+            <Text style={s.titanBannerTitle}>{hasProAccess(plan) ? "Manifest Beast, Reseller CFO & Tax Export" : "Score liquidation lots & track your true margins"}</Text>
           </View>
           <Text style={s.titanBannerArrow}>{"\u2192"}</Text>
         </TouchableOpacity>

@@ -77,7 +77,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
               style={[s.modeBtn, mode==="business"&&s.modeBtnActive]}
               onPress={()=>{ setMode("business"); setScreen("biz-dashboard"); }}
             >
-              <Text style={[s.modeTxt, mode==="business"&&s.modeTxtActive]}>💼 Command Center</Text>
+              <Text style={[s.modeTxt, mode==="business"&&s.modeTxtActive]}>💼 Business Tools</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[s.modeBtn, mode==="tools"&&s.modeBtnActive]}

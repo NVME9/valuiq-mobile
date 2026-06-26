@@ -35,7 +35,7 @@ export default function BusinessDashboard({ token, userEmail, onNavigate, onLogo
       <View style={s.hdr}>
         <View>
           <Text style={s.greet}>{g}</Text>
-          <Text style={s.hdrTitle}>Command Center</Text>
+          <Text style={s.hdrTitle}>Business Tools</Text>
         </View>
         <View style={s.badgeRow}>
           <View style={s.badge}><Text style={s.badgeTxt}>💼 BUSINESS</Text></View>
