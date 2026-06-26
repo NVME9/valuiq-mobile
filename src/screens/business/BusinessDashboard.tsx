@@ -7,23 +7,9 @@ import { API_BASE } from "../../lib/api";
 interface Props { token:string; plan:string; userEmail:string; onNavigate:(s:string)=>void; onLogout:()=>void; }
 
 const TOOLS = [
-  // 💎 THE, DIAMONDS — Features no other app has,
-  { id:"vendor-intel",   icon:"🔬", title:"Vendor Intelligence",   desc:"Know if a vendor over-grades before buying",  badge:"🔥" as const, isDiamond:true },
-  { id:"trend-predictor",icon:"📈", title:"Trend Predictor",       desc:"Know what's hot BEFORE everyone else",        badge:"🔥" as const, isDiamond:true },
-  { id:"fake-detector",  icon:"🛡️", title:"Fake Detector",        desc:"Photo authentication — prevent account bans", badge:"🔥" as const, isDiamond:true },
-  // ⚔️ CORE, WEAPONS,
   { id:"manifest-beast", icon:"📋", title:"Manifest Beast",        desc:"Score whole lots, get your max bid",             badge:"LIVE" as const },
   { id:"reseller-cfo",  icon:"💰", title:"The Reseller's CFO",   desc:"Your true margin by category + month-end forecast", badge:"NEW" as const, isDiamond:true },
-  { id:"cashflow",       icon:"💰", title:"Cash Flow Oracle",       desc:"30/60/90 day forecast",                       badge:null },
-  { id:"competitor",     icon:"🏹", title:"Competitor Intel",  desc:"Analyze top sellers in your category",          badge:null },
-  // 🏢 TEAM & OPERATIONS,
   { id:"tax",            icon:"📊", title:"Tax Export",            desc:"Schedule C ready — accountant-approved",      badge:null },
-  // 📱 CONSUMER, TOOLS (full access)
-  { id:"scanner",        icon:"📷", title:"Item Scanner",          desc:"Scan any item",                               badge:null },
-  { id:"viral-content",  icon:"📱", title:"Viral Content Engine",  desc:"TikTok scripts from your finds",              badge:"NEW" as const },
-  { id:"sourcing-trip",  icon:"🗺️", title:"Sourcing Intel",        desc:"Where and what to source for profit",             badge:"NEW" as const },
-  { id:"bundle",         icon:"📦", title:"Bundle Builder",   desc:"Bundle items for higher margins",             badge:null },
-  { id:"ai-coach",       icon:"🎯", title:"AI Coach",              desc:"Personal analysis from your data",            badge:null },
 ];
 
 export default function BusinessDashboard({ token, userEmail, onNavigate, onLogout }: Props) {

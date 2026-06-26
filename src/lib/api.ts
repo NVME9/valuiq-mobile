@@ -6,6 +6,8 @@ export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiO
 export const API_BASE = "https://www.getvaluiq.com";
 // Full Titan-suite access: paid Titan, founder Lifetime, or comped VIP.
 export const hasTitanAccess = (plan: string): boolean => ["titan","lifetime","vip"].includes(plan);
+export const hasProAccess = (plan: string): boolean => ["pro","titan","lifetime","vip"].includes(plan);
+
 
 const SB = { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY, "Content-Type": "application/json" };
 

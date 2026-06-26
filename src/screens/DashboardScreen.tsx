@@ -59,7 +59,6 @@ const TOOLS = [
   { id:"bundle-builder",icon:"📦", name:"Bundle Builder",   desc:"Group stuck items into fast bundles",    minPlan:1, accent:C.orange  },
   { id:"flip-score",    icon:"🎯", name:"Flip Score",       desc:"Your reseller report card",             minPlan:1, accent:C.green   },
   { id:"relist",        icon:"✏️",  name:"Auto-Relist",      desc:"Refresh dying listings",               minPlan:1, accent:C.orange  },
-  { id:"manifest",      icon:"📋", name:"Manifest Analyzer",desc:"Score liquidation lots",                minPlan:2, accent:C.yellow  },
   { id:"specialty",     icon:"🎯", name:"Specialty Scanner",desc:"Sneakers, cards, vinyl & luxury",       minPlan:2, accent:"#b066ff" },
   { id:"arbitrage",     icon:"📈", name:"Arbitrage Finder", desc:"Underpriced items hiding in plain sight",minPlan:2, accent:C.green  },
   { id:"ai-coach",      icon:"🧠", name:"AI Coach",         desc:"Personal insights from your history",   minPlan:2, accent:"#b066ff" },

@@ -4,14 +4,13 @@ import {
   ActivityIndicator, TouchableOpacity, Animated, Dimensions,
 } from "react-native";
 import { C } from "./src/lib/theme";
-import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken } from "./src/lib/api";
+import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken , hasProAccess } from "./src/lib/api";
 import { supabase } from "./src/lib/supabase";
 import LoginScreen from "./src/screens/LoginScreen";
 import ScannerScreen from "./src/screens/ScannerScreen";
 import DashboardScreen from "./src/screens/DashboardScreen";
 import ThriftRunScreen from "./src/screens/ThriftRunScreen";
 import SpecialtyScreen from "./src/screens/SpecialtyScreen";
-import ManifestScreen from "./src/screens/ManifestScreen";
 import DeathPileScreen from "./src/screens/DeathPileScreen";
 import CommunityScreen from "./src/screens/CommunityScreen";
 import ProfileScreen from "./src/screens/ProfileScreen";
@@ -256,7 +255,6 @@ export default function App() {
     "dashboard":    <DashboardScreen {...props} />,
     "thrift-run":   <ThriftRunScreen {...props} />,
     "specialty":    <SpecialtyScreen {...props} />,
-    "manifest":     <ManifestScreen {...props} />,
     "deathpile":    <DeathPileScreen {...props} />,
     "community":    <CommunityScreen {...props} />,
     "profile":      <ProfileScreen {...props} />,
@@ -285,7 +283,7 @@ export default function App() {
     "history":      <HistoryScreen {...props} />,
     "faq":          <FAQScreen {...props} />,
     "admin":        <AdminScreen {...props} />,
-    "titan":     hasTitanAccess(plan) ? <BusinessApp token={token} plan={plan} userEmail={session?.user?.email || ""} scansLeft={scansLeft} setScansLeft={setScansLeft} onLogout={handleLogout} /> : <BusinessScreen {...props} />,
+    "titan":     hasProAccess(plan) ? <BusinessApp token={token} plan={plan} userEmail={session?.user?.email || ""} scansLeft={scansLeft} setScansLeft={setScansLeft} onLogout={handleLogout} /> : <UpgradeScreen {...props} />,
   };
 
   const TAB_SCREENS: Screen[] = ["scanner","dashboard","community","profile"];
