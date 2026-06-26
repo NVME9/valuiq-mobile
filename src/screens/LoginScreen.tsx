@@ -14,6 +14,7 @@ import {
 import {
   signIn, signUp, resetPasswordForEmail, confirmPasswordReset,
   saveSession, Session, API_BASE, refreshSessionWithToken,
+  signInWithApple, signInWithGoogle,
 } from "../lib/api";
 
 type Mode = "signin" | "signup" | "forgot" | "reset";
@@ -182,6 +183,36 @@ export default function LoginScreen({ onLogin }: Props) {
   );
 
   // ── MAIN LOGIN SCREEN ──────────────────────────────────────────
+  async function handleAppleSignIn() {
+    setError("");
+    setLoading(true);
+    try {
+      const session = await signInWithApple();
+      await saveSession(session);
+      onLogin(session);
+    } catch (e: any) {
+      if (e?.code !== "ERR_REQUEST_CANCELED" && !String(e?.message||"").includes("cancel")) {
+        setError(e?.message || "Apple sign in failed");
+      }
+    }
+    setLoading(false);
+  }
+
+  async function handleGoogleSignIn() {
+    setError("");
+    setLoading(true);
+    try {
+      const session = await signInWithGoogle();
+      await saveSession(session);
+      onLogin(session);
+    } catch (e: any) {
+      if (!String(e?.message||"").includes("cancel")) {
+        setError(e?.message || "Google sign in failed");
+      }
+    }
+    setLoading(false);
+  }
+
   return (
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
@@ -302,6 +333,26 @@ export default function LoginScreen({ onLogin }: Props) {
             </TouchableOpacity>
           )}
 
+          {/* OAuth buttons - only on signin/signup */}
+          {(mode === "signin" || mode === "signup") && (
+            <>
+              <View style={s.orRow}>
+                <View style={s.orLine} />
+                <Text style={s.orTxt}>or</Text>
+                <View style={s.orLine} />
+              </View>
+              {Platform.OS === "ios" && (
+                <TouchableOpacity style={s.appleBtn} onPress={handleAppleSignIn} disabled={loading} activeOpacity={0.85}>
+                  <Text style={s.appleBtnTxt}>{"\uF8FF"}  Sign in with Apple</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={s.googleBtn} onPress={handleGoogleSignIn} disabled={loading} activeOpacity={0.85}>
+                <View style={s.googleBadge}><Text style={s.googleBadgeTxt}>G</Text></View>
+                <Text style={s.googleBtnTxt}>Sign in with Google</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
           {/* Mode switcher */}
           <View style={s.switchRow}>
             {mode === "signin" ? (
@@ -346,6 +397,9 @@ const s = StyleSheet.create({
   errorBox:      { backgroundColor: "#1a0505", borderWidth: 1, borderColor: "#ff5a5a40", borderRadius: 10, padding: 12, marginBottom: 14 },
   errorTxt:      { color: C.red, fontSize: 13, lineHeight: 18 },
   // Social,
+  orRow:         { flexDirection: "row", alignItems: "center", marginVertical: 16 },
+  orLine:        { flex: 1, height: 1, backgroundColor: "#333" },
+  orTxt:         { color: "#777", fontSize: 13, marginHorizontal: 12, fontWeight: "600" },
   appleBtn:      { backgroundColor: "#1a1a1a", borderRadius: 14, padding: 15, alignItems: "center", marginBottom: 10, borderWidth: 1.5, borderColor: "#555", flexDirection: "row", justifyContent: "center", gap: 10 },
   appleBtnTxt:   { color: "#fff", fontSize: 15, fontWeight: "700" },
   googleBtn:     { backgroundColor: "#fff", borderRadius: 14, padding: 15, alignItems: "center", marginBottom: 10, borderWidth: 1.5, borderColor: "#ddd", flexDirection: "row", justifyContent: "center", gap: 10 },

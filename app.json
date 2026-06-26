@@ -14,6 +14,7 @@
     },
     "ios": {
       "supportsTablet": false,
+      "usesAppleSignIn": true,
       "bundleIdentifier": "com.valuiq.app",
       "infoPlist": {
         "NSCameraUsageDescription": "ValuIQ uses your camera to scan items and identify their resale value.",
@@ -28,7 +29,6 @@
           }
         ]
       },
-
       "jsEngine": "jsc"
     },
     "android": {
@@ -48,7 +48,9 @@
     "plugins": [
       "expo-camera",
       "expo-image-picker",
-      "expo-local-authentication"
+      "expo-local-authentication",
+      "expo-web-browser",
+      "expo-apple-authentication"
     ],
     "scheme": "valuiq",
     "extra": {

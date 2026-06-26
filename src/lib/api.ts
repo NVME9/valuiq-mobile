@@ -1,4 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as AppleAuthentication from "expo-apple-authentication";
+import * as WebBrowser from "expo-web-browser";
+import { supabase } from "./supabase";
 import * as ImageManipulator from "expo-image-manipulator";
 
 export const SUPABASE_URL = "https://tylrcmczbvcvxkbuwnhf.supabase.co";
@@ -250,4 +253,63 @@ export async function getProfitOracle(token: string, item: { category?: string; 
   } catch {
     return { success: false };
   }
+}
+
+// ============ OAUTH: Apple + Google ============
+export async function signInWithApple(): Promise<Session> {
+  const credential = await AppleAuthentication.signInAsync({
+    requestedScopes: [
+      AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+      AppleAuthentication.AppleAuthenticationScope.EMAIL,
+    ],
+  });
+  if (!credential.identityToken) throw new Error("Apple sign in failed - no identity token");
+  const { data, error } = await supabase.auth.signInWithIdToken({
+    provider: "apple",
+    token: credential.identityToken,
+  });
+  if (error) throw new Error(error.message || "Apple sign in failed");
+  if (!data.session) throw new Error("Apple sign in failed - no session");
+  return {
+    access_token: data.session.access_token,
+    refresh_token: data.session.refresh_token,
+    user: { id: data.session.user.id, email: data.session.user.email || "" },
+  };
+}
+
+export async function signInWithGoogle(): Promise<Session> {
+  const redirectTo = "valuiq://auth-callback";
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo, skipBrowserRedirect: true },
+  });
+  if (error) throw new Error(error.message || "Google sign in failed");
+  if (!data?.url) throw new Error("Google sign in failed - no auth URL");
+  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+  if (result.type !== "success" || !result.url) throw new Error("Google sign in cancelled");
+  const url = result.url;
+  const frag = url.split("#")[1] || url.split("?")[1] || "";
+  const params = new URLSearchParams(frag);
+  const code = params.get("code");
+  if (code) {
+    const { data: ex, error: exErr } = await supabase.auth.exchangeCodeForSession(code);
+    if (exErr) throw new Error(exErr.message || "Google sign in failed");
+    if (!ex.session) throw new Error("Google sign in failed - no session");
+    return {
+      access_token: ex.session.access_token,
+      refresh_token: ex.session.refresh_token,
+      user: { id: ex.session.user.id, email: ex.session.user.email || "" },
+    };
+  }
+  const access_token = params.get("access_token");
+  const refresh_token = params.get("refresh_token");
+  if (access_token) {
+    const { data: sess } = await supabase.auth.getUser(access_token);
+    return {
+      access_token,
+      refresh_token: refresh_token || "",
+      user: { id: sess.user?.id || "", email: sess.user?.email || "" },
+    };
+  }
+  throw new Error("Google sign in failed - no code or token returned");
 }
