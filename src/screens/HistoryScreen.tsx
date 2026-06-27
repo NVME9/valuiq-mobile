@@ -6,12 +6,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
+import Coachmark from "../components/Coachmark";
 import { API_BASE, rerunScan, updateScan, updateThriftItem } from "../lib/api";
 
 interface Props {
   token:string; plan:string; scansLeft:number|null;
   setScansLeft:(n:number|null)=>void;
   onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void;
+  tourStep?: string|null; advanceTour?: (s: string|null) => void; skipTour?: () => void;
 }
 
 type HistoryTab = "scans" | "thrift" | "specialty";
@@ -22,7 +24,7 @@ function verdictColor(v: string) {
   return C.red;
 }
 
-export default function HistoryScreen({ token, plan, onNavigate, onBack }: Props) {
+export default function HistoryScreen({ token, plan, onNavigate, onBack, tourStep, advanceTour, skipTour }: Props) {
   const [tab, setTab]               = useState<HistoryTab>("scans");
   const [scans, setScans]           = useState<any[]>([]);
   const [thriftRuns, setThriftRuns] = useState<any[]>([]);
@@ -275,6 +277,16 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack }: Props
   return (
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
+      <Coachmark
+        visible={tourStep === "history"}
+        step={4} totalSteps={4}
+        title="Everything saves here"
+        body="Every scan lands in your history. Tap any item to revisit it, or re-run the analysis anytime for fresh prices. You're ready to flip!"
+        ctaLabel="Start flipping"
+        anchor="center"
+        onNext={() => skipTour && skipTour()}
+        onSkip={() => skipTour && skipTour()}
+      />
 
       {/* Header */}
       <View style={s.header}>

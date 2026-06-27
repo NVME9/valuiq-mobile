@@ -8,6 +8,7 @@ import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-ca
 import * as ImagePicker from "expo-image-picker";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
+import Coachmark from "../components/Coachmark";
 import ShareButton from "../components/ShareButton";
 import { API_BASE, scanImage, scanBarcode , getProfitOracle } from "../lib/api";
 import { scheduleSaleCheckIn } from "../lib/notifications";
@@ -24,9 +25,10 @@ interface Props {
   setScansLeft: (n: number | null) => void;
   onNavigate: (s: string) => void;
   onLogout: () => void;
+  tourStep?: string|null; advanceTour?: (s: string|null) => void; skipTour?: () => void;
 }
 
-export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, onNavigate, onLogout }: Props) {
+export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, onNavigate, onLogout, tourStep, advanceTour, skipTour }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>("camera");
@@ -123,10 +125,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         }
       } catch {}
       setStep("result");
+      if (tourStep === "capture" && advanceTour) advanceTour("result");
       if (plan === "free") setScansLeft(n => n !== null ? Math.max(0, n - 1) : null);
     } catch (e: any) {
       setResult({ _error: e.message });
       setStep("result");
+      if (tourStep === "capture" && advanceTour) advanceTour("result");
     }
   }
 
@@ -234,6 +238,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     return (
       <SafeAreaView style={s.safe}>
         <StatusBar barStyle="light-content"/>
+        <Coachmark
+          visible={tourStep === "result"}
+          step={3} totalSteps={4}
+          title="Your real numbers"
+          body="True profit after fees, plus a clear BUY or PASS - based on real eBay sold data, not guesses. This is what makes ValuIQ different. Your scan also saved automatically."
+          ctaLabel="See where it saved"
+          anchor="center"
+          onNext={() => { advanceTour && advanceTour("history"); onNavigate("history"); }}
+          onSkip={() => skipTour && skipTour()}
+        />
         {/* Nav */}
         <View style={s.nav}>
           <TouchableOpacity onPress={() => setStep("review")} style={s.navBack}>
@@ -686,6 +700,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   if (step === "camera" && mode === "barcode") return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
       <StatusBar barStyle="light-content" />
+      <Coachmark
+        visible={tourStep === "capture"}
+        step={2} totalSteps={4}
+        title="Snap your first item"
+        body="Point your camera at any item and tap the shutter - or pick a photo from your library. ValuIQ will fetch its real resale value and profit."
+        ctaLabel="Got it"
+        anchor="top"
+        onNext={() => advanceTour && advanceTour("capture")}
+        onSkip={() => skipTour && skipTour()}
+      />
       <CameraView style={{ flex: 1, position: "absolute" as any, top:0, left:0, right:0, bottom:0 }} facing="back"
         barcodeScannerSettings={{ barcodeTypes: ["ean13","ean8","upc_a","upc_e","qr","code128","code39"] }}
         onBarcodeScanned={handleBarcode} />
@@ -726,6 +750,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
       <StatusBar barStyle="light-content" />
+      <Coachmark
+        visible={tourStep === "capture"}
+        step={2} totalSteps={4}
+        title="Snap your first item"
+        body="Point your camera at any item and tap the shutter - or pick a photo from your library. ValuIQ will fetch its real resale value and profit."
+        ctaLabel="Got it"
+        anchor="top"
+        onNext={() => advanceTour && advanceTour("capture")}
+        onSkip={() => skipTour && skipTour()}
+      />
       <CameraView ref={cameraRef} style={{ flex: 1, position: "absolute" as any, top: 0, left: 0, right: 0, bottom: 0 }} facing="back" />
       <View style={{ flex: 1 }}>
         <View style={{ flex: 1 }}>
