@@ -168,6 +168,7 @@ export default function App() {
   const [splashDone, setSplashDone] = useState(false);
   const [onboarded, setOnboarded] = useState(false);
   const [aiConsented, setAiConsented] = useState(false);
+  const [tourStep, setTourStep]     = useState<string|null>(null);
   const fadeIn = useRef(new Animated.Value(0)).current;
 
   
@@ -195,6 +196,9 @@ export default function App() {
         await saveSession(refreshed);
         setSession(refreshed);
         await loadUserData(refreshed.access_token);
+        const tdone = await AsyncStorage.getItem("@valuiq_tour_done");
+        const cdone = await AsyncStorage.getItem("@valuiq_ai_consent");
+        if (tdone !== "true" && cdone === "true") setTourStep("scan");
       } catch { await clearSession(); }
     }
     setAppReady(true);
@@ -225,6 +229,21 @@ export default function App() {
   const token = session?.access_token || "";
   const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
 
+  async function skipTour() {
+    try { await AsyncStorage.setItem("@valuiq_tour_done", "true"); } catch {}
+    setTourStep(null);
+  }
+  function advanceTour(next: string|null) {
+    if (next === null) { skipTour(); return; }
+    setTourStep(next);
+  }
+  // Start the guided tour for brand-new users the first time they reach the dashboard.
+  async function maybeStartTour() {
+    try {
+      const done = await AsyncStorage.getItem("@valuiq_tour_done");
+      if (done !== "true") setTourStep("scan");
+    } catch {}
+  }
   function navigate(s: Screen, data?: any) {
     setNavData(data ?? null);
     // Tab bar screens reset history; tool screens push to stack,
@@ -247,7 +266,7 @@ export default function App() {
     }
   }
 
-  const props = { token, plan, scansLeft, setScansLeft, onNavigate:navigate, onBack:goBack, onLogout:handleLogout, navData };
+  const props = { token, plan, scansLeft, setScansLeft, onNavigate:navigate, onBack:goBack, onLogout:handleLogout, navData, tourStep, advanceTour, skipTour };
 
   const SCREENS: Record<Screen,React.ReactNode> = {
     "scanner":      <ScannerScreen {...props} />,
@@ -311,8 +330,13 @@ export default function App() {
               : <LoginScreen onLogin={handleLogin} />
         ) : !aiConsented ? (
           <AIConsentScreen onAgree={async () => {
-            try { await AsyncStorage.setItem("@valuiq_ai_consent","true"); } catch {}
             setAiConsented(true);
+            try {
+              await AsyncStorage.setItem("@valuiq_ai_consent", "true");
+              const chk = await AsyncStorage.getItem("@valuiq_ai_consent");
+              if (chk !== "true") await AsyncStorage.setItem("@valuiq_ai_consent", "true");
+            } catch (e) { console.warn("consent save failed", e); }
+            maybeStartTour();
           }} />
         ) : (
           <View style={s.root}>

@@ -6,6 +6,7 @@ import {
 } from "react-native";
 import { SafeAreaView as SAV } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import Coachmark from "../components/Coachmark";
 import SaleCapturePrompt from "../components/SaleCapturePrompt";
 import { API_BASE, hasProAccess } from "../lib/api";
 
@@ -15,6 +16,7 @@ interface Props {
   token: string; plan: string; scansLeft: number | null;
   setScansLeft: (n: number | null) => void;
   onNavigate: (s: string) => void; onBack?: () => void; onLogout: () => void;
+  tourStep?: string|null; advanceTour?: (s: string|null) => void; skipTour?: () => void;
 }
 
 function planLevel(p: string) {
@@ -81,7 +83,7 @@ const sh = StyleSheet.create({
   chevron: { color:C.text4, fontSize:18, fontWeight:"900" },
 });
 
-export default function DashboardScreen({ token, plan, scansLeft, onNavigate, onLogout }: Props) {
+export default function DashboardScreen({ token, plan, scansLeft, onNavigate, onLogout, tourStep, advanceTour, skipTour }: Props) {
   const [scans, setScans]         = useState<any[]>([]);
   const [stats, setStats]         = useState<any>(null);
   const [refreshing, setRefresh]  = useState(false);
@@ -139,6 +141,16 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
   return (
     <SAV style={s.safe}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
+      <Coachmark
+        visible={tourStep === "scan"}
+        step={1} totalSteps={4}
+        title="Welcome to ValuIQ!"
+        body="Let's find out what something is really worth. Tap the Scan tab at the bottom to value your first item."
+        ctaLabel="Got it"
+        anchor="bottom"
+        onNext={() => advanceTour && advanceTour("capture")}
+        onSkip={() => skipTour && skipTour()}
+      />
 
       {/* Nav */}
       <View style={s.nav}>
