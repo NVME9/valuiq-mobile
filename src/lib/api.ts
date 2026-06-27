@@ -313,3 +313,27 @@ export async function signInWithGoogle(): Promise<Session> {
   }
   throw new Error("Google sign in failed - no code or token returned");
 }
+
+// Share a win to the in-app Community feed (populates the real community_wins table).
+export async function shareWin(
+  token: string, itemName: string, profit: number,
+  platform?: string, storeName?: string
+): Promise<boolean> {
+  try {
+    const r = await fetch(`${API_BASE}/api/community-wins`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userToken: token,
+        itemName,
+        profit: Math.round(profit),
+        platform: platform || "eBay",
+        storeName: storeName || "",
+      }),
+    });
+    const d = await r.json().catch(() => ({}));
+    return d?.success === true;
+  } catch {
+    return false;
+  }
+}

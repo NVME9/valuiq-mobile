@@ -10,7 +10,7 @@ import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import Coachmark from "../components/Coachmark";
 import ShareButton from "../components/ShareButton";
-import { API_BASE, scanImage, scanBarcode , getProfitOracle } from "../lib/api";
+import { API_BASE, scanImage, scanBarcode , getProfitOracle, shareWin } from "../lib/api";
 import { scheduleSaleCheckIn } from "../lib/notifications";
 
 const { width } = Dimensions.get("window");
@@ -34,6 +34,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [step, setStep] = useState<Step>("camera");
   const [mode, setMode] = useState<"photo" | "barcode">("photo");
   const [photos, setPhotos] = useState<string[]>([]);
+  const [winShared, setWinShared] = useState(false);
+  const [sharingWin, setSharingWin] = useState(false);
   const [brandInput, setBrandInput] = useState("");
   const [loadMsg, setLoadMsg] = useState(0);
   const [goDeeper, setGoDeeper] = useState(false);
@@ -63,7 +65,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   function reset() {
     setStep("camera");
     setResult(null);
-    setPhotos([]);
+    setPhotos([]); setWinShared(false);
     setDescription("");
     setBrandInput("");
     setBuyPrice("");
@@ -592,6 +594,22 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                      title="My ValuIQ Find"
                      compact
                    />
+                   {result.decision === "BUY" && (result.netProfit || 0) >= 20 && (
+                     <TouchableOpacity
+                       style={s.communityShareBtn}
+                       disabled={winShared || sharingWin}
+                       activeOpacity={0.85}
+                       onPress={async () => {
+                         setSharingWin(true);
+                         const ok = await shareWin(token, result.itemName || "Great find", result.netProfit || 0, "eBay", "");
+                         setSharingWin(false);
+                         if (ok) setWinShared(true);
+                       }}>
+                       <Text style={s.communityShareTxt}>
+                         {winShared ? "\u2713  Shared with the community!" : sharingWin ? "Sharing..." : "\uD83C\uDF89  Share this win with the community"}
+                       </Text>
+                     </TouchableOpacity>
+                   )}
                 </View>
               )}
             </>
@@ -816,6 +834,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 }
 
 const s = StyleSheet.create({
+  communityShareBtn: { marginTop: 10, backgroundColor: C.greenBg, borderWidth: 1.5, borderColor: C.greenBorder, borderRadius: 12, paddingVertical: 13, alignItems: "center" },
+  communityShareTxt: { color: C.green, fontSize: 14.5, fontWeight: "800" },
   safe:           { flex: 1, backgroundColor: C.bg },
   center:         { flex: 1, alignItems: "center", justifyContent: "center", padding: 28 },
   h1:             { color: C.text1, fontSize: 26, fontWeight: "900", letterSpacing: -0.5 },
