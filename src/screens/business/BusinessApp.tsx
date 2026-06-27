@@ -77,7 +77,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
             </TouchableOpacity>
             <TouchableOpacity
               style={[s.modeBtn, mode==="tools"&&s.modeBtnActive]}
-              onPress={()=>{ setMode("tools"); navigate("scanner"); }}
+              onPress={()=>{ setMode("tools"); navigate("dashboard"); }}
             >
               <Text style={[s.modeTxt, mode==="tools"&&s.modeTxtActive]}>📷 All Tools</Text>
             </TouchableOpacity>

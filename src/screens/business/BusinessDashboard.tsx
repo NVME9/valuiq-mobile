@@ -7,9 +7,9 @@ import { API_BASE } from "../../lib/api";
 interface Props { token:string; plan:string; userEmail:string; onNavigate:(s:string)=>void; onLogout:()=>void; }
 
 const TOOLS = [
-  { id:"manifest-beast", icon:"📋", title:"Manifest Beast",        desc:"Score whole lots, get your max bid",             badge:"LIVE" as const },
-  { id:"reseller-cfo",  icon:"💰", title:"The Reseller's CFO",   desc:"Your true margin by category + month-end forecast", badge:"NEW" as const, isDiamond:true },
-  { id:"tax",            icon:"📊", title:"Tax Export",            desc:"Schedule C ready — accountant-approved",      badge:null },
+  { id:"manifest-beast", icon:"\uD83D\uDCCB", title:"Manifest Beast",        desc:"Score whole lots, get your max bid",             badge:"LIVE" as const },
+  { id:"reseller-cfo",  icon:"\uD83D\uDCB0", title:"The Reseller's CFO",   desc:"Your true margin by category + month-end forecast", badge:"NEW" as const },
+  { id:"tax",            icon:"\uD83D\uDCCA", title:"Tax Export",            desc:"Schedule C ready - accountant-approved",      badge:null },
 ];
 
 export default function BusinessDashboard({ token, userEmail, onNavigate, onLogout }: Props) {
@@ -38,7 +38,7 @@ export default function BusinessDashboard({ token, userEmail, onNavigate, onLogo
           <Text style={s.hdrTitle}>Business Tools</Text>
         </View>
         <View style={s.badgeRow}>
-          <View style={s.badge}><Text style={s.badgeTxt}>💼 BUSINESS</Text></View>
+          <View style={s.badge}><Text style={s.badgeTxt}>BUSINESS</Text></View>
           <TouchableOpacity onPress={onLogout} style={s.logoutBtn}>
             <Text style={s.logoutTxt}>↩</Text>
           </TouchableOpacity>
@@ -64,7 +64,7 @@ export default function BusinessDashboard({ token, userEmail, onNavigate, onLogo
 
 
         {/* Tools */}
-        <Text style={s.secTit}>YOUR TITAN TOOLKIT</Text>
+        <Text style={s.secTit}>YOUR BUSINESS TOOLKIT</Text>
         <View style={s.grid}>
           {TOOLS.map(t=>(
             <TouchableOpacity key={t.id} style={[(t as any).isDiamond ? s.diamondCard : s.toolCard]} onPress={()=>onNavigate(t.id)} activeOpacity={0.8}>
