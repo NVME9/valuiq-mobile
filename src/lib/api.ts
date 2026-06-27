@@ -91,6 +91,7 @@ export async function sendMagicLink(email: string): Promise<void> {
 export async function refreshToken(refresh_token: string): Promise<Session> {
   const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, { method:"POST", headers:SB, body:JSON.stringify({refresh_token}) });
   const d = await r.json();
+  console.log("[DIAG refreshToken] status=" + r.status + " ok=" + r.ok + " resp=" + JSON.stringify(d).slice(0,300));
   if (!r.ok) throw new Error("Session expired");
   return d;
 }
@@ -288,8 +289,25 @@ export async function signInWithGoogle(): Promise<Session> {
   const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
   if (result.type !== "success" || !result.url) throw new Error("Google sign in cancelled");
   const url = result.url;
+  // Implicit flow returns tokens in the URL fragment (#access_token=...&refresh_token=...)
   const frag = url.split("#")[1] || url.split("?")[1] || "";
   const params = new URLSearchParams(frag);
+  const access_token = params.get("access_token");
+  const refresh_token = params.get("refresh_token");
+  if (access_token) {
+    // Set the session on the client so it persists + auto-refreshes
+    await supabase.auth.setSession({
+      access_token,
+      refresh_token: refresh_token || "",
+    });
+    const { data: sess } = await supabase.auth.getUser(access_token);
+    return {
+      access_token,
+      refresh_token: refresh_token || "",
+      user: { id: sess.user?.id || "", email: sess.user?.email || "" },
+    };
+  }
+  // Fallback: PKCE code exchange (in case provider returns a code)
   const code = params.get("code");
   if (code) {
     const { data: ex, error: exErr } = await supabase.auth.exchangeCodeForSession(code);
@@ -299,16 +317,6 @@ export async function signInWithGoogle(): Promise<Session> {
       access_token: ex.session.access_token,
       refresh_token: ex.session.refresh_token,
       user: { id: ex.session.user.id, email: ex.session.user.email || "" },
-    };
-  }
-  const access_token = params.get("access_token");
-  const refresh_token = params.get("refresh_token");
-  if (access_token) {
-    const { data: sess } = await supabase.auth.getUser(access_token);
-    return {
-      access_token,
-      refresh_token: refresh_token || "",
-      user: { id: sess.user?.id || "", email: sess.user?.email || "" },
     };
   }
   throw new Error("Google sign in failed - no code or token returned");

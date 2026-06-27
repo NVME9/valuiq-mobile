@@ -186,19 +186,19 @@ export default function App() {
       const seen = await AsyncStorage.getItem("@valuiq_onboarded");
       if (seen === "true") setOnboarded(true);
       const consent = await AsyncStorage.getItem("@valuiq_ai_consent");
-      if (consent === "true") setAiConsented(true);
+      console.log("[DIAG init] consent read =", consent); if (consent === "true") setAiConsented(true);
     } catch {}
-    const saved = await loadSession();
+    const saved = await loadSession(); console.log("[DIAG init] loadSession =", saved ? "FOUND" : "NONE");
     if (saved) {
       try {
-        const refreshed = await refreshToken(saved.refresh_token);
+        const refreshed = await refreshToken(saved.refresh_token); console.log("[DIAG init] refresh OK len=", (refreshed && refreshed.access_token ? refreshed.access_token.length : 0));
         await saveSession(refreshed);
         setSession(refreshed);
         await loadUserData(refreshed.access_token);
         const tdone = await AsyncStorage.getItem("@valuiq_tour_done");
         const cdone = await AsyncStorage.getItem("@valuiq_ai_consent");
         if (tdone !== "true" && cdone === "true") setTourStep("scan");
-      } catch { await clearSession(); }
+      } catch (e) { console.log("[DIAG init] refresh FAILED -> clearSession. error=", String(e)); await clearSession(); }
     }
     setAppReady(true);
   }

@@ -189,6 +189,9 @@ export default function LoginScreen({ onLogin }: Props) {
     try {
       const session = await signInWithApple();
       await saveSession(session);
+      if (session.refresh_token) {
+        try { await saveBiometricRefreshToken(session.refresh_token); } catch {}
+      }
       onLogin(session);
     } catch (e: any) {
       if (e?.code !== "ERR_REQUEST_CANCELED" && !String(e?.message||"").includes("cancel")) {
@@ -204,6 +207,9 @@ export default function LoginScreen({ onLogin }: Props) {
     try {
       const session = await signInWithGoogle();
       await saveSession(session);
+      if (session.refresh_token) {
+        try { await saveBiometricRefreshToken(session.refresh_token); } catch {}
+      }
       onLogin(session);
     } catch (e: any) {
       if (!String(e?.message||"").includes("cancel")) {
