@@ -42,7 +42,7 @@ const FAQS = [
   },
   {
     q: "Is ValuIQ available on Android?",
-    a: "iOS app is live now. Android is coming soon. The full web app at getvaluiq.com works on any device including Android phones via your mobile browser.",
+    a: "ValuIQ is live on iOS. The full web app at getvaluiq.com works on any device, including Android phones, right from your mobile browser.",
   },
   {
     q: "How do I report incorrect pricing?",

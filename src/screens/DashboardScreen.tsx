@@ -66,14 +66,6 @@ const TOOLS = [
   { id:"profit-tracker",icon:"💰", name:"Profit Tracker",   desc:"Your real P&L every flip",             minPlan:2, accent:C.green   },
 ];
 
-const COMING_SOON = [
-  { icon:"💼", name:"ValuIQ Business",    desc:"Manifest Beast, Auto-Scout, Pallet Prophet + exclusive AI tools", badge:"Coming Soon", color:"#ff8c42" },
-  { icon:"📸", name:"Photo IQ",           desc:"AI critiques your listing photos vs top sellers", badge:"Q3 2026", color:"#b066ff" },
-  { icon:"⏱️", name:"True Hourly Rate",   desc:"Your REAL hourly rate per category — most resellers are shocked", badge:"Q3 2026", color:C.green },
-  { icon:"💨", name:"Cash Velocity",      desc:"Dollars per day held — the metric that rewires sourcing", badge:"Q3 2026", color:C.yellow },
-  { icon:"🗓️", name:"Perfect Timing",    desc:"Exact day and time to list for 43% higher sale prices", badge:"Q4 2026", color:"#4db8ff" },
-  { icon:"⚠️", name:"Safe To Sell",       desc:"CPSC recall + counterfeit check before you list", badge:"Q4 2026", color:C.red },
-];
 
 function SectionHeader({ title, expanded, onToggle }: { title:string; expanded:boolean; onToggle:()=>void }) {
   return (
@@ -96,7 +88,6 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
   const [liveIdx, setLiveIdx]     = useState(0);
   const [showTools, setShowTools] = useState(true);
   const [showScans, setShowScans] = useState(true);
-  const [showSoon,  setShowSoon]  = useState(false);
   const [showAI,    setShowAI]    = useState(false);
   const scanPulse                 = useRef(new Animated.Value(1)).current;
   const liveFade                  = useRef(new Animated.Value(1)).current;
@@ -310,24 +301,6 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
           </TouchableOpacity>
         ))}
 
-        {/* COMING SOON - hidden for App Store (Guideline 2.1: no unreleased features advertised) */}
-        {false && (
-          <View style={{marginBottom:14}}>
-            {COMING_SOON.map((item, i) => (
-              <View key={i} style={[s.csCard, {borderColor:item.color+"25"}]}>
-                <Text style={{fontSize:22, marginRight:10}}>{item.icon}</Text>
-                <View style={{flex:1}}>
-                  <Text style={[s.csName, {color:item.color}]}>{item.name}</Text>
-                  <Text style={s.csDesc}>{item.desc}</Text>
-                </View>
-                <View style={[s.csBadge, {backgroundColor:item.color+"20", borderColor:item.color+"40"}]}>
-                  <Text style={[s.csBadgeTxt, {color:item.color}]}>{item.badge}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
         {/* RECENT SCANS - collapsible */}
         <SectionHeader title="RECENT SCANS" expanded={showScans} onToggle={() => setShowScans(v => !v)}/>
         {showScans && (
@@ -451,7 +424,7 @@ const s = StyleSheet.create({
   aiTeaserEye:   { color:"#b066ff", fontSize:8, fontWeight:"900", letterSpacing:1.5, marginBottom:4 },
   aiTeaserTitle: { color:C.text1, fontSize:15, fontWeight:"900", marginBottom:4 },
   aiTeaserSub:   { color:C.text3, fontSize:12, lineHeight:17 },
-  // Coming soon
+  // Card styles
   csCard:        { backgroundColor:C.surface, borderWidth:1, borderRadius:14, padding:14, flexDirection:"row", alignItems:"flex-start", marginBottom:8 },
   csName:        { fontSize:13, fontWeight:"800", marginBottom:3 },
   csDesc:        { color:C.text3, fontSize:11, lineHeight:15 },
