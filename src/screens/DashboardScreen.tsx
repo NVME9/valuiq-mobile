@@ -73,14 +73,14 @@ function SectionHeader({ title, expanded, onToggle }: { title:string; expanded:b
   return (
     <TouchableOpacity style={sh.row} onPress={onToggle} activeOpacity={0.8}>
       <Text style={sh.title}>{title}</Text>
-      <Text style={[sh.chevron, expanded && {transform:[{rotate:"180deg"}]}]}>⌄</Text>
+      <Text style={[sh.chevron, expanded && {transform:[{rotate:"180deg"}]}]}>{"\u25BC"}</Text>
     </TouchableOpacity>
   );
 }
 const sh = StyleSheet.create({
   row:     { flexDirection:"row", justifyContent:"space-between", alignItems:"center", paddingTop:16, paddingBottom:10, marginBottom:4 },
-  title:   { color:C.text4, fontSize:9, fontWeight:"800", letterSpacing:2, textTransform:"uppercase" },
-  chevron: { color:C.text4, fontSize:18, fontWeight:"900" },
+  title:   { color:C.text3, fontSize:11, fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase" },
+  chevron: { color:C.text2, fontSize:13, fontWeight:"900" },
 });
 
 export default function DashboardScreen({ token, plan, scansLeft, onNavigate, onLogout, tourStep, advanceTour, skipTour }: Props) {

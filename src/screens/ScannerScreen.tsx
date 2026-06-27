@@ -215,7 +215,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     if (result?._error) return (
       <SafeAreaView style={s.safe}>
         <View style={s.nav}>
-          <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}></Text></TouchableOpacity>
+          <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
           <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
           <Text style={s.logoText}>ValuIQ</Text>
         </View>
@@ -253,7 +253,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         {/* Nav */}
         <View style={s.nav}>
           <TouchableOpacity onPress={() => setStep("review")} style={s.navBack}>
-            <Text style={s.navBackText}></Text>
+            <Text style={s.navBackText}>{"\u2039"}</Text>
           </TouchableOpacity>
           <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
           <Text style={s.logoText}>ValuIQ</Text>
@@ -637,7 +637,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" />
       <View style={s.nav}>
-        <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}></Text></TouchableOpacity>
+        <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
         <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
         <Text style={s.logoText}>ValuIQ</Text>
       </View>

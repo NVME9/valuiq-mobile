@@ -126,7 +126,7 @@ export default function ManifestBeast({ token, onBack }: Props) {
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" backgroundColor={B.bg}/>
       <View style={s.nav}>
-        <TouchableOpacity onPress={onBack} style={s.back}><Text style={s.backTxt}>←</Text></TouchableOpacity>
+        <TouchableOpacity onPress={onBack} style={s.back}><Text style={s.backTxt}>{"\u2039"}</Text></TouchableOpacity>
         <Text style={s.navTitle}>📋 Manifest Beast</Text>
         <View style={{width:36}}/>
       </View>

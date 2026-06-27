@@ -64,7 +64,7 @@ export default function HelpScreen({ onNavigate, onBack }: Props) {
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
       <View style={s.nav}>
-        <TouchableOpacity onPress={()=>onBack?.()} style={s.back}><Text style={s.backTxt}>←</Text></TouchableOpacity>
+        <TouchableOpacity onPress={()=>onBack?.()} style={s.back}><Text style={s.backTxt}>{"\u2039"}</Text></TouchableOpacity>
         <Text style={s.navTitle}>Help & FAQ</Text>
         <View style={{width:36}}/>
       </View>
