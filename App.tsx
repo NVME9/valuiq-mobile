@@ -31,7 +31,6 @@ import FlipScoreScreen from "./src/screens/FlipScoreScreen";
 import SourcingAlertsScreen from "./src/screens/SourcingAlertsScreen";
 import InventoryScreen from "./src/screens/InventoryScreen";
 import ProfitTrackerScreen from "./src/screens/ProfitTrackerScreen";
-import DealHunterScreen from "./src/screens/DealHunterScreen";
 import OnboardingScreen from "./src/screens/OnboardingScreen";
 import AIConsentScreen from "./src/screens/AIConsentScreen";
 import AICoachScreen from "./src/screens/AICoachScreen";
@@ -295,7 +294,6 @@ export default function App() {
     "leaderboard":  <CommunityScreen {...props} />,
     "inventory":    <InventoryScreen {...props} />,
     "profit-tracker":<ProfitTrackerScreen {...props} />,
-    "deal-hunter":  <DealHunterScreen {...props} />,
     "ai-coach":     <AICoachScreen {...props} />,
     "profit-tracker": <ProfitTrackerScreen {...props} />,
     "history":      <HistoryScreen {...props} />,
