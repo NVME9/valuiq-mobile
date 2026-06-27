@@ -5,10 +5,6 @@ import { B } from "../../lib/businessTheme";
 import BusinessDashboard from "./BusinessDashboard";
 import ManifestBeast from "./ManifestBeast";
 import ResellerCFO from "./ResellerCFO";
-import VendorIntel from "./VendorIntel";
-import CompetitorIntel from "./CompetitorIntel";
-import TrendPredictor from "./TrendPredictor";
-import FakeDetector from "./FakeDetector";
 import TaxExport from "./TaxExport";
 import SourcingIntelScreen from "../SourcingIntelScreen";
 import CashFlowScreen from "../CashFlowScreen";
@@ -39,7 +35,7 @@ interface Props {
   onLogout: () => void;
 }
 
-type BizScreen = "biz-dashboard" | "manifest-beast" | "reseller-cfo" | "vendor-intel" | "competitor" | "trend-predictor" | "fake-detector" | "tax" | 
+type BizScreen = "biz-dashboard" | "manifest-beast" | "reseller-cfo" | "tax" | 
   "scanner"|"dashboard"|"price-battle"|"thrift-run"|"deathpile"|
   "arbitrage"|"specialty"|"profile"|
   "history"|"faq"|"ai-coach"|"inventory"|"community"|"cashflow"|"viral-content"|"bundle"|"sourcing-trip";
@@ -64,7 +60,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
   token, plan, scansLeft, setScansLeft,
     onNavigate: navigate, onBack: goBack, onLogout };
 
-  const isBizScreen = screen === "biz-dashboard" || screen === "manifest-beast" || screen === "reseller-cfo" || screen === "vendor-intel" || screen === "competitor" || screen === "trend-predictor" || screen === "fake-detector" || screen === "tax";
+  const isBizScreen = screen === "biz-dashboard" || screen === "manifest-beast" || screen === "reseller-cfo" || screen === "tax";
 
   return (
     <SafeAreaView style={s.container} edges={["top"]}>
@@ -93,10 +89,6 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
       {screen === "biz-dashboard" && <BusinessDashboard token={token} plan={plan} userEmail={userEmail} onNavigate={navigate} onLogout={onLogout}/>}
       {screen === "manifest-beast" && <ManifestBeast token={token} onBack={goBack}/>}
       {screen === "reseller-cfo" && <ResellerCFO token={token} onBack={goBack}/>}
-      {screen === "vendor-intel" && <VendorIntel token={token} onBack={goBack}/>}
-      {screen === "competitor" && <CompetitorIntel token={token} onBack={goBack}/>}
-      {screen === "trend-predictor" && <TrendPredictor token={token} onBack={goBack}/>}
-      {screen === "fake-detector" && <FakeDetector token={token} onBack={goBack}/>}
       {screen === "tax" && <TaxExport token={token} onBack={goBack}/>}
       
       {/* Consumer screens - full access for Business users */}
