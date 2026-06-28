@@ -323,6 +323,26 @@ export async function signInWithGoogle(): Promise<Session> {
 }
 
 // Share a win to the in-app Community feed (populates the real community_wins table).
+export async function reportWin(
+  token: string, winId: string, reason?: string
+): Promise<boolean> {
+  try {
+    const r = await fetch(`${API_BASE}/api/community-report`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userToken: token,
+        winId,
+        reason: reason || "Inappropriate content",
+      }),
+    });
+    const d = await r.json().catch(() => ({}));
+    return !!d?.success;
+  } catch {
+    return false;
+  }
+}
+
 export async function shareWin(
   token: string, itemName: string, profit: number,
   platform?: string, storeName?: string

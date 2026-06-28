@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, RefreshControl, ActivityIndicator } from "react-native";
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, RefreshControl, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
-import { API_BASE, getCommunityWins } from "../lib/api";
+import { API_BASE, getCommunityWins, reportWin } from "../lib/api";
 
 const EXAMPLE_WINS = [
   { id:"1", username:"FlipQueen",   item_name:"Coach Leather Crossbody",      profit:67,  platform:"Poshmark", store_name:"Goodwill",        likes:24, created_at:new Date(Date.now()-7200000).toISOString()   },
@@ -46,7 +46,7 @@ interface Props {
   onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void;
 }
 
-export default function CommunityScreen({ onNavigate, onBack }: Props) {
+export default function CommunityScreen({ token, onNavigate, onBack }: Props) {
   const [tab, setTab]           = useState<"wins"|"leaderboard">("wins");
   const [filter, setFilter]     = useState<"hot"|"profit"|"recent">("hot");
   const [wins, setWins]         = useState<any[]>(EXAMPLE_WINS.map(w => ({ ...w, isExample: true })));
@@ -171,6 +171,16 @@ export default function CommunityScreen({ onNavigate, onBack }: Props) {
                   <TouchableOpacity style={s.scanItBtn} onPress={()=>onNavigate("scanner")}>
                     <Text style={s.scanItTxt}>Scan similar →</Text>
                   </TouchableOpacity>
+                {!win.isExample && (
+                  <TouchableOpacity style={{ paddingHorizontal: 8, paddingVertical: 6 }} onPress={() => {
+                    Alert.alert("Report post", "Report this post for review?", [
+                      { text: "Cancel", style: "cancel" },
+                      { text: "Report", style: "destructive", onPress: async () => { await reportWin(token, win.id); Alert.alert("Thanks", "Our team will review this post."); } },
+                    ]);
+                  }}>
+                    <Text style={{ color: C.text4, fontSize: 12 }}>{"\u2691"} Report</Text>
+                  </TouchableOpacity>
+                )}
                 </View>
               </View>
             ))}
