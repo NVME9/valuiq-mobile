@@ -176,7 +176,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // - UPGRADE -
   if (step === "upgrade") return (
     <SafeAreaView style={s.safe}>
-      <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 60 }}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 24, paddingBottom: 60 }}>
         <Text style={{ fontSize: 52, textAlign: "center", marginBottom: 16 }}></Text>
         <Text style={[s.h1, { textAlign: "center" }]}>Free scans used up</Text>
         <Text style={[s.body, { textAlign: "center", marginBottom: 24 }]}>
@@ -262,7 +262,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           </TouchableOpacity>
         </View>
 
-        <ScrollView contentContainerStyle={{padding:16,paddingBottom:60}} showsVerticalScrollIndicator={false}>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,paddingBottom:60}} showsVerticalScrollIndicator={false}>
 
           {/* - VERDICT CARD - */}
           <View style={[s.verdictCard,{borderColor:(hasNoData?C.border:dc)+"40",backgroundColor:(hasNoData?C.surface:dc)+"10"}]}>
@@ -641,7 +641,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
         <Text style={s.logoText}>ValuIQ</Text>
       </View>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
         <Text style={[s.h2, { marginBottom: 4 }]}>What are you looking at?</Text>
         <Text style={[s.body, { marginBottom: 16 }]}>More detail = better result. A photo makes the biggest difference.</Text>
 

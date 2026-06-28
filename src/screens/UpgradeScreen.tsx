@@ -144,7 +144,7 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
       <View style={s.nav}>
         <TouchableOpacity style={s.backBtn} onPress={onBack||(() => onNavigate("dashboard"))}>
-          <Text style={s.backTxt}>← Back</Text>
+          <Text style={s.backTxt}>{"\u2039"} Back</Text>
         </TouchableOpacity>
         <Text style={s.navTitle}>Choose Your Plan</Text>
         <View style={{width:36}}/>
