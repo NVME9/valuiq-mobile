@@ -218,6 +218,11 @@ export default function App() {
     setSession(s);
     await loadUserData(s.access_token);
     setScreen("dashboard");
+    try {
+      const tdone = await AsyncStorage.getItem("@valuiq_tour_done");
+      const cdone = await AsyncStorage.getItem("@valuiq_ai_consent");
+      if (tdone !== "true" && cdone === "true") setTourStep("scan");
+    } catch {}
   }
 
   async function handleLogout() {
