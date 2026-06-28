@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  StatusBar, ActivityIndicator, TextInput, Linking, Image, Modal, Pressable, Alert } from "react-native";
+  StatusBar, ActivityIndicator, TextInput, Linking, Image, Modal, Pressable, Alert, Share } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
@@ -552,17 +552,23 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
               </View>
             )}
 
-            {/* Referral */}
+            {/* Share with a friend */}
             <View style={s.referralCard}>
-              <Text style={s.referralTitle}>🔗 Refer Friends & Earn</Text>
+              <Text style={s.referralTitle}>{"\uD83D\uDCE4"} Share ValuIQ</Text>
               <Text style={s.referralBody}>
-                Share, ValuIQ with other resellers. When they sign up through your link, you both benefit.
+                Know a reseller who'd love this? Send them ValuIQ.
               </Text>
               <TouchableOpacity
                 style={s.referralBtn}
-                onPress={()=>Linking.openURL(`${API_BASE}/partners`)}
+                onPress={async () => {
+                  try {
+                    await Share.share({
+                      message: "Check out ValuIQ - scan any item and get its real resale value instantly. https://apps.apple.com/app/id6772601131",
+                    });
+                  } catch {}
+                }}
               >
-                <Text style={s.referralBtnText}>Get your referral link →</Text>
+                <Text style={s.referralBtnText}>Share with a friend</Text>
               </TouchableOpacity>
             </View>
 
@@ -625,40 +631,6 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
           <Text style={ps.navLabel}>AI Coach</Text>
           <Text style={ps.navArrow}>›</Text>
         </TouchableOpacity>
-
-        {/* ── REFERRAL, PROGRAM ── */}
-        {["seller","pro","lifetime","titan"].includes(plan) && (
-          <View style={ps.refCard}>
-            <View style={ps.refHeader}>
-              <Text style={ps.refTitle}>💰 Your Referral Link</Text>
-              <Text style={ps.refSub}>Earn 20% of every friend's first payment</Text></View>
-            <View style={ps.refLinkBox}>
-              <Text style={ps.refLink} numberOfLines={1}>
-                {referralLink || "Loading..."}
-              </Text>
-              <TouchableOpacity style={ps.copyBtn} onPress={copyReferralLink}>
-                <Text style={ps.copyBtnTxt}>{copied ? "✓ Copied!" : "Copy"}</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={ps.refStats}>
-              <View style={ps.refStat}>
-                <Text style={ps.refStatVal}>{referrals.total}</Text>
-                <Text style={ps.refStatLbl}>Referrals</Text>
-              </View>
-              <View style={ps.refStat}>
-                <Text style={[ps.refStatVal,{color:C.green}]}>${referrals.totalEarned}</Text>
-                <Text style={ps.refStatLbl}>Earned</Text>
-              </View>
-              <View style={ps.refStat}>
-                <Text style={[ps.refStatVal,{color:C.yellow}]}>${referrals.pendingEarned}</Text>
-                <Text style={ps.refStatLbl}>Pending</Text>
-              </View>
-            </View>
-            <Text style={ps.refNote}>
-              Seller → $3.80 · Pro → $9.80 · Lifetime → $39.40 per referral,
-            </Text>
-          </View>
-        )}
 
         {/* ── ACCOUNT, SECTION — always visible regardless of tab ── */}
         <View style={s.accountSection}>
