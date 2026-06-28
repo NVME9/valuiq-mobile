@@ -4,6 +4,7 @@ import {
   StatusBar, ActivityIndicator, TextInput, Linking, Image, Modal, Pressable, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import * as Clipboard from "expo-clipboard";
 import { C } from "../lib/theme";
 import { isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric, getBiometricLabel } from "../lib/biometrics";
 import { API_BASE, deleteAccount } from "../lib/api";
@@ -159,10 +160,10 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
 
   async function copyReferralLink() {
     try {
-      const { Clipboard } = await import("@react-native-clipboard/clipboard").catch(() => 
-        ({ Clipboard: null }));
-      if (Clipboard) {
-        Clipboard.setString(referralLink);
+      const _ok = true; // (expo-clipboard imported at top) 
+
+      if (_ok) {
+        await Clipboard.setStringAsync(referralLink);
       } else {
         // Fallback - show the link
       }

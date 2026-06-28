@@ -333,12 +333,12 @@ export default function App() {
               : <LoginScreen onLogin={handleLogin} />
         ) : !aiConsented ? (
           <AIConsentScreen onAgree={async () => {
-            setAiConsented(true);
             try {
               await AsyncStorage.setItem("@valuiq_ai_consent", "true");
               const chk = await AsyncStorage.getItem("@valuiq_ai_consent");
               if (chk !== "true") await AsyncStorage.setItem("@valuiq_ai_consent", "true");
             } catch (e) { console.warn("consent save failed", e); }
+            setAiConsented(true);
             maybeStartTour();
           }} />
         ) : (
