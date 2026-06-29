@@ -16,7 +16,7 @@ interface Props {
   token: string; plan: string; scansLeft: number | null;
   setScansLeft: (n: number | null) => void;
   onNavigate: (s: string) => void; onBack?: () => void; onLogout: () => void;
-  tourStep?: string|null; advanceTour?: (s: string|null) => void; skipTour?: () => void;
+  tourStep?: string|null; advanceTour?: (s: string|null) => void; skipTour?: () => void; startTour?: () => void;
 }
 
 function planLevel(p: string) {
@@ -42,6 +42,14 @@ const LIVE_FEED = [
   { emoji:"\uD83C\uDFF7\uFE0F", text:"Price Battle shows your best platform after fees", time:"Tip" },
   { emoji:"\uD83D\uDD0D", text:"Use Specialty Scanner for cards, sneakers & vinyl", time:"Tip" },
   { emoji:"\uD83D\uDCCA", text:"Track every flip in Profit Tracker for real P&L", time:"Tip" },
+];
+
+const EXAMPLE_WINS = [
+  { username:"reseller_mike", item_name:"Nike Air Max", profit:42, isExample:true },
+  { username:"flip_queen", item_name:"Coach Handbag", profit:68, isExample:true },
+  { username:"thrift_king", item_name:"Vintage Levi Jacket", profit:35, isExample:true },
+  { username:"deal_hunter", item_name:"KitchenAid Mixer", profit:90, isExample:true },
+  { username:"side_hustle", item_name:"Lego Star Wars Set", profit:55, isExample:true },
 ];
 
 const TOOLS = [
@@ -83,7 +91,7 @@ const sh = StyleSheet.create({
   chevron: { color:C.text2, fontSize:13, fontWeight:"900" },
 });
 
-export default function DashboardScreen({ token, plan, scansLeft, onNavigate, onLogout, tourStep, advanceTour, skipTour }: Props) {
+export default function DashboardScreen({ token, plan, scansLeft, onNavigate, onLogout, tourStep, advanceTour, skipTour, startTour }: Props) {
   const [scans, setScans]         = useState<any[]>([]);
   const [stats, setStats]         = useState<any>(null);
   const [refreshing, setRefresh]  = useState(false);
@@ -109,7 +117,7 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
     pulse.start();
     const interval = setInterval(() => {
       Animated.timing(liveFade, { toValue:0, duration:250, useNativeDriver:true }).start(() => {
-        setLiveIdx(i => (i+1) % Math.max(wins.length, 1));
+        setLiveIdx(i => (i+1) % Math.max((wins.length > 0 ? wins.length : 5), 1));
       setTipIdx(i => (i+1) % LIVE_FEED.length);
         Animated.timing(liveFade, { toValue:1, duration:300, useNativeDriver:true }).start();
       });
@@ -144,7 +152,8 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
   const myTools    = TOOLS.filter(t => t.minPlan <= level && !LAUNCH_HIDDEN.includes(t.id));
   const lockedTools = TOOLS.filter(t => t.minPlan > level && !LAUNCH_HIDDEN.includes(t.id));
   const tip        = LIVE_FEED[tipIdx];
-  const win        = wins.length > 0 ? wins[liveIdx % wins.length] : null;
+  const feedData   = wins.length > 0 ? wins : EXAMPLE_WINS;
+  const win        = feedData.length > 0 ? feedData[liveIdx % feedData.length] : null;
 
   return (
     <SAV style={s.safe}>
@@ -173,6 +182,9 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
           {isFree && scansLeft !== null && (
             <View style={s.scansBadge}><Text style={s.scansBadgeTxt}>{scansLeft}/10</Text></View>
           )}
+          <TouchableOpacity onPress={() => startTour && startTour()} style={{marginRight:10}}>
+            <Text style={{fontSize:20}}>{"\u2753"}</Text>
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => onNavigate("profile")}>
             <Text style={{fontSize:22}}>👤</Text>
           </TouchableOpacity>
@@ -410,7 +422,7 @@ const s = StyleSheet.create({
   liveLbl:       { color:C.red, fontSize:11, fontWeight:"900", letterSpacing:1 },
   liveTime:      { color:C.text4, fontSize:10, marginLeft:"auto" as any },
   liveSeeAll:    { color:C.orange, fontSize:11, fontWeight:"700", marginLeft:8 },
-  liveTxt:       { color:C.text1, fontSize:14, fontWeight:"700", lineHeight:20, marginBottom:2 },
+  liveTxt:       { flex:1, color:C.text1, fontSize:14, fontWeight:"700", lineHeight:20, marginBottom:2 },
   liveSubtxt:    { color:C.text4, fontSize:11 },
   // Specialty Hero
   specialtyHero:      { backgroundColor:"#0a0d08", borderWidth:1.5, borderColor:C.green+"40", borderRadius:18, padding:18, marginBottom:16, flexDirection:"row", alignItems:"center", overflow:"hidden" },

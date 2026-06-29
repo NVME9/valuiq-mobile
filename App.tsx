@@ -270,7 +270,8 @@ export default function App() {
     }
   }
 
-  const props = { token, plan, scansLeft, setScansLeft, onNavigate:navigate, onBack:goBack, onLogout:handleLogout, navData, tourStep, advanceTour, skipTour };
+  const startTour = () => setTourStep("scan");
+  const props = { token, plan, scansLeft, setScansLeft, onNavigate:navigate, onBack:goBack, onLogout:handleLogout, navData, tourStep, advanceTour, skipTour, startTour };
 
   const SCREENS: Record<Screen,React.ReactNode> = {
     "scanner":      <ScannerScreen {...props} />,
