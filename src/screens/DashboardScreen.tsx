@@ -8,7 +8,7 @@ import { SafeAreaView as SAV } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import Coachmark from "../components/Coachmark";
 import SaleCapturePrompt from "../components/SaleCapturePrompt";
-import { API_BASE, hasProAccess } from "../lib/api";
+import { API_BASE, hasProAccess, getCommunityWins } from "../lib/api";
 
 const { width } = Dimensions.get("window");
 
@@ -88,6 +88,8 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
   const [stats, setStats]         = useState<any>(null);
   const [refreshing, setRefresh]  = useState(false);
   const [liveIdx, setLiveIdx]     = useState(0);
+  const [wins, setWins]           = useState<any[]>([]);
+  const [tipIdx, setTipIdx]       = useState(0);
   const [showTools, setShowTools] = useState(true);
   const [showScans, setShowScans] = useState(true);
   const [showAI,    setShowAI]    = useState(false);
@@ -107,7 +109,8 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
     pulse.start();
     const interval = setInterval(() => {
       Animated.timing(liveFade, { toValue:0, duration:250, useNativeDriver:true }).start(() => {
-        setLiveIdx(i => (i+1) % LIVE_FEED.length);
+        setLiveIdx(i => (i+1) % Math.max(wins.length, 1));
+      setTipIdx(i => (i+1) % LIVE_FEED.length);
         Animated.timing(liveFade, { toValue:1, duration:300, useNativeDriver:true }).start();
       });
     }, 4000);
@@ -129,6 +132,10 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
         });
       }
     } catch {}
+    try {
+      const w = await getCommunityWins(20);
+      if (Array.isArray(w) && w.length > 0) setWins(w);
+    } catch {}
     setRefresh(false);
   }
 
@@ -136,7 +143,8 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
   const LAUNCH_HIDDEN = ["deal-hunter"];
   const myTools    = TOOLS.filter(t => t.minPlan <= level && !LAUNCH_HIDDEN.includes(t.id));
   const lockedTools = TOOLS.filter(t => t.minPlan > level && !LAUNCH_HIDDEN.includes(t.id));
-  const activity   = LIVE_FEED[liveIdx];
+  const tip        = LIVE_FEED[tipIdx];
+  const win        = wins.length > 0 ? wins[liveIdx % wins.length] : null;
 
   return (
     <SAV style={s.safe}>
@@ -192,15 +200,25 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
           </TouchableOpacity>
         </Animated.View>
 
-        {/* LIVE FEED */}
+        {/* LIVE FEED - real community wins */}
         <TouchableOpacity style={s.liveBar} onPress={() => onNavigate("community")} activeOpacity={0.85}>
           <View style={s.liveDot}/>
           <Text style={s.liveLbl}>LIVE</Text>
           <Animated.Text style={[s.liveTxt, {opacity:liveFade}]} numberOfLines={2}>
-            {activity.emoji} {activity.text}
+            {win
+              ? `${"\uD83D\uDCB0"} ${win.username || "A reseller"} flipped ${win.item_name} for +$${win.profit}${win.isExample ? "  \u00B7 Example" : ""}`
+              : `${"\uD83D\uDD25"} See what resellers are flipping right now`}
           </Animated.Text>
-          <Text style={s.liveTime}>{activity.time}</Text>
+          <Text style={s.liveTime}>{"\u203A"}</Text>
         </TouchableOpacity>
+
+        {/* TIP CARD - separate from live feed */}
+        <View style={s.tipBar}>
+          <Text style={s.tipLbl}>TIP</Text>
+          <Animated.Text style={[s.liveTxt, {opacity:liveFade}]} numberOfLines={2}>
+            {tip.emoji} {tip.text}
+          </Animated.Text>
+        </View>
 
 
 
@@ -387,6 +405,8 @@ const s = StyleSheet.create({
   liveTopRow:    { flexDirection:"row", alignItems:"center", gap:8, marginBottom:10 },
   livePulse:     { flexDirection:"row", alignItems:"center", gap:6 },
   liveDot:       { width:9, height:9, borderRadius:5, backgroundColor:C.red },
+  tipBar: { flexDirection:"row" as any, alignItems:"center", backgroundColor:C.surface, borderRadius:10, paddingHorizontal:12, paddingVertical:8, marginTop:8, gap:8 },
+  tipLbl: { color:C.yellow, fontSize:11, fontWeight:"800" as any, letterSpacing:0.5 },
   liveLbl:       { color:C.red, fontSize:11, fontWeight:"900", letterSpacing:1 },
   liveTime:      { color:C.text4, fontSize:10, marginLeft:"auto" as any },
   liveSeeAll:    { color:C.orange, fontSize:11, fontWeight:"700", marginLeft:8 },

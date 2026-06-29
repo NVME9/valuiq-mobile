@@ -8,6 +8,7 @@ import * as Clipboard from "expo-clipboard";
 import { C } from "../lib/theme";
 import { isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric, getBiometricLabel } from "../lib/biometrics";
 import { API_BASE, deleteAccount } from "../lib/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const EMOJIS = ["🛍️","💰","🔥","⚡","🏆","👑","💎","🦁","🐉","🎯","🚀","💪","🌟","🦊","😎","🤑","🏅","🌊","🎪","🦅"];
 
@@ -442,14 +443,6 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
               <View style={{flex:1,paddingHorizontal:12}}>
                 <Text style={{color:C.text1,fontSize:14,fontWeight:"700"}}>Community Leaderboard</Text>
                 <Text style={{color:C.text4,fontSize:12,marginTop:2}}>See how you rank against other flippers</Text>
-              </View>
-              <Text style={{color:C.green,fontSize:18}}>→</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.communityBtn} onPress={()=>Linking.openURL(`${API_BASE}/partners`)}>
-              <Text style={{fontSize:20}}>🔗</Text>
-              <View style={{flex:1,paddingHorizontal:12}}>
-                <Text style={{color:C.text1,fontSize:14,fontWeight:"700"}}>Refer a Friend</Text>
-                <Text style={{color:C.text4,fontSize:12,marginTop:2}}>Share, ValuIQ · earn rewards</Text>
               </View>
               <Text style={{color:C.green,fontSize:18}}>→</Text>
             </TouchableOpacity>
