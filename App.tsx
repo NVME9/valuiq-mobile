@@ -239,6 +239,8 @@ export default function App() {
   }
   function advanceTour(next: string|null) {
     if (next === null) { skipTour(); return; }
+    if (next === "capture" || next === "result") { navigate("scanner"); }
+    else if (next === "history") { navigate("history"); }
     setTourStep(next);
   }
   // Start the guided tour for brand-new users the first time they reach the dashboard.

@@ -545,7 +545,18 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
               </View>
             )}
 
-            {/* Share with a friend */}
+            {/* Promo code */}
+            <TouchableOpacity
+              style={s.promoCard}
+              onPress={()=>Linking.openURL(`${API_BASE}/pricing`)}
+            >
+              <Text style={{color:C.text1,fontSize:14,fontWeight:"700"}}>🏷️ Have a promo code?</Text>
+              <Text style={{color:C.text3,fontSize:12,marginTop:4}}>Apply at getvaluiq.com/pricing</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Share with a friend */}
             <View style={s.referralCard}>
               <Text style={s.referralTitle}>{"\uD83D\uDCE4"} Share ValuIQ</Text>
               <Text style={s.referralBody}>
@@ -565,18 +576,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
               </TouchableOpacity>
             </View>
 
-            {/* Promo code */}
-            <TouchableOpacity
-              style={s.promoCard}
-              onPress={()=>Linking.openURL(`${API_BASE}/pricing`)}
-            >
-              <Text style={{color:C.text1,fontSize:14,fontWeight:"700"}}>🏷️ Have a promo code?</Text>
-              <Text style={{color:C.text3,fontSize:12,marginTop:4}}>Apply at getvaluiq.com/pricing</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* History & FAQ */}
+          {/* History & FAQ */}
         {biometricType !== "none" && (
           <TouchableOpacity
             style={ps.navRow}

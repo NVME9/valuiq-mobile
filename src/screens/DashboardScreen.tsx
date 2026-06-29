@@ -2,13 +2,14 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   StatusBar, RefreshControl, ActivityIndicator,
-  Animated, Dimensions, Image,
+  Animated, Dimensions, Image, Alert,
 } from "react-native";
 import { SafeAreaView as SAV } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import Coachmark from "../components/Coachmark";
 import SaleCapturePrompt from "../components/SaleCapturePrompt";
 import { API_BASE, hasProAccess, getCommunityWins } from "../lib/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const { width } = Dimensions.get("window");
 
@@ -151,7 +152,21 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
   const LAUNCH_HIDDEN = ["deal-hunter"];
   const myTools    = TOOLS.filter(t => t.minPlan <= level && !LAUNCH_HIDDEN.includes(t.id));
   const lockedTools = TOOLS.filter(t => t.minPlan > level && !LAUNCH_HIDDEN.includes(t.id));
-  const tip        = LIVE_FEED[tipIdx];
+async function showDebug() {
+    try {
+      const ob = await AsyncStorage.getItem("@valuiq_onboarded");
+      const co = await AsyncStorage.getItem("@valuiq_ai_consent");
+      const td = await AsyncStorage.getItem("@valuiq_tour_done");
+      const bio = await AsyncStorage.getItem("@valuiq_bio_enabled");
+      Alert.alert("ValuIQ Debug",
+        `onboarded: ${ob}\nconsent: ${co}\ntour_done: ${td}\nbio: ${bio}\ntourStep: ${tourStep}\nwins: ${wins.length}`,
+        [
+          { text: "Clear flags", onPress: async () => { await AsyncStorage.multiRemove(["@valuiq_onboarded","@valuiq_ai_consent","@valuiq_tour_done"]); } },
+          { text: "OK" }
+        ]);
+    } catch (e:any) { Alert.alert("Debug error", String(e)); }
+  }
+    const tip        = LIVE_FEED[tipIdx];
   const feedData   = wins.length > 0 ? wins : EXAMPLE_WINS;
   const win        = feedData.length > 0 ? feedData[liveIdx % feedData.length] : null;
 
@@ -172,8 +187,10 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
       {/* Nav */}
       <View style={s.nav}>
         <View style={s.logoRow}>
-          <View style={s.logoBox}><Text style={s.logoV}>V</Text></View>
-          <Text style={s.logoTxt}>ValuIQ</Text>
+          <TouchableOpacity onLongPress={showDebug} delayLongPress={800} activeOpacity={1} style={{flexDirection:"row" as any, alignItems:"center"}}>
+            <View style={s.logoBox}><Text style={s.logoV}>V</Text></View>
+            <Text style={s.logoTxt}>ValuIQ</Text>
+          </TouchableOpacity>
         </View>
         <View style={s.navRight}>
           <View style={[s.planBadge, {borderColor:planColor(plan)+"50", backgroundColor:planColor(plan)+"15"}]}>
@@ -223,14 +240,6 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
           </Animated.Text>
           <Text style={s.liveTime}>{"\u203A"}</Text>
         </TouchableOpacity>
-
-        {/* TIP CARD - separate from live feed */}
-        <View style={s.tipBar}>
-          <Text style={s.tipLbl}>TIP</Text>
-          <Animated.Text style={[s.liveTxt, {opacity:liveFade}]} numberOfLines={2}>
-            {tip.emoji} {tip.text}
-          </Animated.Text>
-        </View>
 
 
 
