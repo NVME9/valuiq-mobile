@@ -34,7 +34,13 @@ export default function SaleCaptureCard({ token, scan, channel = "in_app", onDon
     onDone(scan.id, "dismissed");
   }
 
-  const title = scan.brand ? `${scan.brand} ${scan.item_name}` : scan.item_name;
+  const cleanName = (n: string) => (n || "")
+    .replace(/^run_\d+\s*/i, "")           // strip run_<id> prefix
+    .split(/\|\|\||data:image|;base64|\/9j\//i)[0]  // cut off any encoded-image junk
+    .replace(/\s+(Etsy|eBay|Poshmark|Mercari|Depop)\s*$/i, "") // trailing platform tag
+    .trim() || "Item";
+  const _name = cleanName(scan.item_name);
+  const title = scan.brand ? `${scan.brand} ${_name}` : _name;
 
   return (
     <View style={s.card}>
@@ -43,7 +49,7 @@ export default function SaleCaptureCard({ token, scan, channel = "in_app", onDon
           <Image source={{ uri: scan.image_url }} style={s.thumb} />
         ) : (
           <View style={[s.thumb, s.thumbEmpty]}>
-            <Text style={s.thumbLetter}>{(scan.item_name || "?").charAt(0).toUpperCase()}</Text>
+            <Text style={s.thumbLetter}>{(_name || "?").charAt(0).toUpperCase()}</Text>
           </View>
         )}
         <View style={s.info}>

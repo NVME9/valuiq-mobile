@@ -5,6 +5,14 @@ import { API_BASE } from "./api";
 
 export type SaleOutcome = "sold" | "passed" | "not_yet";
 
+function cleanItemName(n: string): string {
+  return (n || "")
+    .replace(/^run_\d+\s*/i, "")
+    .split(/\|\|\||data:image|;base64|\/9j\//i)[0]
+    .replace(/\s+(Etsy|eBay|Poshmark|Mercari|Depop)\s*$/i, "")
+    .trim() || "Item";
+}
+
 export interface PendingScan {
   id: string;
   item_name: string;
@@ -44,7 +52,7 @@ export async function getPendingSaleScans(
       .slice(0, limit)
       .map((r: any) => ({
         id: r.id,
-        item_name: r.item_name,
+        item_name: cleanItemName(r.item_name),
         brand: r.brand,
         category: r.category,
         image_url: r.image_url,
