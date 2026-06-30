@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
   ScrollView, Linking, StatusBar, TextInput,
-  Image, Dimensions } from "react-native";
+  Image, Dimensions, Animated } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
@@ -38,6 +38,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [sharingWin, setSharingWin] = useState(false);
   const [brandInput, setBrandInput] = useState("");
   const [loadMsg, setLoadMsg] = useState(0);
+  const loadBar = useRef(new Animated.Value(0)).current;
   const [goDeeper, setGoDeeper] = useState(false);
   const [description, setDescription] = useState("");
   const [buyPrice, setBuyPrice] = useState("");
@@ -139,9 +140,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
   // - PERMISSION -
   useEffect(() => {
-    if (step !== "loading") return;
+    if (step !== "loading") { loadBar.setValue(0); return; }
     const msgs = ["Identifying your item...","Reading brand & model details...","Pulling real eBay sold comps...","Estimating prices across platforms...","Calculating profit & fees...","Finding the best place to sell..."];
     const id = setInterval(() => setLoadMsg(m => (m + 1) % msgs.length), 1800);
+    loadBar.setValue(0);
+    Animated.timing(loadBar, { toValue: 0.92, duration: 6000, useNativeDriver: false }).start();
     return () => clearInterval(id);
   }, [step]);
 
@@ -169,6 +172,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         </View>
         <ActivityIndicator size="large" color={C.green} style={{ marginTop: 40, marginBottom: 16 }} />
         <Text style={s.h2}>{["Identifying your item...","Reading brand & model details...","Pulling real eBay sold comps...","Estimating prices across platforms...","Calculating profit & fees...","Finding the best place to sell..."][loadMsg]}</Text>
+        <View style={s.progressTrack}>
+          <Animated.View style={[s.progressFill, { width: loadBar.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }) }]} />
+        </View>
         <Text style={s.body}>This usually takes a few seconds</Text>
       </View>
     </SafeAreaView>
@@ -735,7 +741,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         title="Snap your first item"
         body="Point your camera at any item and tap the shutter - or pick a photo from your library. ValuIQ will fetch its real resale value and profit."
         ctaLabel="Got it"
-        anchor="top"
+        anchor="bottom"
         onNext={() => advanceTour && advanceTour("scanning")}
         onSkip={() => skipTour && skipTour()}
       />
@@ -785,7 +791,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         title="Snap your first item"
         body="Point your camera at any item and tap the shutter - or pick a photo from your library. ValuIQ will fetch its real resale value and profit."
         ctaLabel="Got it"
-        anchor="top"
+        anchor="bottom"
         onNext={() => advanceTour && advanceTour("scanning")}
         onSkip={() => skipTour && skipTour()}
       />
@@ -834,7 +840,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               <View style={s.shutterInner} />
               {photos.length > 0 && <View style={s.shutterBadge}><Text style={s.shutterBadgeTxt}>{photos.length}</Text></View>}
             </TouchableOpacity>
-            <TouchableOpacity style={s.camSecondBtn} onPress={() => photos.length > 0 && setStep("review")} disabled={photos.length === 0}>
+            <TouchableOpacity style={s.camSecondBtn} onPress={() => { if (photos.length > 0) { setStep("review"); if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("review"); } }} disabled={photos.length === 0}>
               <Text style={[s.camSecondLabel, { color: photos.length > 0 ? C.green : "rgba(255,255,255,0.3)" }]} numberOfLines={1}>Done</Text>
             </TouchableOpacity>
           </View>
@@ -884,6 +890,8 @@ const s = StyleSheet.create({
   shutterBadgeTxt:{ color: "#000", fontSize: 13, fontWeight: "900" },
   doneBtn: { width: 72, height: 50, borderRadius: 25, backgroundColor: C.green, alignItems: "center", justifyContent: "center" },
   doneBtnTxt: { color: "#000", fontSize: 14, fontWeight: "900" },
+  progressTrack: { width: "70%", height: 6, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 3, marginTop: 20, marginBottom: 8, overflow: "hidden" },
+  progressFill: { height: 6, backgroundColor: C.green, borderRadius: 3 },
   camControls: { paddingBottom: 48, paddingTop: 20, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 40 },
   camBottomBar:   { paddingBottom: 40, paddingHorizontal: 24 },
 

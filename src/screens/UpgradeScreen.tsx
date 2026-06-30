@@ -144,7 +144,7 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
       <View style={s.nav}>
         <TouchableOpacity style={s.backBtn} onPress={onBack||(() => onNavigate("dashboard"))}>
-          <Text style={s.backTxt}>{"\u2039"} Back</Text>
+          <Text style={s.backTxt} numberOfLines={1}>{"\u2039"} Back</Text>
         </TouchableOpacity>
         <Text style={s.navTitle}>Choose Your Plan</Text>
         <View style={{width:36}}/>
@@ -153,6 +153,25 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
         <Text style={s.headline}>Upgrade ValuIQ</Text>
         <Text style={s.sub}>No contracts. Cancel anytime. Not happy? Email team@getvaluiq.com within 7 days.</Text>
+
+        {/* Monthly / Annual toggle */}
+        <View style={s.toggleRow}>
+          <TouchableOpacity
+            style={[s.toggleBtn, billing==="monthly" && s.toggleActive]}
+            onPress={() => setBilling("monthly")}
+            activeOpacity={0.8}
+          >
+            <Text style={[s.toggleTxt, billing==="monthly" && s.toggleTxtActive]}>Monthly</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.toggleBtn, billing==="annual" && s.toggleActive]}
+            onPress={() => setBilling("annual")}
+            activeOpacity={0.8}
+          >
+            <Text style={[s.toggleTxt, billing==="annual" && s.toggleTxtActive]}>Annual</Text>
+            <View style={s.toggleSaveBadge}><Text style={s.toggleSaveTxt}>SAVE</Text></View>
+          </TouchableOpacity>
+        </View>
 
         {/* RESTORE PURCHASES (Apple-required) */}
         <TouchableOpacity onPress={handleRestore} disabled={loading==="restore"} style={s.restoreBtn}>
@@ -295,8 +314,8 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
 const s = StyleSheet.create({
   safe:            { flex:1, backgroundColor:C.bg },
   nav:             { flexDirection:"row", alignItems:"center", justifyContent:"space-between", paddingHorizontal:20, paddingTop: 16, paddingBottom: 10, borderBottomWidth:1, borderBottomColor:C.border },
-  backBtn:         { width:36, height:36, justifyContent:"center" },
-  backTxt:         { color:C.text1, fontSize:14, fontWeight:"600" as any },
+  backBtn:         { minWidth:70, height:36, justifyContent:"center", paddingRight:8 },
+  backTxt:         { color:C.text1, fontSize:15, fontWeight:"700" as any },
   navTitle:        { color:C.text1, fontSize:16, fontWeight:"800" as any },
   scroll:          { padding:16, paddingBottom:80 },
   headline:        { color:C.text1, fontSize:24, fontWeight:"900" as any, letterSpacing:-0.5, marginBottom:6 },
@@ -307,6 +326,10 @@ const s = StyleSheet.create({
   toggleRow:       { flexDirection:"row" as any, backgroundColor:"#0a1500", borderRadius:14, padding:5, gap:4, borderWidth:2, borderColor:C.greenBorder },
   toggleBtn:       { flex:1, paddingTop:16, paddingBottom:10, borderRadius:10, alignItems:"center" as any, justifyContent:"center" as any, flexDirection:"row" as any, gap:4 },
   toggleActive:    { backgroundColor:C.green },
+  toggleBtn:       { flex:1, flexDirection:"row" as any, alignItems:"center", justifyContent:"center", gap:6, paddingVertical:11, borderRadius:10 },
+  toggleTxtActive: { color:"#000", fontWeight:"800" as any },
+  toggleSaveBadge: { backgroundColor:"#000", borderRadius:6, paddingHorizontal:6, paddingVertical:2 },
+  toggleSaveTxt:   { color:C.green, fontSize:9, fontWeight:"900" as any },
   toggleTxt:       { color:C.text3, fontSize:14, fontWeight:"700" as any },
   toggleActiveTxt: { color:C.greenDark, fontSize:13, fontWeight:"900" as any },
   switchAnnualHint:{ color:C.green, fontSize:12, textAlign:"center" as any, marginTop:8, fontWeight:"600" as any },
