@@ -22,7 +22,7 @@ const PLANS = [
     cta:null, priceId_monthly:null, priceId_annual:null },
   {
     id:"seller", tierLabel:"SELLER", label:"💪 Seller", price:"$14.99", sub:"/month", color:C.green,
-    annualPrice:"$109", annualSub:"/year", annualSavings:"Save $79",
+    annualPrice:"$109", annualSub:"/year", annualSavings:"Save $71",
     headline:"For resellers who flip every week",
     pitch:"One profitable flip pays for 3 months. 75 scans, Thrift Run, Death Pile, Auto-Relist, Hot Now.",
     badge:"MOST POPULAR", badgeBg:C.green,
@@ -41,7 +41,7 @@ const PLANS = [
     priceId_annual:"price_1Tan7yDa11MSShNkcqT3l3MX" },
   {
     id:"pro", tierLabel:"PRO", label:"🔥 Pro", price:"$34.99", sub:"/month", color:C.orange,
-    annualPrice:"$259", annualSub:"/year", annualSavings:"Save $109",
+    annualPrice:"$259", annualSub:"/year", annualSavings:"Save $161",
     headline:"Where serious money is made",
     pitch:"Unlimited scans plus the full Specialty Scanner for sneakers, watches, handbags, trading cards and more. Dealer-grade appraisals on every category.",
     badge:"RECOMMENDED", badgeBg:C.orange,
@@ -227,7 +227,7 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
                     </Text>
                   )}
                   {showAnnual && (p as any).annualSavings && (
-                    <Text style={s.crossedPrice}>${(parseFloat(displayPrice?.replace("$","")??0)*12).toFixed(0)}/yr regular</Text>
+                    <Text style={s.crossedPrice}>${(parseFloat((p.price||"$0").replace("$",""))*12).toFixed(0)}/yr/yr regular</Text>
                   )}
                   <Text style={[s.price, {color: p.color}]}>{displayPrice}</Text>
                   <Text style={s.priceSub}>{displaySub}</Text>
