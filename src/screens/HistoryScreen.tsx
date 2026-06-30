@@ -279,7 +279,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
       <Coachmark
         visible={tourStep === "history"}
-        step={4} totalSteps={4}
+        step={5} totalSteps={5}
         title="Everything saves here"
         body="Every scan lands in your history. Tap any item to revisit it, or re-run the analysis anytime for fresh prices. You're ready to flip!"
         ctaLabel="Start flipping"

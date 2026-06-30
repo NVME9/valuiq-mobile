@@ -175,7 +175,7 @@ async function showDebug() {
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
       <Coachmark
         visible={tourStep === "scan"}
-        step={1} totalSteps={4}
+        step={1} totalSteps={5}
         title="Welcome to ValuIQ!"
         body="Let's find out what something is really worth. Tap the Scan tab at the bottom to value your first item."
         ctaLabel="Got it"

@@ -169,6 +169,7 @@ export default function App() {
   const [onboarded, setOnboarded] = useState(false);
   const [aiConsented, setAiConsented] = useState(false);
   const [tourStep, setTourStep]     = useState<string|null>(null);
+  const tourAutoFired = useRef(false);  // auto-tour fires at most once per app session
   const fadeIn = useRef(new Animated.Value(0)).current;
 
   
@@ -198,7 +199,7 @@ export default function App() {
         await loadUserData(refreshed.access_token);
         const tdone = await AsyncStorage.getItem("@valuiq_tour_done");
         const cdone = await AsyncStorage.getItem("@valuiq_ai_consent");
-        if (tdone !== "true") setTourStep("scan");
+        /* auto-tour only via maybeStartTour after consent; returning users use the ? button */
       } catch (e) { console.log("[DIAG init] refresh FAILED -> clearSession. error=", String(e)); await clearSession(); }
     }
     setAppReady(true);
@@ -222,7 +223,7 @@ export default function App() {
     try {
       const tdone = await AsyncStorage.getItem("@valuiq_tour_done");
       const cdone = await AsyncStorage.getItem("@valuiq_ai_consent");
-      if (tdone !== "true") setTourStep("scan");
+      /* auto-tour only via maybeStartTour after consent; returning users use the ? button */
     } catch {}
   }
 
@@ -246,9 +247,10 @@ export default function App() {
   }
   // Start the guided tour for brand-new users the first time they reach the dashboard.
   async function maybeStartTour() {
+    if (tourAutoFired.current) return;
     try {
       const done = await AsyncStorage.getItem("@valuiq_tour_done");
-      if (done !== "true") setTourStep("scan");
+      if (done !== "true") { tourAutoFired.current = true; setTourStep("scan"); }
     } catch {}
   }
   function navigate(s: Screen, data?: any) {

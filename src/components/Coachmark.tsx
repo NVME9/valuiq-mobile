@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Dimensions } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from "react-native";
 import { C } from "../lib/theme";
 
 const { width } = Dimensions.get("window");
@@ -18,58 +18,68 @@ export interface CoachmarkProps {
 }
 
 /**
- * A friendly guided-tour callout. Renders a dimmed overlay with a bright,
- * high-contrast instruction card. Non-blocking guidance: the user can still
- * tap the real UI, or use Next to advance / Skip to end the tour.
+ * A friendly guided-tour callout. Renders as a compact, NON-blocking banner
+ * pinned to the top or bottom of the screen (never a full overlay), so the
+ * user can still SEE and TAP the real UI it describes. No Modal, no dim.
  */
 export default function Coachmark({
-  visible, step, totalSteps, title, body, ctaLabel = "Next", onNext, onSkip, anchor = "center",
+  visible, step, totalSteps, title, body, ctaLabel = "Next", onNext, onSkip, anchor = "bottom",
 }: CoachmarkProps) {
   if (!visible) return null;
 
-  const justify = anchor === "top" ? "flex-start" : anchor === "bottom" ? "flex-end" : "center";
+  // Pin to top or bottom (never center-cover). Default bottom so it sits below content.
+  const pin = anchor === "top" ? { top: 0 } : { bottom: 0 };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onSkip}>
-      <View style={[s.overlay, { justifyContent: justify }]}>
-        <View style={s.card}>
-          {/* progress dots */}
-          <View style={s.dots}>
-            {Array.from({ length: totalSteps }).map((_, i) => (
-              <View key={i} style={[s.dot, i === step - 1 && s.dotActive]} />
-            ))}
-          </View>
-          <Text style={s.title}>{title}</Text>
-          <Text style={s.body}>{body}</Text>
-          <View style={s.row}>
-            <TouchableOpacity onPress={onSkip} style={s.skipBtn} activeOpacity={0.7}>
-              <Text style={s.skipTxt}>Skip tour</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={onNext} style={s.nextBtn} activeOpacity={0.85}>
-              <Text style={s.nextTxt}>{ctaLabel}</Text>
-            </TouchableOpacity>
-          </View>
+    <View style={[s.wrap, pin]} pointerEvents="box-none">
+      <View style={s.card}>
+        {/* progress dots */}
+        <View style={s.dots}>
+          {Array.from({ length: totalSteps }).map((_, i) => (
+            <View key={i} style={[s.dot, i === step - 1 && s.dotActive]} />
+          ))}
+        </View>
+        <Text style={s.title}>{title}</Text>
+        <Text style={s.body}>{body}</Text>
+        <View style={s.row}>
+          <TouchableOpacity onPress={onSkip} style={s.skipBtn} activeOpacity={0.7}>
+            <Text style={s.skipTxt}>Skip tour</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onNext} style={s.nextBtn} activeOpacity={0.85}>
+            <Text style={s.nextTxt} numberOfLines={1}>{ctaLabel}</Text>
+          </TouchableOpacity>
         </View>
       </View>
-    </Modal>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.72)", paddingHorizontal: 24, paddingVertical: 80 },
-  card: {
-    backgroundColor: C.surfaceHigh, borderRadius: 20, padding: 22,
-    borderWidth: 1.5, borderColor: C.green, width: Math.min(width - 48, 380), alignSelf: "center",
-    shadowColor: C.green, shadowOpacity: 0.25, shadowRadius: 20, shadowOffset: { width: 0, height: 6 }, elevation: 8,
+  // Pinned banner, NOT a full-screen overlay. pointerEvents box-none lets taps
+  // pass through to the real UI everywhere except on the card itself.
+  wrap: {
+    position: "absolute",
+    left: 0, right: 0,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    alignItems: "center",
+    zIndex: 9999,
   },
-  dots: { flexDirection: "row", gap: 6, marginBottom: 14 },
+  card: {
+    backgroundColor: C.surfaceHigh, borderRadius: 20, padding: 20,
+    borderWidth: 1.5, borderColor: C.green, width: Math.min(width - 32, 400),
+    shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: { width: 0, height: 6 },
+    elevation: 12,
+  },
+  dots: { flexDirection: "row", gap: 6, marginBottom: 12 },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.border },
   dotActive: { backgroundColor: C.green, width: 18 },
   title: { color: C.text1, fontSize: 19, fontWeight: "900", marginBottom: 8 },
-  body: { color: C.text2, fontSize: 14.5, lineHeight: 21, marginBottom: 20 },
-  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  skipBtn: { paddingVertical: 10, paddingHorizontal: 6 },
+  body: { color: C.text2, fontSize: 14.5, lineHeight: 21, marginBottom: 18 },
+  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  skipBtn: { paddingVertical: 10, paddingHorizontal: 4, flexShrink: 0 },
   skipTxt: { color: C.text3, fontSize: 14, fontWeight: "600" },
-  nextBtn: { backgroundColor: C.green, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 28 },
-  nextTxt: { color: C.greenDark, fontSize: 15, fontWeight: "800" },
+  // flexShrink lets the button adapt; numberOfLines on text prevents overflow
+  nextBtn: { backgroundColor: C.green, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 20, flexShrink: 1, maxWidth: 240 },
+  nextTxt: { color: C.greenDark, fontSize: 15, fontWeight: "800", textAlign: "center" },
 });

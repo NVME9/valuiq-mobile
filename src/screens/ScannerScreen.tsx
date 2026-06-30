@@ -80,7 +80,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       const small = await compressPhoto(photo.base64);
       setPhotos(p => {
         const next = [...p, small].slice(0, 3);
-        if (next.length >= 3) setStep("review");
+        if (next.length >= 3) { setStep("review"); if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("review"); }
         return next;
       });
     }
@@ -92,6 +92,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       const small = await compressPhoto(res.assets[0].base64);
       setPhotos(p => [...p, small].slice(0, 3));
       setStep("review");
+      if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("review");
     }
   }
 
@@ -127,12 +128,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         }
       } catch {}
       setStep("result");
-      if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("result");
+      if ((tourStep === "review" || tourStep === "review-wait" || tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("result");
       if (plan === "free") setScansLeft(n => n !== null ? Math.max(0, n - 1) : null);
     } catch (e: any) {
       setResult({ _error: e.message });
       setStep("result");
-      if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("result");
+      if ((tourStep === "review" || tourStep === "review-wait" || tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("result");
     }
   }
 
@@ -242,7 +243,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         <StatusBar barStyle="light-content"/>
         <Coachmark
           visible={tourStep === "result"}
-          step={3} totalSteps={4}
+          step={4} totalSteps={5}
           title="Your real numbers"
           body="True profit after fees, plus a clear BUY or PASS - based on real eBay sold data, not guesses. This is what makes ValuIQ different. Your scan also saved automatically."
           ctaLabel="See where it saved"
@@ -636,6 +637,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   if (step === "review") return (
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" />
+      <Coachmark
+        visible={tourStep === "review"}
+        step={3} totalSteps={5}
+        title="Add details (optional)"
+        body="Enter the price you would pay, plus brand or extra details. All optional, but they sharpen your results. Then tap Analyze below."
+        ctaLabel="Got it"
+        anchor="bottom"
+        onNext={() => advanceTour && advanceTour("review-wait")}
+        onSkip={() => skipTour && skipTour()}
+      />
       <View style={s.nav}>
         <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
         <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
@@ -720,7 +731,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       <StatusBar barStyle="light-content" />
       <Coachmark
         visible={tourStep === "capture"}
-        step={2} totalSteps={4}
+        step={2} totalSteps={5}
         title="Snap your first item"
         body="Point your camera at any item and tap the shutter - or pick a photo from your library. ValuIQ will fetch its real resale value and profit."
         ctaLabel="Got it"
@@ -770,7 +781,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       <StatusBar barStyle="light-content" />
       <Coachmark
         visible={tourStep === "capture"}
-        step={2} totalSteps={4}
+        step={2} totalSteps={5}
         title="Snap your first item"
         body="Point your camera at any item and tap the shutter - or pick a photo from your library. ValuIQ will fetch its real resale value and profit."
         ctaLabel="Got it"
