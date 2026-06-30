@@ -6,6 +6,7 @@ import {
 import { C } from "./src/lib/theme";
 import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken , hasProAccess } from "./src/lib/api";
 import { supabase } from "./src/lib/supabase";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import LoginScreen from "./src/screens/LoginScreen";
 import ScannerScreen from "./src/screens/ScannerScreen";
 import DashboardScreen from "./src/screens/DashboardScreen";

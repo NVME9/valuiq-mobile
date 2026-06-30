@@ -127,12 +127,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         }
       } catch {}
       setStep("result");
-      if (tourStep === "capture" && advanceTour) advanceTour("result");
+      if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("result");
       if (plan === "free") setScansLeft(n => n !== null ? Math.max(0, n - 1) : null);
     } catch (e: any) {
       setResult({ _error: e.message });
       setStep("result");
-      if (tourStep === "capture" && advanceTour) advanceTour("result");
+      if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("result");
     }
   }
 
@@ -725,7 +725,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         body="Point your camera at any item and tap the shutter - or pick a photo from your library. ValuIQ will fetch its real resale value and profit."
         ctaLabel="Got it"
         anchor="top"
-        onNext={() => advanceTour && advanceTour("history")}
+        onNext={() => advanceTour && advanceTour("scanning")}
         onSkip={() => skipTour && skipTour()}
       />
       <CameraView style={{ flex: 1, position: "absolute" as any, top:0, left:0, right:0, bottom:0 }} facing="back"
@@ -775,7 +775,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         body="Point your camera at any item and tap the shutter - or pick a photo from your library. ValuIQ will fetch its real resale value and profit."
         ctaLabel="Got it"
         anchor="top"
-        onNext={() => advanceTour && advanceTour("history")}
+        onNext={() => advanceTour && advanceTour("scanning")}
         onSkip={() => skipTour && skipTour()}
       />
       <CameraView ref={cameraRef} style={{ flex: 1, position: "absolute" as any, top: 0, left: 0, right: 0, bottom: 0 }} facing="back" />
