@@ -262,7 +262,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
   const previewEmoji = editEmoji || (!editPhoto && currentEmoji);
   const previewInitial = (displayName || "F")[0]?.toUpperCase() || "F";
 
-  if (false) {
+  if (loading && !profile) {
     return (
       <SafeAreaView style={[s.safe, {backgroundColor: C.bg, alignItems:"center", justifyContent:"center"}]}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
