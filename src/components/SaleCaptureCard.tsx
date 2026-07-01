@@ -40,7 +40,8 @@ export default function SaleCaptureCard({ token, scan, channel = "in_app", onDon
     .replace(/\s+(Etsy|eBay|Poshmark|Mercari|Depop)\s*$/i, "") // trailing platform tag
     .trim() || "Item";
   const _name = cleanName(scan.item_name);
-  const title = scan.brand ? `${scan.brand} ${_name}` : _name;
+  const _brand = cleanName(scan.brand || "").replace(/^Item$/, "");  // clean brand; drop if it was only junk
+  const title = _brand ? `${_brand} ${_name}` : _name;
 
   return (
     <View style={s.card}>
@@ -56,7 +57,7 @@ export default function SaleCaptureCard({ token, scan, channel = "in_app", onDon
           <Text style={s.title} numberOfLines={2}>{title}</Text>
           <Text style={s.meta}>
             Listed ~{scan.daysListed} days ago
-            {scan.best_platform ? ` · ${scan.best_platform}` : ""}
+            {scan.best_platform ? ` · ${(scan.best_platform||"").split("|||")[0]}` : ""}
           </Text>
         </View>
       </View>

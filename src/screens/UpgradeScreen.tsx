@@ -227,7 +227,7 @@ export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props
                     </Text>
                   )}
                   {showAnnual && (p as any).annualSavings && (
-                    <Text style={s.crossedPrice}>${(parseFloat((p.price||"$0").replace("$",""))*12).toFixed(0)}/yr/yr regular</Text>
+                    <Text style={s.crossedPrice}>${(parseFloat((p.price||"$0").replace("$",""))*12).toFixed(0)}/yr regular</Text>
                   )}
                   <Text style={[s.price, {color: p.color}]}>{displayPrice}</Text>
                   <Text style={s.priceSub}>{displaySub}</Text>
