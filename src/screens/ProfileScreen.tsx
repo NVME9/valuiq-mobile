@@ -494,15 +494,13 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
               </View>
             </View>
 
-            {plan==="free" && (
-              <TouchableOpacity
-                style={s.upgradeFullBtn}
-                onPress={()=>onNavigate("upgrade")}
-                activeOpacity={0.85}
-              >
-                <Text style={s.upgradeFullBtnText}>View all plans & upgrade →</Text>
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+          style={s.upgradeFullBtn}
+          onPress={()=>onNavigate("upgrade")}
+          activeOpacity={0.85}
+        >
+          <Text style={s.upgradeFullBtnText}>{plan==="free" ? "View all plans & upgrade" : "Manage plan & restore purchases"}</Text>
+        </TouchableOpacity>
 
             {/* Account deletion - available to ALL users */}
             <View style={s.deleteAccountCard}>
