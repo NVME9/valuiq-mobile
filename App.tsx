@@ -354,7 +354,7 @@ export default function App() {
               <View style={s.tabBar}>
                 {TABS.map(t => {
                   // Hide upgrade tab for paid users,
-                  if (t.highlight === false || (t.id === "upgrade" && isPaid)) return null;
+                  if (t.highlight === false && t.id !== "upgrade") return null;
                   const active = activeTab === t.id;
                   return (
                     <TouchableOpacity

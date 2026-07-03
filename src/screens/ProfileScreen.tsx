@@ -532,11 +532,11 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
                     ? "You have lifetime access — no recurring charges. Contact support to transfer or get help."
                     : "Update billing, change plan, or cancel any time. No cancellation fees ever."}
                 </Text>
-                <TouchableOpacity onPress={()=>Linking.openURL(`${API_BASE}/pricing`)} style={{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:10,padding:12,alignItems:"center",marginBottom:8}}>
-                  <Text style={{color:C.green,fontSize:13,fontWeight:"700"}}>Manage billing at getvaluiq.com →</Text>
+                <TouchableOpacity onPress={()=>Linking.openURL("https://apps.apple.com/account/subscriptions")} style={{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:10,padding:12,alignItems:"center",marginBottom:8}}>
+                  <Text style={{color:C.green,fontSize:13,fontWeight:"700"}}>Manage subscription in App Store →</Text>
                 </TouchableOpacity>
                 {plan!=="lifetime" && (
-                <TouchableOpacity onPress={()=>Linking.openURL(`${API_BASE}/pricing#cancel`)} style={{backgroundColor:"#1a0505",borderWidth:1,borderColor:C.red+"30",borderRadius:10,padding:12,alignItems:"center"}}>
+                <TouchableOpacity onPress={()=>Linking.openURL("https://apps.apple.com/account/subscriptions")} style={{backgroundColor:"#1a0505",borderWidth:1,borderColor:C.red+"30",borderRadius:10,padding:12,alignItems:"center"}}>
                   <Text style={{color:C.red,fontSize:13,fontWeight:"700"}}>Cancel subscription</Text>
                 </TouchableOpacity>
                 )}
@@ -546,10 +546,10 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
             {/* Promo code */}
             <TouchableOpacity
               style={s.promoCard}
-              onPress={()=>Linking.openURL(`${API_BASE}/pricing`)}
+              onPress={()=>Linking.openURL("https://apps.apple.com/redeem")}
             >
               <Text style={{color:C.text1,fontSize:14,fontWeight:"700"}}>🏷️ Have a promo code?</Text>
-              <Text style={{color:C.text3,fontSize:12,marginTop:4}}>Apply at getvaluiq.com/pricing</Text>
+              <Text style={{color:C.text3,fontSize:12,marginTop:4}}>Redeem in the App Store</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -630,7 +630,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
           {/* Cancel subscription - paid users only */}
           {plan!=="free" && plan!=="lifetime" && (
             <TouchableOpacity
-              onPress={()=>Linking.openURL(`${API_BASE}/pricing#cancel`)}
+              onPress={()=>Linking.openURL("https://apps.apple.com/account/subscriptions")}
               style={s.cancelBtn}
             >
               <Text style={s.cancelBtnTxt}>Cancel Subscription</Text>
@@ -640,7 +640,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
           {/* Manage billing - paid users */}
           {plan!=="free" && (
             <TouchableOpacity
-              onPress={()=>Linking.openURL(`${API_BASE}/pricing`)}
+              onPress={()=>Linking.openURL("https://apps.apple.com/redeem")}
               style={s.manageBtn}
             >
               <Text style={s.manageBtnTxt}>
