@@ -160,6 +160,7 @@ const ss = StyleSheet.create({
 export default function App() {
   const [session, setSession]       = useState<Session|null>(null);
   const [plan, setPlan]             = useState("free");
+  const [planLoaded, setPlanLoaded] = useState(false);
   const [scansLeft, setScansLeft]   = useState<number|null>(null);
   const [screen, setScreen]         = useState<Screen>("dashboard");
   const [history, setHistory]       = useState<Screen[]>([]);
@@ -214,6 +215,7 @@ export default function App() {
       const paid = ["seller","pro","lifetime","titan"].includes(p);
       setScansLeft(paid ? null : Math.max(0, 10 - count));
     }
+    setPlanLoaded(true);
   }
 
   async function handleLogin(s:Session) {
@@ -229,7 +231,7 @@ export default function App() {
 
   async function handleLogout() {
     await clearSession();
-    setSession(null); setPlan("free"); setScansLeft(null); setScreen("dashboard");
+    setSession(null); setPlan("free"); setPlanLoaded(false); setScansLeft(null); setScreen("dashboard");
   }
 
   const token = session?.access_token || "";
@@ -328,7 +330,7 @@ export default function App() {
     <SafeAreaProvider>
     <View style={s.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-      {(!splashDone || !appReady) && <SplashScreen onDone={()=>setSplashDone(true)} />}
+      {(!splashDone || !appReady || (!!session && !planLoaded)) && <SplashScreen onDone={()=>setSplashDone(true)} />}
       <Animated.View style={[{flex:1}, {opacity:fadeIn}]}>
         {!session ? (
             !onboarded
