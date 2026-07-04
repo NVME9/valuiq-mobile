@@ -54,6 +54,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         brand: r.brand,
         itemName: r.itemName || r.item_name,
         buyPrice: Number(buyPrice) || 0,
+        estValue: Number(r.sellPrice) || 0,
       }).then((d) => { if (alive && d && d.success) setOracle(d); });
     }
     return () => { alive = false; };
@@ -197,7 +198,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             <Text style={s.dealSub}>one time - Pro features forever</Text>
           </View>
           <TouchableOpacity style={s.dealBtn} onPress={() => onNavigate('upgrade')}>
-            <Text style={s.dealBtnText}>Get Lifetime $149 ></Text>
+            <Text style={s.dealBtnText}>Get Lifetime $149 {'>'}</Text>
           </TouchableOpacity>
         </View>
         <View style={{ flexDirection: "row", gap: 10, marginBottom: 16 }}>
@@ -308,7 +309,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     <Text style={s.goodBannerTitle}>{result.priceData.count} real sold listings</Text>
                     <Text style={s.goodBannerSub}>eBay avg ${result.priceData.avgPrice} - ${result.priceData.minPrice}-${result.priceData.maxPrice}</Text>
                   </View>
-                  <Text style={{color:C.green}}>></Text>
+                  <Text style={{color:C.green}}>{'>'}</Text>
                 </TouchableOpacity>
               ) : hasLimitedData ? (
                 <View style={s.limitedBanner}>
@@ -438,7 +439,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     ].filter(l => l.url).map(link => (
                       <TouchableOpacity key={link.name} style={{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:8,paddingHorizontal:10,paddingVertical:6}}
                         onPress={()=>Linking.openURL(link.url)}>
-                        <Text style={{color:C.green,fontSize:11,fontWeight:"700"}}>{link.name} ></Text>
+                        <Text style={{color:C.green,fontSize:11,fontWeight:"700"}}>{link.name} {'>'}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -472,7 +473,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     Platform comparison, listing title, risk score, hot tips, and share card are locked on Free. Upgrade to see everything - one good flip pays for 6 months.
                   </Text>
                   <View style={{backgroundColor:C.green,borderRadius:8,paddingHorizontal:20,paddingVertical:8}}>
-                    <Text style={{color:C.greenDark,fontWeight:"900",fontSize:13}}>Upgrade from $14.99/mo ></Text>
+                    <Text style={{color:C.greenDark,fontWeight:"900",fontSize:13}}>Upgrade from $14.99/mo {'>'}</Text>
                   </View>
                   <Text style={{color:C.text4,fontSize:10,marginTop:8}}>Used {scansLeft !== null ? 10 - scansLeft : "?"} of 10 free scans this month</Text>
                 </TouchableOpacity>
@@ -541,7 +542,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                       <Text style={s.infoLabel}>Listing Tips</Text>
                       {result.listingTips.map((tip:string,i:number)=>(
                         <View key={i} style={{flexDirection:"row",gap:8,marginBottom:6}}>
-                          <Text style={{color:C.green,fontSize:13}}>></Text>
+                          <Text style={{color:C.green,fontSize:13}}>{'>'}</Text>
                           <Text style={{color:C.text2,fontSize:13,lineHeight:20,flex:1}}>{tip}</Text>
                         </View>
                       ))}
@@ -630,7 +631,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 <Text style={{color:C.text1,fontSize:13,fontWeight:"700"}}>{scansLeft} scans left this month</Text>
                 <Text style={{color:C.text3,fontSize:11}}>Upgrade for unlimited scans</Text>
               </View>
-              <Text style={{color:C.green,fontSize:18}}>></Text>
+              <Text style={{color:C.green,fontSize:18}}>{'>'}</Text>
             </TouchableOpacity>
           )}
 
@@ -725,7 +726,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         )}
 
         <TouchableOpacity style={[s.greenBtn, { marginTop: 14 }]} onPress={() => analyze()}>
-          <Text style={s.greenBtnText}>Analyze Now ></Text>
+          <Text style={s.greenBtnText}>Analyze Now {'>'}</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

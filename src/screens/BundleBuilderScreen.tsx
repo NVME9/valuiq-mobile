@@ -112,7 +112,7 @@ export default function BundleBuilderScreen({ onBack }: Props) {
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   nav: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomColor: C.border, borderBottomWidth: 1 },
-  navBack: { width: 50 }, navBackText: { color: C.green, fontSize: 16, fontWeight: "600" },
+  navBack: { minWidth: 64, flexShrink: 0, paddingRight: 8 }, navBackText: { color: C.green, fontSize: 16, fontWeight: "600" },
   navTitle: { color: C.text1, fontSize: 18, fontWeight: "800" },
   sub: { color: C.text3, fontSize: 13, marginBottom: 16, lineHeight: 19 },
   itemRow: { flexDirection: "row", gap: 8, alignItems: "center", marginBottom: 8 },

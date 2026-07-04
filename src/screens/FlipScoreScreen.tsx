@@ -126,7 +126,7 @@ const s = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   loadingText: { color: C.text3, marginTop: 12, fontSize: 14 },
   nav: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomColor: C.border, borderBottomWidth: 1 },
-  navBack: { width: 50 }, navBackText: { color: C.green, fontSize: 16, fontWeight: "600" },
+  navBack: { minWidth: 64, flexShrink: 0, paddingRight: 8 }, navBackText: { color: C.green, fontSize: 16, fontWeight: "600" },
   navTitle: { color: C.text1, fontSize: 18, fontWeight: "800" },
   hero: { flexDirection: "row", alignItems: "center", gap: 18, marginBottom: 14, marginTop: 4 },
   grade: { fontSize: 56, fontWeight: "900", letterSpacing: -2 },

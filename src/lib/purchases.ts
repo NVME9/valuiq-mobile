@@ -7,6 +7,7 @@ import { API_BASE } from "./api";
 
 // TODO: paste your RevenueCat Public SDK key (starts with appl_) here.
 const RC_APPLE_KEY = "appl_NNZQuUUREjkiLNoLfPXDfKKXXuN";
+const RC_GOOGLE_KEY = "goog_wsYaVraIRkPgChguEMjHzFcGAhM";
 
 // The entitlement identifier configured in RevenueCat that means "has a paid plan".
 const ENTITLEMENT = "ValuIQ Pro";
@@ -17,6 +18,9 @@ export function configurePurchases(appUserId?: string) {
   if (_configured) return;
   if (Platform.OS === "ios") {
     Purchases.configure({ apiKey: RC_APPLE_KEY, appUserID: appUserId });
+    _configured = true;
+  } else if (Platform.OS === "android") {
+    Purchases.configure({ apiKey: RC_GOOGLE_KEY, appUserID: appUserId });
     _configured = true;
   }
 }

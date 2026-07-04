@@ -135,7 +135,7 @@ const s = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   loadingText: { color: C.text3, marginTop: 12, fontSize: 14 },
   nav: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomColor: C.border, borderBottomWidth: 1 },
-  navBack: { width: 50 }, navBackText: { color: C.green, fontSize: 16, fontWeight: "600" },
+  navBack: { minWidth: 64, flexShrink: 0, paddingRight: 8 }, navBackText: { color: C.green, fontSize: 16, fontWeight: "600" },
   navTitle: { color: C.text1, fontSize: 18, fontWeight: "800" },
   estBadge: { alignSelf: "flex-start", borderColor: C.yellow + "50", borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 14 },
   estText: { color: C.yellow, fontSize: 11, fontWeight: "800", letterSpacing: 0.3 },
