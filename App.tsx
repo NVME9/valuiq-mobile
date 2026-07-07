@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   View, Text, StyleSheet, StatusBar, Platform,
-  ActivityIndicator, TouchableOpacity, Animated, Dimensions,
+  ActivityIndicator, TouchableOpacity, Animated, Dimensions, AppState
 } from "react-native";
 import { C } from "./src/lib/theme";
 import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken , hasProAccess } from "./src/lib/api";
@@ -176,6 +176,30 @@ export default function App() {
   
 
   useEffect(() => { init(); }, []);
+
+  // Re-verify identity when the app returns from the background.
+  // Without this, the access token goes stale while backgrounded and the
+  // app falls back to a generic profile (no name / no admin / free plan).
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", async (state) => {
+      if (state === "active") {
+        try {
+          const saved = await loadSession();
+          if (saved && saved.refresh_token) {
+            const refreshed = await refreshToken(saved.refresh_token);
+            await saveSession(refreshed);
+            setSession(refreshed);
+            await loadUserData(refreshed.access_token);
+          }
+        } catch (e) {
+          // On failure, do NOT clear the session here â€” a transient refresh
+          // failure on resume must not log the user out or drop them to free.
+          console.log("[DIAG resume] refresh skipped:", String(e));
+        }
+      }
+    });
+    return () => { sub.remove(); };
+  }, []);
 
   useEffect(() => {
     if (splashDone && appReady) {
