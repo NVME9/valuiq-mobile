@@ -329,7 +329,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               {/* Profit number */}
               <View style={[s.profitCard,{borderColor:isProfit?C.green+"25":C.red+"25"}]}>
                 <Text style={s.profitLabel}>{hasLimitedData?"EST. PROFIT AFTER FEES":"YOUR PROFIT AFTER FEES"}</Text>
-                <Text style={[s.profitAmount,{color:isProfit?C.green:C.red,fontSize:52,opacity:hasLimitedData?0.8:1}]}>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={[s.profitAmount,{color:isProfit?C.green:C.red,fontSize:44,opacity:hasLimitedData?0.8:1}]}>
                   {isProfit?"+":""}${Math.abs(result.netProfit||0).toFixed(2)}
                 </Text>
                 <Text style={s.profitSub}>
@@ -357,27 +357,48 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
               {/* PROFIT ORACLE â€” real-outcome prediction */}
               {oracle && oracle.prediction && (
-                <View style={s.oracleCard}>
-                  <Text style={s.oracleLabel}>
-                    {oracle.dataMode === "crowd-led" ? "\ud83d\udd2e PROFIT ORACLE \u00b7 REAL DATA" : "\ud83d\udd2e PROFIT ORACLE"}
-                  </Text>
-                  <Text style={s.oracleHead}>{oracle.prediction.headline}</Text>
-                  {oracle.dataMode === "crowd-led" && (
-                    <View style={s.oracleStats}>
+                <View style={s.oracleHero}>
+                  <View style={s.oracleHeroTop}>
+                    <Text style={s.oracleHeroBadge}>{"\uD83D\uDD2E  PROFIT ORACLE"}</Text>
+                    <Text style={oracle.dataMode === "crowd-led" ? s.oracleHeroLive : s.oracleHeroEst}>
+                      {oracle.dataMode === "crowd-led" ? "\u25CF REAL RESELLER DATA" : "MARKET ESTIMATE"}
+                    </Text>
+                  </View>
+                  <Text style={s.oracleHeroTag}>What resellers actually make on this</Text>
+                  {oracle.dataMode === "crowd-led" ? (
+                    <View style={s.oracleHeroStats}>
                       {oracle.prediction.sellRate != null && (
-                        <View style={s.oracleStat}><Text style={s.oracleVal}>{oracle.prediction.sellRate}%</Text><Text style={s.oracleLbl}>sold</Text></View>
+                        <View style={s.oracleHeroStat}><Text style={s.oracleHeroVal}>{oracle.prediction.sellRate}%</Text><Text style={s.oracleHeroLbl}>actually sold</Text></View>
                       )}
                       {oracle.prediction.medianProfit != null && (
-                        <View style={s.oracleStat}><Text style={[s.oracleVal,{color:C.green}]}>${oracle.prediction.medianProfit}</Text><Text style={s.oracleLbl}>real profit</Text></View>
+                        <View style={s.oracleHeroStat}><Text style={[s.oracleHeroVal,{color:C.green}]}>${oracle.prediction.medianProfit}</Text><Text style={s.oracleHeroLbl}>median profit</Text></View>
                       )}
                       {oracle.prediction.medianDays != null && (
-                        <View style={s.oracleStat}><Text style={s.oracleVal}>~{oracle.prediction.medianDays}d</Text><Text style={s.oracleLbl}>to sell</Text></View>
+                        <View style={s.oracleHeroStat}><Text style={s.oracleHeroVal}>~{oracle.prediction.medianDays}d</Text><Text style={s.oracleHeroLbl}>to sell</Text></View>
+                      )}
+                    </View>
+                  ) : (
+                    <View style={s.oracleHeroStats}>
+                      {oracle.prediction.estResale != null && (
+                        <View style={s.oracleHeroStat}><Text style={s.oracleHeroVal}>${oracle.prediction.estResale}</Text><Text style={s.oracleHeroLbl}>est. resale</Text></View>
+                      )}
+                      {oracle.prediction.estProfit != null && (
+                        <View style={s.oracleHeroStat}><Text style={[s.oracleHeroVal,{color:C.green}]}>${oracle.prediction.estProfit}</Text><Text style={s.oracleHeroLbl}>est. profit</Text></View>
+                      )}
+                      {oracle.prediction.estMaxBuy != null && (
+                        <View style={s.oracleHeroStat}><Text style={s.oracleHeroVal}>${oracle.prediction.estMaxBuy}</Text><Text style={s.oracleHeroLbl}>max buy</Text></View>
                       )}
                     </View>
                   )}
-                  {oracle.prediction.overpayWarning ? (
-                    <Text style={s.oracleWarn}>\u26a0\ufe0f {oracle.prediction.overpayWarning}</Text>
+                  {oracle.prediction.headline ? (
+                    <Text style={s.oracleHeroLine}>{oracle.prediction.headline}</Text>
                   ) : null}
+                  {oracle.prediction.overpayWarning ? (
+                    <Text style={s.oracleHeroWarn}>{"\u26A0\uFE0F "}{oracle.prediction.overpayWarning}</Text>
+                  ) : null}
+                  {oracle.dataMode !== "crowd-led" && (
+                    <Text style={s.oracleHeroFoot}>Sharpens with real reseller outcomes as the community sells.</Text>
+                  )}
                 </View>
               )}
 
@@ -926,7 +947,20 @@ const s = StyleSheet.create({
   profitAmount:   { fontWeight: "900", letterSpacing: -2, lineHeight: 68, marginBottom: 6 },
   veloBadge: { borderWidth: 1, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16, marginTop: 12, alignItems: "center" },
   veloText: { fontSize: 16, fontWeight: "800" },
-    oracleCard: { backgroundColor: "#1a1424", borderColor: "#b066ff40", borderWidth: 1, borderRadius: 12, padding: 14, marginTop: 12 },
+    oracleHero: { backgroundColor: "#1c1330", borderColor: "#b066ff", borderWidth: 1.5, borderRadius: 18, padding: 18, marginBottom: 14, shadowColor: "#b066ff", shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 0 }, elevation: 8 },
+  oracleHeroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 },
+  oracleHeroBadge: { color: "#c98bff", fontSize: 13, fontWeight: "900", letterSpacing: 1 },
+  oracleHeroLive: { color: "#9ef01a", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
+  oracleHeroEst: { color: "#8a7aa8", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
+  oracleHeroTag: { color: "#e8dcff", fontSize: 15, fontWeight: "700", marginBottom: 14 },
+  oracleHeroStats: { flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
+  oracleHeroStat: { flex: 1, alignItems: "center" },
+  oracleHeroVal: { color: "#ffffff", fontSize: 26, fontWeight: "900", letterSpacing: -0.5 },
+  oracleHeroLbl: { color: "#a99cc4", fontSize: 11, fontWeight: "600", marginTop: 2, textAlign: "center" },
+  oracleHeroLine: { color: "#d8ccec", fontSize: 13, lineHeight: 19, fontWeight: "600" },
+  oracleHeroWarn: { color: C.yellow, fontSize: 13, fontWeight: "700", marginTop: 8 },
+  oracleHeroFoot: { color: "#8a7aa8", fontSize: 11, fontStyle: "italic", marginTop: 10 },
+  oracleCard: { backgroundColor: "#1a1424", borderColor: "#b066ff40", borderWidth: 1, borderRadius: 12, padding: 14, marginTop: 12 },
   oracleLabel: { color: "#b066ff", fontSize: 11, fontWeight: "800", letterSpacing: 0.5, marginBottom: 6 },
   oracleHead: { color: C.text1, fontSize: 14, fontWeight: "700", lineHeight: 20, marginBottom: 8 },
   oracleStats: { flexDirection: "row", gap: 20, marginBottom: 6 },
