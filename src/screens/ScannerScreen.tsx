@@ -11,7 +11,8 @@ import { C } from "../lib/theme";
 import Coachmark from "../components/Coachmark";
 import ShareButton from "../components/ShareButton";
 import { API_BASE, scanImage, scanBarcode , getProfitOracle, shareWin } from "../lib/api";
-import { scheduleSaleCheckIn } from "../lib/notifications";
+import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notifications";
+import * as Notifications from "expo-notifications";
 
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
@@ -44,6 +45,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [buyPrice, setBuyPrice] = useState("");
   const [result, setResult] = useState<any>(null);
   const [oracle, setOracle] = useState<any>(null);
+  // Soft notification ask (never fire Apple's cold prompt un-primed)
+  const [pendingCheckIn, setPendingCheckIn] = useState<{scanId:string; itemName:string}|null>(null);
+  const [checkInAsked, setCheckInAsked] = useState(false);
+  async function acceptCheckIn() {
+    const p = pendingCheckIn;
+    setPendingCheckIn(null); setCheckInAsked(true);
+    if (!p) return;
+    const granted = await requestNotificationPermission();
+    if (granted) { try { await scheduleSaleCheckIn(p.scanId, p.itemName); } catch {} }
+  }
+  function declineCheckIn() { setPendingCheckIn(null); setCheckInAsked(true); }
   useEffect(() => {
     let alive = true;
     setOracle(null);
@@ -122,11 +134,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       }
       if (!d.success) throw new Error(d.error || "Analysis failed");
       setResult(d);
-      // SALE-CAPTURE MOAT: schedule a BUY check-in
+      // SALE-CAPTURE MOAT: on a BUY, either schedule (if already allowed) or
+      // surface the soft in-app ask. Never fire Apple's cold prompt directly.
       try {
         if (d && d.decision === "BUY") {
           const sid = d.id || d.scanId || d.scan_id;
-          if (sid) scheduleSaleCheckIn(String(sid), d.itemName || d.item_name || "your item");
+          const nm = d.itemName || d.item_name || "your item";
+          if (sid) {
+            const { status } = await Notifications.getPermissionsAsync();
+            if (status === "granted") {
+              scheduleSaleCheckIn(String(sid), nm);
+            } else if (status !== "denied") {
+              // Not yet asked â€” show our own ask, in context, after they see the win.
+              setPendingCheckIn({ scanId: String(sid), itemName: nm });
+            }
+          }
         }
       } catch {}
       setStep("result");
@@ -399,6 +421,25 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   {oracle.dataMode !== "crowd-led" && (
                     <Text style={s.oracleHeroFoot}>Sharpens with real reseller outcomes as the community sells.</Text>
                   )}
+                </View>
+              )}
+
+              {/* SOFT NOTIFICATION ASK - only after a BUY, in context, never a cold OS prompt */}
+              {pendingCheckIn && !checkInAsked && (
+                <View style={s.askCard}>
+                  <Text style={s.askTitle}>Want a reminder to log what this sells for?</Text>
+                  <Text style={s.askBody}>
+                    We'll check back in about 2 weeks. Logging what actually sold keeps your profit
+                    stats real - and sharpens the Oracle for everyone.
+                  </Text>
+                  <View style={s.askRow}>
+                    <TouchableOpacity style={s.askNo} onPress={declineCheckIn} activeOpacity={0.8}>
+                      <Text style={s.askNoTxt}>Not now</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.askYes} onPress={acceptCheckIn} activeOpacity={0.85}>
+                      <Text style={s.askYesTxt}>Yes, remind me</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               )}
 
@@ -947,7 +988,15 @@ const s = StyleSheet.create({
   profitAmount:   { fontWeight: "900", letterSpacing: -2, lineHeight: 68, marginBottom: 6 },
   veloBadge: { borderWidth: 1, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16, marginTop: 12, alignItems: "center" },
   veloText: { fontSize: 16, fontWeight: "800" },
-    oracleHero: { backgroundColor: "#1c1330", borderColor: "#b066ff", borderWidth: 1.5, borderRadius: 18, padding: 18, marginBottom: 14, shadowColor: "#b066ff", shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 0 }, elevation: 8 },
+    askCard:   { backgroundColor: "#101a08", borderColor: C.green + "50", borderWidth: 1, borderRadius: 14, padding: 16, marginBottom: 12 },
+  askTitle:  { color: C.text1, fontSize: 15, fontWeight: "800", marginBottom: 6 },
+  askBody:   { color: C.text3, fontSize: 13, lineHeight: 18, marginBottom: 14 },
+  askRow:    { flexDirection: "row", gap: 10 },
+  askNo:     { flex: 1, backgroundColor: "transparent", borderColor: C.border, borderWidth: 1, borderRadius: 10, paddingVertical: 12, alignItems: "center" },
+  askNoTxt:  { color: C.text3, fontSize: 14, fontWeight: "700" },
+  askYes:    { flex: 1.4, backgroundColor: C.green, borderRadius: 10, paddingVertical: 12, alignItems: "center" },
+  askYesTxt: { color: C.greenDark, fontSize: 14, fontWeight: "900" },
+  oracleHero: { backgroundColor: "#1c1330", borderColor: "#b066ff", borderWidth: 1.5, borderRadius: 18, padding: 18, marginBottom: 14, shadowColor: "#b066ff", shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 0 }, elevation: 8 },
   oracleHeroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 },
   oracleHeroBadge: { color: "#c98bff", fontSize: 13, fontWeight: "900", letterSpacing: 1 },
   oracleHeroLive: { color: "#9ef01a", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },

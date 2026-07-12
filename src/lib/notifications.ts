@@ -44,8 +44,11 @@ export async function scheduleSaleCheckIn(
   daysOut = 12
 ): Promise<string | null> {
   try {
-    const granted = await requestNotificationPermission();
-    if (!granted) return null;
+    // Do NOT request permission here. Apple's cold prompt right after a scan
+    // gets declined, and on iOS a decline is permanent. ScannerScreen shows a
+    // soft in-app ask first and only then requests. Here: no-op unless granted.
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== "granted") return null;
 
     const seconds = Math.max(60, daysOut * 86400);
     const shortName = (itemName || "your item").length > 40
