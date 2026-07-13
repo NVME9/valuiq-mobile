@@ -340,87 +340,89 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 </View>
               ) : null}
 
-              {/* AI tier disclosure */}
-              {plan === "free" && !hasNoData && (
-                <View style={{flexDirection:"row",alignItems:"center",gap:6,backgroundColor:C.surface,borderRadius:8,padding: 8 as any,marginBottom:8,borderWidth:1,borderColor:C.border}}>
-                  <Text style={{fontSize:12}}></Text>
-                  <Text style={{color:C.text4,fontSize:11,flex:1}}>Standard AI analysis. Upgrade for deeper market intelligence.</Text>
-                </View>
-              )}
 
-              {/* Profit number */}
-              <View style={[s.profitCard,{borderColor:isProfit?C.green+"25":C.red+"25"}]}>
-                <Text style={s.profitLabel}>{hasLimitedData?"EST. PROFIT AFTER FEES":"YOUR PROFIT AFTER FEES"}</Text>
-                <Text numberOfLines={1} adjustsFontSizeToFit style={[s.profitAmount,{color:isProfit?C.green:C.red,fontSize:44,opacity:hasLimitedData?0.8:1}]}>
-                  {isProfit?"+":""}${Math.abs(result.netProfit||0).toFixed(2)}
-                </Text>
-                <Text style={s.profitSub}>
-                  Sell ${result.sellPrice} on {result.bestPlatform} - {result.roi}% ROI
-                  {hasLimitedData?" - verify before buying":""}
-                </Text>
-              </View>
 
-              {/* VELOCITY ENGINE badge */}
-              {result.velocity && result.velocity.tier !== "unknown" && (() => {
-                const vt = result.velocity.tier;
-                const vColor = vt === "fast" ? C.green : vt === "steady" ? C.yellow : C.orange;
-                const vLabel = vt === "fast" ? "Fast mover" : vt === "steady" ? "Steady seller" : "Slow mover";
-                return (
-                  <View style={[s.veloBadge, { borderColor: vColor + "40", backgroundColor: vColor + "12" }]}>
-                    <Text style={[s.veloText, { color: vColor }]}>
-                      {vLabel}{result.velocity.estDaysToSale ? "  -  ~" + result.velocity.estDaysToSale + " days to sell" : ""}
-                    </Text>
-                    {result.velocity.sellThrough !== null && (
-                      <Text style={s.veloSub}>{result.velocity.sellThrough}% of listings sell{result.velocity.soldCount ? " (" + result.velocity.soldCount + " recent sales)" : ""}</Text>
-                    )}
-                  </View>
-                );
-              })()}
 
               {/* PROFIT ORACLE â€” real-outcome prediction */}
               {oracle && oracle.prediction && (
                 <View style={s.oracleHero}>
                   <View style={s.oracleHeroTop}>
-                    <Text style={s.oracleHeroBadge}>{"\uD83D\uDD2E  PROFIT ORACLE"}</Text>
-                    <Text style={oracle.dataMode === "crowd-led" ? s.oracleHeroLive : s.oracleHeroEst}>
-                      {oracle.dataMode === "crowd-led" ? "\u25CF REAL RESELLER DATA" : "MARKET ESTIMATE"}
+                    <Text style={s.oracleHeroBadge} numberOfLines={1}>{"\uD83D\uDD2E PROFIT ORACLE"}</Text>
+                    <Text
+                      numberOfLines={1}
+                      style={oracle.dataMode === "crowd-led" ? s.oracleHeroLive : s.oracleHeroEst}
+                    >
+                      {oracle.dataMode === "crowd-led" ? "\u25CF REAL DATA" : "ESTIMATE"}
                     </Text>
                   </View>
-                  <Text style={s.oracleHeroTag}>What resellers actually make on this</Text>
-                  {oracle.dataMode === "crowd-led" ? (
-                    <View style={s.oracleHeroStats}>
-                      {oracle.prediction.sellRate != null && (
-                        <View style={s.oracleHeroStat}><Text style={s.oracleHeroVal}>{oracle.prediction.sellRate}%</Text><Text style={s.oracleHeroLbl}>actually sold</Text></View>
-                      )}
-                      {oracle.prediction.medianProfit != null && (
-                        <View style={s.oracleHeroStat}><Text style={[s.oracleHeroVal,{color:C.green}]}>${oracle.prediction.medianProfit}</Text><Text style={s.oracleHeroLbl}>median profit</Text></View>
-                      )}
-                      {oracle.prediction.medianDays != null && (
-                        <View style={s.oracleHeroStat}><Text style={s.oracleHeroVal}>~{oracle.prediction.medianDays}d</Text><Text style={s.oracleHeroLbl}>to sell</Text></View>
-                      )}
-                    </View>
-                  ) : (
-                    <View style={s.oracleHeroStats}>
-                      {oracle.prediction.estResale != null && (
-                        <View style={s.oracleHeroStat}><Text style={s.oracleHeroVal}>${oracle.prediction.estResale}</Text><Text style={s.oracleHeroLbl}>est. resale</Text></View>
-                      )}
-                      {oracle.prediction.estProfit != null && (
-                        <View style={s.oracleHeroStat}><Text style={[s.oracleHeroVal,{color:C.green}]}>${oracle.prediction.estProfit}</Text><Text style={s.oracleHeroLbl}>est. profit</Text></View>
-                      )}
-                      {oracle.prediction.estMaxBuy != null && (
-                        <View style={s.oracleHeroStat}><Text style={s.oracleHeroVal}>${oracle.prediction.estMaxBuy}</Text><Text style={s.oracleHeroLbl}>max buy</Text></View>
-                      )}
-                    </View>
-                  )}
-                  {oracle.prediction.headline ? (
-                    <Text style={s.oracleHeroLine}>{oracle.prediction.headline}</Text>
-                  ) : null}
-                  {oracle.prediction.overpayWarning ? (
-                    <Text style={s.oracleHeroWarn}>{"\u26A0\uFE0F "}{oracle.prediction.overpayWarning}</Text>
-                  ) : null}
-                  {oracle.dataMode !== "crowd-led" && (
-                    <Text style={s.oracleHeroFoot}>Sharpens with real reseller outcomes as the community sells.</Text>
-                  )}
+
+                  {/* HERO: the number that decides the buy */}
+                  {(() => {
+                    const maxBuy = oracle.dataMode === "crowd-led"
+                      ? oracle.prediction.safeMaxBuy
+                      : oracle.prediction.estMaxBuy;
+                    const prof = oracle.dataMode === "crowd-led"
+                      ? oracle.prediction.medianProfit
+                      : oracle.prediction.estProfit;
+                    const resale = oracle.dataMode === "crowd-led"
+                      ? null
+                      : oracle.prediction.estResale;
+                    const profNum = Number(prof);
+                    const profOk = prof != null && !isNaN(profNum);
+                    const profTxt = profOk ? (profNum < 0 ? "-$" + Math.abs(profNum) : "$" + profNum) : "\u2014";
+                    const profCol = profOk ? (profNum < 0 ? C.red : C.green) : C.text4;
+                    return (
+                      <>
+                        <Text style={s.oracleHeroTag}>Don't pay more than</Text>
+                        <Text style={s.oracleMaxBuy} numberOfLines={1} adjustsFontSizeToFit>
+                          {maxBuy != null ? "$" + maxBuy : "\u2014"}
+                        </Text>
+                        <View style={s.oracleHeroStats}>
+                          <View style={s.oracleHeroStat}>
+                            <Text style={[s.oracleHeroVal,{color:profCol}]} numberOfLines={1} adjustsFontSizeToFit>{profTxt}</Text>
+                            <Text style={s.oracleHeroLbl}>{oracle.dataMode === "crowd-led" ? "real profit" : "est. profit"}</Text>
+                          </View>
+                          {oracle.dataMode === "crowd-led" ? (
+                            <>
+                              {oracle.prediction.sellRate != null && (
+                                <View style={s.oracleHeroStat}>
+                                  <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>{oracle.prediction.sellRate}%</Text>
+                                  <Text style={s.oracleHeroLbl}>actually sold</Text>
+                                </View>
+                              )}
+                              {oracle.prediction.medianDays != null && (
+                                <View style={s.oracleHeroStat}>
+                                  <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>~{oracle.prediction.medianDays}d</Text>
+                                  <Text style={s.oracleHeroLbl}>to sell</Text>
+                                </View>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              {resale != null && (
+                                <View style={s.oracleHeroStat}>
+                                  <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>${resale}</Text>
+                                  <Text style={s.oracleHeroLbl}>sells for</Text>
+                                </View>
+                              )}
+                              {result.velocity && result.velocity.estDaysToSale ? (
+                                <View style={s.oracleHeroStat}>
+                                  <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>~{result.velocity.estDaysToSale}d</Text>
+                                  <Text style={s.oracleHeroLbl}>to sell</Text>
+                                </View>
+                              ) : null}
+                            </>
+                          )}
+                        </View>
+                      </>
+                    );
+                  })()}
+
+                  <Text style={s.oracleHeroFoot}>
+                    {oracle.dataMode === "crowd-led"
+                      ? "From real reseller outcomes."
+                      : "Market estimate. Sharpens as the community logs real sales."}
+                  </Text>
                 </View>
               )}
 
@@ -443,19 +445,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 </View>
               )}
 
-              {/* Key numbers - compact row */}
-              <View style={s.numbersCard}>
-                {([
-                  ["MAX TO PAY", `$${result.buyTarget||0}`, C.yellow],
-                  ["SELL FOR",   `$${result.sellPrice||0}`, C.text1],
-                  ["PLATFORM",   result.bestPlatform||"eBay", C.text1],
-                ] as [string,string,string][]).map(([label,value,color])=>(
-                  <View key={label} style={s.numberItem}>
-                    <Text style={s.numberLabel}>{label}</Text>
-                    <Text style={[s.numberValue,{color}]} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
-                  </View>
-                ))}
-              </View>
 
               {/* Platform comparison - profit ranked */}
               {result.platformBreakdown && result.platformBreakdown.length > 0 && (
@@ -1001,6 +990,7 @@ const s = StyleSheet.create({
   oracleHeroBadge: { color: "#c98bff", fontSize: 13, fontWeight: "900", letterSpacing: 1 },
   oracleHeroLive: { color: "#9ef01a", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
   oracleHeroEst: { color: "#8a7aa8", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
+  oracleMaxBuy: { color: "#ffffff", fontSize: 46, fontWeight: "900", letterSpacing: -1.5, marginBottom: 14, marginTop: -2 },
   oracleHeroTag: { color: "#e8dcff", fontSize: 15, fontWeight: "700", marginBottom: 14 },
   oracleHeroStats: { flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
   oracleHeroStat: { flex: 1, alignItems: "center" },
