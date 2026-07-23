@@ -70,7 +70,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       }).then((d) => { if (alive && d && d.success) setOracle(d); });
     }
     return () => { alive = false; };
-  }, [result]);
+    // buyPrice matters: without it the Oracle is computed once at scan time and
+    // never updates when the user enters what they're actually paying.
+  }, [result, buyPrice]);
   const [barcodeScanned, setBarcodeScanned] = useState(false);
   const cameraRef        = useRef<any>(null);
   const [showAnalysis,   setShowAnalysis]   = useState(false);
