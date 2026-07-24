@@ -67,6 +67,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         itemName: r.itemName || r.item_name,
         buyPrice: Number(buyPrice) || 0,
         estValue: Number(r.sellPrice) || 0,
+        // Hand the Oracle the numbers this scan already computed. The lens
+        // math is the source of truth: buyTarget is the 3x rule against the
+        // real sale price, and netProfit already accounts for the winning
+        // platform's actual fee rate and the user's cost. Passing them here
+        // is what stops the Oracle and the platform card from disagreeing.
+        bestPlatform: r.bestPlatform,
+        lensBuyTarget: Number(r.buyTarget) || 0,
+        lensNetProfit: Number(r.netProfit) || 0,
       }).then((d) => { if (alive && d && d.success) setOracle(d); });
     }
     return () => { alive = false; };

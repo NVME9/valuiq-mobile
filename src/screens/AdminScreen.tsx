@@ -343,7 +343,7 @@ export default function AdminScreen({ token, onNavigate, onBack }: Props) {
                         </Text>
                       </View>
                       <Text style={{color:C.text4,fontSize:10}}>
-                        {new Date(u.created_at).toLocaleDateString()}
+                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : "\u2014"}
                       </Text>
                     </View>
                   </View>

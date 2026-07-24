@@ -243,7 +243,7 @@ export async function getCommunityWins(): Promise<any[]> {
   try { const d = await fetch(`${API_BASE}/api/community-wins`).then(r=>r.json()); return Array.isArray(d) ? d : []; } catch { return []; }
 }
 
-export async function getProfitOracle(token: string, item: { category?: string; brand?: string; itemName?: string; buyPrice?: number; estValue?: number }): Promise<any> {
+export async function getProfitOracle(token: string, item: { category?: string; brand?: string; itemName?: string; buyPrice?: number; estValue?: number; bestPlatform?: string; lensBuyTarget?: number; lensNetProfit?: number }): Promise<any> {
   try {
     const r = await fetch(`${API_BASE}/api/profit-oracle`, {
       method: "POST",
