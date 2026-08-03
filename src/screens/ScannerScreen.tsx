@@ -287,6 +287,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const isProfit       = (result.netProfit || 0) > 0;
     const dc             = result.decision === "BUY" ? C.green : result.decision === "WATCH" ? C.yellow : C.red;
     const verdict        = hasNoData ? "UNKNOWN" : result.decision || "PASS";
+    const isPass          = verdict === "PASS";
 
     return (
       <SafeAreaView style={s.safe}>
@@ -467,8 +468,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               )}
 
 
-              {/* Platform comparison - profit ranked */}
-              {result.platformBreakdown && result.platformBreakdown.length > 0 && (
+              {/* PASS reason - shown in place of the platform breakdown */}
+              {isPass && result.reasoning && (
+                <View style={s.infoCard}>
+                  <Text style={s.infoLabel}>Why PASS</Text>
+                  <Text style={s.infoText}>{result.reasoning}</Text>
+                </View>
+              )}
+
+              {/* Platform comparison - profit ranked (BUY/WATCH only) */}
+              {!isPass && result.platformBreakdown && result.platformBreakdown.length > 0 && (
                 <View style={s.infoCard}>
                   <Text style={[s.infoLabel,{marginBottom:10}]}>BEST PLACE TO SELL</Text>
                   {(goDeeper ? result.platformBreakdown : result.platformBreakdown.slice(0,3)).map((pb:any, i:number) => (
