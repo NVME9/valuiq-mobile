@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  StatusBar, ActivityIndicator, RefreshControl, Alert, Image, TextInput } from "react-native";
+  StatusBar, ActivityIndicator, RefreshControl, Alert, Image, TextInput, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { compressPhoto } from "../lib/image";
@@ -360,6 +360,8 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
               ) : (
                 displayScans.map(scan => {
                   const isSel = !!selected[scan.id];
+                  let full: any = null;
+                  try { full = scan.specialty_data ? JSON.parse(scan.specialty_data) : null; } catch { full = null; }
                   return (
                   <TouchableOpacity
                     key={scan.id}
@@ -419,6 +421,42 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                             Best platform: <Text style={{color:C.text1,fontWeight:"700"}}>{scan.best_platform}</Text>
                           </Text>
                         ) : null}
+
+                        {full && editingId !== scan.id && (
+                          <>
+                            {full.platformBreakdown && full.platformBreakdown.length > 0 && (
+                              <View style={s.apprSection}>
+                                <Text style={s.apprLabel}>Platform breakdown</Text>
+                                {full.platformBreakdown.slice(0,3).map((pb:any, i:number) => {
+                                  const profNum = Number(pb.netProfit) || 0;
+                                  const isNeg = profNum < 0;
+                                  return (
+                                    <Text key={pb.platform} style={[s.apprBullet, isNeg && {color:C.red}]}>
+                                      {pb.platform}: {isNeg ? "-$" + Math.abs(profNum) : "+$" + profNum} profit
+                                    </Text>
+                                  );
+                                })}
+                              </View>
+                            )}
+                            {full.reasoning ? (
+                              <View style={s.apprSection}><Text style={s.apprLabel}>Analysis</Text><Text style={s.apprText}>{full.reasoning}</Text></View>
+                            ) : null}
+                            {full.hotTip ? (
+                              <View style={s.apprSection}><Text style={[s.apprLabel,{color:C.red}]}>Hot Tip</Text><Text style={s.apprText}>{full.hotTip}</Text></View>
+                            ) : null}
+                            {full.riskScore !== undefined ? (
+                              <Text style={{color:C.text3,fontSize:12,marginBottom:8}}>
+                                Risk Score: {full.riskScore}/10{full.watchOutFor ? " — " + full.watchOutFor : ""}
+                              </Text>
+                            ) : null}
+                            {full.timeToSell ? (
+                              <Text style={{color:C.text3,fontSize:12,marginBottom:8}}>
+                                Time to sell: {full.timeToSell} {"·"} Payout {full.payoutSpeed || "3-5 days"}
+                              </Text>
+                            ) : null}
+                          </>
+                        )}
+
                         {editingId === scan.id ? (
                           <View style={s.editPanel}>
                             <Text style={s.editLabel}>Item name</Text>
@@ -624,7 +662,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                           <Text style={s.cardPlatform}>{appr.value || ("$" + (item.sell_price||0))}</Text>
                         </View>
                         <View style={[s.verdictBadge, {backgroundColor: decColor + "20"}]}>
-                          <Text style={[s.verdictTxt, {color: decColor}]}>{item.decision || "WATCH"}</Text>
+                          <Text style={[s.verdictBadgeTxt, {color: decColor}]}>{item.decision || "WATCH"}</Text>
                         </View>
                       </View>
 
@@ -746,5 +784,5 @@ const s = StyleSheet.create({
   apprText:      { color:C.text2, fontSize:13, lineHeight:20 },
   apprBullet:    { color:C.text2, fontSize:13, lineHeight:20, marginBottom:2 },
   verdictBadge:  { paddingHorizontal:10, paddingVertical:5, borderRadius:8 },
-  verdictTxt:    { fontSize:12, fontWeight:"800" },
+  verdictBadgeTxt: { fontSize:12, fontWeight:"800" },
 });
