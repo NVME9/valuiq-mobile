@@ -16,6 +16,7 @@ import * as Notifications from "expo-notifications";
 
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
+const MAX_PHOTOS = 5;
 
 type Step = "camera" | "barcode" | "review" | "loading" | "result" | "upgrade";
 
@@ -103,18 +104,28 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     if (photo?.base64) {
       const small = await compressPhoto(photo.base64);
       setPhotos(p => {
-        const next = [...p, small].slice(0, 3);
-        if (next.length >= 3) { setStep("review"); if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("review"); }
+        const next = [...p, small].slice(0, MAX_PHOTOS);
+        if (next.length >= MAX_PHOTOS) { setStep("review"); if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("review"); }
         return next;
       });
     }
   }
 
   async function pickLibrary() {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], base64: true, quality: 0.7 });
-    if (!res.canceled && res.assets[0]?.base64) {
-      const small = await compressPhoto(res.assets[0].base64);
-      setPhotos(p => [...p, small].slice(0, 3));
+    const remaining = MAX_PHOTOS - photos.length;
+    if (remaining <= 0) return;
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"], base64: true, quality: 0.7,
+      allowsMultipleSelection: true, selectionLimit: remaining,
+    });
+    if (res.canceled || !res.assets?.length) return;
+    const picked = res.assets.slice(0, remaining);
+    const compressed: string[] = [];
+    for (const a of picked) {
+      if (a.base64) compressed.push(await compressPhoto(a.base64));
+    }
+    if (compressed.length) {
+      setPhotos(p => [...p, ...compressed].slice(0, MAX_PHOTOS));
       setStep("review");
       if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("review");
     }
@@ -736,7 +747,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               </TouchableOpacity>
             </View>
           ))}
-          {photos.length < 3 && (
+          {photos.length < MAX_PHOTOS && (
             <View style={{ gap: 8, flexDirection: "row" }}>
               <TouchableOpacity onPress={() => setStep("camera")} style={s.addPhotoBtn}>
                 <Text style={{ fontSize: 22 }}></Text>
@@ -890,7 +901,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 <View key={i} style={[s.corner, pos as any, border as any]} />
               ))}
             </View>
-            <Text style={s.camHint}>Snap 1-3 photos, then tap Done</Text>
+            <Text style={s.camHint}>Snap 1-5 photos, then tap Done</Text>
           </View>
 
           {/* Controls */}
