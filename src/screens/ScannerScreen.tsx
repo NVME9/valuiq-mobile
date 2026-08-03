@@ -480,15 +480,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               {!isPass && result.platformBreakdown && result.platformBreakdown.length > 0 && (
                 <View style={s.infoCard}>
                   <Text style={[s.infoLabel,{marginBottom:10}]}>BEST PLACE TO SELL</Text>
-                  {(goDeeper ? result.platformBreakdown : result.platformBreakdown.slice(0,3)).map((pb:any, i:number) => (
+                  {(goDeeper ? result.platformBreakdown : result.platformBreakdown.slice(0,3)).map((pb:any, i:number) => {
+                    const profNum = Number(pb.netProfit) || 0;
+                    const isNeg = profNum < 0;
+                    const isBest = i === 0 && !isNeg;
+                    return (
                     <View key={pb.platform} style={{marginBottom:goDeeper?14:8}}>
                       <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}}>
                         <View style={{flexDirection:"row",alignItems:"center",gap:6}}>
-                          <View style={{width:3,height:16,borderRadius:2,backgroundColor:i===0?C.green:C.border}}/>
+                          <View style={{width:3,height:16,borderRadius:2,backgroundColor:isBest?C.green:C.border}}/>
                           <Text style={{color:i===0?C.text1:C.text3,fontSize:14,fontWeight:i===0?"800":"500"}}>{pb.platform}</Text>
-                          {i===0 && <Text style={{color:C.green,fontSize:9,fontWeight:"900"}}>BEST</Text>}
+                          {isBest && <Text style={{color:C.green,fontSize:9,fontWeight:"900"}}>BEST</Text>}
                         </View>
-                        <Text style={{color:i===0?C.green:C.text2,fontSize:15,fontWeight:"800"}}>+${pb.netProfit} profit</Text>
+                        <Text style={{color:isNeg?C.red:(i===0?C.green:C.text2),fontSize:15,fontWeight:"800"}}>
+                          {isNeg ? "-$" + Math.abs(profNum) : "+$" + profNum} profit
+                        </Text>
                       </View>
                       {goDeeper && (
                         <View style={{flexDirection:"row",flexWrap:"wrap",gap:10,marginTop:4,marginLeft:9}}>
@@ -499,7 +505,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                         </View>
                       )}
                     </View>
-                  ))}
+                    );
+                  })}
                   <TouchableOpacity onPress={()=>setGoDeeper(g=>!g)} style={{marginTop:4,paddingVertical:8,alignItems:"center"}}>
                     <Text style={{color:C.green,fontSize:13,fontWeight:"800"}}>{goDeeper?"Show less":"Go Deeper - full breakdown"}</Text>
                   </TouchableOpacity>
