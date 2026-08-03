@@ -100,6 +100,8 @@ export default function SpecialtyScreen({ token, onNavigate, onBack }: Props) {
   }
 
   function reset() { setSelectedCat(null); setFields({}); setPhotos([]); setResult(null); setError(""); }
+  function editAndRerun() { setResult(null); setError(""); }
+  function scanAnother() { setFields({}); setPhotos([]); setResult(null); setError(""); }
 
   // ── CATEGORY GRID ──────────────────────────────────────
   if (!selectedCat) return (
@@ -234,7 +236,18 @@ export default function SpecialtyScreen({ token, onNavigate, onBack }: Props) {
           message={selectedCat.label + " appraisal via ValuIQ\n\n" + (result.identification || selectedCat.label) + "\nValue: " + (result.value || "See app") + "\n\ngetvaluiq.com"}
         />
 
-        <TouchableOpacity style={[s.greenBtn, { marginTop: 10 }]} onPress={() => { setResult(null); }}>
+        <TouchableOpacity
+          style={{backgroundColor:C.surface,borderRadius:12,padding:14,marginTop:10,borderWidth:1,borderColor:C.border,flexDirection:"row",alignItems:"center",gap:8}}
+          onPress={editAndRerun}
+          activeOpacity={0.8}
+        >
+          <Text style={{fontSize:16}}>✏️</Text>
+          <View style={{flex:1}}>
+            <Text style={{color:C.yellow,fontSize:13,fontWeight:"800"}}>Edit & Rerun</Text>
+            <Text style={{color:C.text4,fontSize:11}}>Correct a field or photo and get fresh pricing</Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.greenBtn, { marginTop: 10 }]} onPress={scanAnother}>
           <Text style={s.greenBtnText}>Scan Another →</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[s.greenBtn, { marginTop: 8, backgroundColor: C.surface }]} onPress={reset}>
