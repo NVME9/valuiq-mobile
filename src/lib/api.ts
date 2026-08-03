@@ -178,16 +178,16 @@ export async function rerunScan(token: string, opts: { itemName: string; brand?:
 export async function getScanHistory(token: string): Promise<any[]> {
   try { const d = await fetch(`${API_BASE}/api/scan-history?token=${token}`).then(r=>r.json()); return Array.isArray(d) ? d : []; } catch { return []; }
 }
-export async function scanImage(token: string, base64: string, description?: string, buyPrice?: number): Promise<any> {
+export async function scanImage(token: string, photos: string[], description?: string, buyPrice?: number): Promise<any> {
   const body: any = {
     userToken: token,
-    images: [`data:image/jpeg;base64,${base64}`],
+    images: photos.map(b => `data:image/jpeg;base64,${b}`),
     textInput: description || "",
     buyPrice: buyPrice || 0,
   };
   try {
     const t = await ImageManipulator.manipulateAsync(
-      `data:image/jpeg;base64,${base64}`,
+      `data:image/jpeg;base64,${photos[0]}`,
       [{ resize: { width: 200 } }],
       { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG, base64: true }
     );

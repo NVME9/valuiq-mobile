@@ -136,7 +136,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         if (!p.length && !description && !brandInput) {
           setStep("review"); return;
         }
-        d = await scanImage(token, p[0] || "", (brandInput ? "Brand: " + brandInput + ". " : "") + description, buyPrice ? parseFloat(buyPrice) : undefined);
+        d = await scanImage(token, p, (brandInput ? "Brand: " + brandInput + ". " : "") + description, buyPrice ? parseFloat(buyPrice) : undefined);
       }
       if (d.error === "scan_limit_reached") {
         onNavigate("upgrade");
