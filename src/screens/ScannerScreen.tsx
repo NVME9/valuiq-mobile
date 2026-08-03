@@ -13,6 +13,7 @@ import ShareButton from "../components/ShareButton";
 import { API_BASE, scanImage, scanBarcode , getProfitOracle, shareWin } from "../lib/api";
 import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notifications";
 import * as Notifications from "expo-notifications";
+import { matchSpecialtyCategory } from "./SpecialtyScreen";
 
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
@@ -25,7 +26,7 @@ interface Props {
   plan: string;
   scansLeft: number | null;
   setScansLeft: (n: number | null) => void;
-  onNavigate: (s: string) => void;
+  onNavigate: (s: string, data?: any) => void;
   onLogout: () => void;
   tourStep?: string|null; advanceTour?: (s: string|null) => void; skipTour?: () => void;
 }
@@ -288,6 +289,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const dc             = result.decision === "BUY" ? C.green : result.decision === "WATCH" ? C.yellow : C.red;
     const verdict        = hasNoData ? "UNKNOWN" : result.decision || "PASS";
     const isPass          = verdict === "PASS";
+    const specialtyMatch  = matchSpecialtyCategory(result.category, result.itemName || result.item_name);
 
     return (
       <SafeAreaView style={s.safe}>
@@ -594,6 +596,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   <Text style={{color:C.text4,fontSize:11}}>Correct item details to get fresh pricing</Text>
                 </View>
               </TouchableOpacity>
+
+              {/* Deeper specialty scan, when this category has an expert scanner */}
+              {specialtyMatch && (
+                <TouchableOpacity
+                  style={{backgroundColor:C.surface,borderRadius:12,padding:14,marginBottom:8,borderWidth:1,borderColor:C.green+"40",flexDirection:"row",alignItems:"center",gap:8}}
+                  onPress={()=>onNavigate("specialty", {category: specialtyMatch.id})}
+                  activeOpacity={0.8}
+                >
+                  <Text style={{fontSize:16}}>{specialtyMatch.icon}</Text>
+                  <View style={{flex:1}}>
+                    <Text style={{color:C.green,fontSize:13,fontWeight:"800"}}>Get a deeper {specialtyMatch.label} scan</Text>
+                    <Text style={{color:C.text4,fontSize:11}}>Expert AI with category-specific pricing knowledge</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
 
               {/* Battle this item */}
               <TouchableOpacity style={s.battleBtn} onPress={()=>result.priceData?.ebaySearchUrl && Linking.openURL(result.priceData.ebaySearchUrl)} activeOpacity={0.85}>

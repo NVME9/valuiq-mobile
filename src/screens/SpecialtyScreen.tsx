@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Image, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
@@ -7,7 +7,7 @@ import { C } from "../lib/theme";
 import { analyzeSpecialty } from "../lib/api";
 import ShareButton from "../components/ShareButton";
 
-const CATS = [
+export const CATS = [
   { id:"sneakers", icon:"👟", label:"Sneaker Intelligence", desc:"Jordan, Dunk, Yeezy, New Balance, ASICS, Samba, On Running",
     fields:[{key:"brand",label:"Brand",ph:"e.g. Nike, Adidas, New Balance, Jordan Brand"},{key:"model",label:"Model / Colorway",ph:"e.g. Air Jordan 1 Retro High OG Chicago, Yeezy 350 V2 Zebra"},{key:"size",label:"US Size",ph:"e.g. 10, 10.5, 11"},{key:"condition",label:"Condition",ph:"e.g. Deadstock unworn, VNDS tried on once, Worn 5x"},{key:"box",label:"Box Status",ph:"e.g. OG box perfect, OG box damaged, No box"},{key:"extras",label:"Extras Included",ph:"e.g. Extra laces, Receipt, All tags attached"}] },
   { id:"designer_shoes", icon:"👠", label:"Designer Shoes", desc:"Louboutin, Chanel, Gucci, Jimmy Choo, Manolo Blahnik, Bottega",
@@ -50,15 +50,59 @@ const CATS = [
     fields:[{key:"brand",label:"Brand",ph:"e.g. Snap-On, Craftsman USA, Stanley, Starrett"},{key:"item",label:"Item / Set",ph:"e.g. Socket set, Torque wrench, Machinist gauge"},{key:"era",label:"Era / Made In",ph:"e.g. Made in USA 1970s, Pre-1990 Craftsman, Unknown"},{key:"condition",label:"Condition",ph:"e.g. Excellent like new, Good working, Well used"},{key:"complete",label:"Complete?",ph:"e.g. Full set complete, Missing 3 sockets"},{key:"type",label:"Type",ph:"e.g. Hand tools, Power tool, Measuring tool"}] },
 ];
 
-interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void; }
+// Keywords used to map a freeform AI-returned category/item string (from the
+// main scanner) to one of the specialty categories above.
+const CATEGORY_KEYWORDS: Record<string,string[]> = {
+  sneakers: ["sneaker", "jordan", "yeezy", "dunk"],
+  designer_shoes: ["designer shoe", "heel", "louboutin", "pump"],
+  handbags: ["handbag", "purse", "tote bag", "clutch"],
+  watches: ["watch", "timepiece", "rolex", "omega"],
+  wine: ["wine", "bordeaux", "champagne", "cabernet"],
+  spirits: ["whiskey", "whisky", "bourbon", "scotch", "spirit"],
+  cards: ["trading card", "sports card", "pokemon", "tcg", "rookie card"],
+  vintage_clothing: ["vintage clothing", "streetwear", "vintage tee", "band tee"],
+  jerseys: ["jersey", "memorabilia", "autographed", "game-worn"],
+  instruments: ["guitar", "instrument", "amplifier", "synth"],
+  video_games: ["video game", "console", "cartridge", "cib"],
+  lego: ["lego"],
+  funko: ["funko", "pop figure"],
+  coins: ["coin", "currency", "bullion", "mint mark"],
+  jewelry: ["jewelry", "jewellery", "necklace", "bracelet", "brooch", "earring"],
+  art: ["painting", "lithograph", "art print", "fine art"],
+  antiques: ["antique", "pottery", "porcelain", "figurine"],
+  cameras: ["camera", "lens", "leica", "hasselblad"],
+  vintage_toys: ["vintage toy", "action figure", "hot wheels", "barbie"],
+  tools: ["power tool", "hand tool", "snap-on", "machinist"],
+};
 
-export default function SpecialtyScreen({ token, onNavigate, onBack }: Props) {
-  const [selectedCat, setSelectedCat] = useState<typeof CATS[0]|null>(null);
+export function matchSpecialtyCategory(...texts: (string|undefined|null)[]): typeof CATS[0] | null {
+  const haystack = texts.filter(Boolean).join(" ").toLowerCase();
+  if (!haystack) return null;
+  for (const cat of CATS) {
+    const keywords = CATEGORY_KEYWORDS[cat.id] || [];
+    if (keywords.some(k => haystack.includes(k))) return cat;
+  }
+  return null;
+}
+
+interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string, data?:any)=>void; onBack?:()=>void; onLogout:()=>void; navData?:any; }
+
+export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: Props) {
+  const [selectedCat, setSelectedCat] = useState<typeof CATS[0]|null>(
+    navData?.category ? CATS.find(c => c.id === navData.category) || null : null
+  );
   const [fields, setFields] = useState<Record<string,string>>({});
   const [photos, setPhotos] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (navData?.category) {
+      const cat = CATS.find(c => c.id === navData.category);
+      if (cat) setSelectedCat(cat);
+    }
+  }, [navData?.category]);
 
   async function pickPhoto() {
     if (photos.length >= 5) { setError("Up to 5 photos."); return; }
