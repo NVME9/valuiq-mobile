@@ -349,6 +349,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
           {/* - VERDICT CARD - */}
           <View style={[s.verdictCard,{borderColor:(hasNoData?C.border:dc)+"40",backgroundColor:(hasNoData?C.surface:dc)+"10"}]}>
+            <TouchableOpacity
+              style={s.editTopBtn}
+              onPress={()=>{
+                setDescription(result.itemName||"");
+                setResult(null);
+                setStep("review");
+              }}
+              activeOpacity={0.8}
+              hitSlop={{top:8,bottom:8,left:8,right:8}}
+            >
+              <Text style={s.editTopBtnIcon}>✏️</Text>
+            </TouchableOpacity>
             {photos[0] && (
               <Image source={{uri:`data:image/jpeg;base64,${photos[0]}`}}
                 style={{width:"100%",height:160,borderRadius:10,marginBottom:12}} resizeMode="cover"/>
@@ -608,23 +620,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   </View>
                 </View>
               )}
-
-              {/* Edit & Rerun */}
-              <TouchableOpacity
-                style={{backgroundColor:C.surface,borderRadius:12,padding:14,marginBottom:8,borderWidth:1,borderColor:C.border,flexDirection:"row",alignItems:"center",gap:8}}
-                onPress={()=>{
-                  setDescription(result.itemName||"");
-                  setResult(null);
-                  setStep("review");
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={{fontSize:16}}></Text>
-                <View style={{flex:1}}>
-                  <Text style={{color:C.yellow,fontSize:13,fontWeight:"800"}}>Edit & Rerun</Text>
-                  <Text style={{color:C.text4,fontSize:11}}>Correct item details to get fresh pricing</Text>
-                </View>
-              </TouchableOpacity>
 
               {/* Deeper specialty scan, when this category has an expert scanner */}
               {specialtyMatch && (
@@ -1069,6 +1064,8 @@ const s = StyleSheet.create({
   verdictText:    { fontWeight: "900", letterSpacing: -1, lineHeight: 52, marginBottom: 8 },
   itemName:       { color: C.text1, fontSize: 16, fontWeight: "700", textAlign: "center", marginBottom: 4 },
   itemMeta:       { color: C.text3, fontSize: 13, textAlign: "center" },
+  editTopBtn:     { position: "absolute", top: 14, right: 14, width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(0,0,0,0.35)", borderWidth: 1, borderColor: C.border, alignItems: "center", justifyContent: "center", zIndex: 2 },
+  editTopBtnIcon: { fontSize: 16 },
   profitCard:     { backgroundColor: "rgba(0,0,0,0.35)", borderWidth: 2, borderRadius: 20, padding: 20, marginBottom: 10, alignItems: "center" },
   profitLabel:    { color: C.text3, fontSize: 10, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 },
   profitAmount:   { fontWeight: "900", letterSpacing: -2, lineHeight: 68, marginBottom: 6 },
