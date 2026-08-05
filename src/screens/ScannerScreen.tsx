@@ -2,14 +2,17 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
   ScrollView, Linking, StatusBar, TextInput,
-  Image, Dimensions, Animated } from "react-native";
+  Image, Dimensions, Animated, Alert } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
+import ViewShot from "react-native-view-shot";
+import * as Sharing from "expo-sharing";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import Coachmark from "../components/Coachmark";
 import ShareButton from "../components/ShareButton";
+import ShareCard from "../components/ShareCard";
 import { API_BASE, scanImage, scanBarcode , getProfitOracle, shareWin } from "../lib/api";
 import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notifications";
 import * as Notifications from "expo-notifications";
@@ -39,6 +42,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [photos, setPhotos] = useState<string[]>([]);
   const [winShared, setWinShared] = useState(false);
   const [sharingWin, setSharingWin] = useState(false);
+  const [sharingImage, setSharingImage] = useState(false);
+  const shareCardRef = useRef<ViewShot>(null);
   const [brandInput, setBrandInput] = useState("");
   const [loadMsg, setLoadMsg] = useState(0);
   const loadBar = useRef(new Animated.Value(0)).current;
@@ -58,6 +63,24 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     if (granted) { try { await scheduleSaleCheckIn(p.scanId, p.itemName); } catch {} }
   }
   function declineCheckIn() { setPendingCheckIn(null); setCheckInAsked(true); }
+
+  async function shareResultImage() {
+    if (!shareCardRef.current?.capture || sharingImage) return;
+    setSharingImage(true);
+    try {
+      const available = await Sharing.isAvailableAsync();
+      if (!available) {
+        Alert.alert("Sharing not available", "Sharing isn't supported on this device.");
+        return;
+      }
+      const uri = await shareCardRef.current.capture();
+      await Sharing.shareAsync(uri, { mimeType: "image/png", dialogTitle: "Share your ValuIQ find" });
+    } catch {
+      Alert.alert("Couldn't share", "Something went wrong creating the share image. Try again.");
+    } finally {
+      setSharingImage(false);
+    }
+  }
   useEffect(() => {
     let alive = true;
     setOracle(null);
@@ -304,6 +327,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           onNext={() => { advanceTour && advanceTour("history"); onNavigate("history"); }}
           onSkip={() => skipTour && skipTour()}
         />
+        {/* Off-screen branded card, captured (not displayed) when sharing as an image */}
+        <View style={{ position: "absolute", top: 0, left: -9999 }} pointerEvents="none">
+          <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1, result: "tmpfile" }}>
+            <ShareCard result={result} oracle={oracle} photoBase64={photos[0]} />
+          </ViewShot>
+        </View>
         {/* Nav */}
         <View style={s.nav}>
           <TouchableOpacity onPress={() => setStep("review")} style={s.navBack}>
@@ -707,6 +736,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                      title="My ValuIQ Find"
                      compact
                    />
+                   <TouchableOpacity
+                     style={[s.shareImageBtn, sharingImage && { opacity: 0.6 }]}
+                     disabled={sharingImage}
+                     activeOpacity={0.85}
+                     onPress={shareResultImage}
+                   >
+                     {sharingImage ? (
+                       <ActivityIndicator color={C.green} size="small" />
+                     ) : (
+                       <Text style={s.shareImageBtnText}>Share result as image</Text>
+                     )}
+                   </TouchableOpacity>
                    {result.decision === "BUY" && (result.netProfit || 0) >= 20 && (
                      <TouchableOpacity
                        style={s.communityShareBtn}
@@ -958,6 +999,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
 const s = StyleSheet.create({
   communityShareBtn: { marginTop: 10, backgroundColor: C.greenBg, borderWidth: 1.5, borderColor: C.greenBorder, borderRadius: 12, paddingVertical: 13, alignItems: "center" },
+  shareImageBtn: { marginTop: 10, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 12, paddingVertical: 13, alignItems: "center", justifyContent: "center", minHeight: 46 },
+  shareImageBtnText: { color: C.green, fontSize: 14, fontWeight: "800" },
   communityShareTxt: { color: C.green, fontSize: 14.5, fontWeight: "800" },
   safe:           { flex: 1, backgroundColor: C.bg },
   center:         { flex: 1, alignItems: "center", justifyContent: "center", padding: 28 },
