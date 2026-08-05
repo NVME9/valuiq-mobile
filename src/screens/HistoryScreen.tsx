@@ -129,6 +129,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
     setRerunning(false);
   }
   const loadData = useCallback(async () => {
+    if (!token) { setLoading(false); return; }
     try {
       const [scanRes, thriftRes, specRes] = await Promise.all([
         fetch(`${API_BASE}/api/scan-history?token=${token}&type=scan&limit=50`),
@@ -146,7 +147,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
     setRefreshing(false);
   }, [token]);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [token]);
 
   // Reset selection when switching tabs or leaving select mode
   useEffect(() => { setSelected({}); setExpanded(null); }, [tab]);
