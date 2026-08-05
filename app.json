@@ -50,9 +50,16 @@
       "expo-image-picker",
       "expo-local-authentication",
       "expo-web-browser",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "expo-updates"
     ],
     "scheme": "valuiq",
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/8f5ddfbb-4b97-497e-8249-71cdf1b6811c"
+    },
     "extra": {
       "eas": {
         "projectId": "8f5ddfbb-4b97-497e-8249-71cdf1b6811c"

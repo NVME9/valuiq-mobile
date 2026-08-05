@@ -1,40 +1,43 @@
-﻿{
-    "cli":  {
-                "version":  ">= 12.0.0",
-                appVersionSource: "remote"
-            },
-    "build":  {
-                  "development":  {
-                                      "developmentClient":  true,
-                                      "distribution":  "internal",
-                                      "ios":  {
-                                                  "simulator":  false,
-                                                  "resourceClass":  "m-medium"
-                                              }
-                                  },
-                  "preview":  {
-                                  "distribution":  "internal",
-                                  "ios":  {
-                                              "resourceClass":  "m-medium",
-                                              "image":  "macos-sequoia-15.4-xcode-16.3"
-                                          },
-                                  "env":  {
-                                              "EXPO_USE_HERMES":  "0"
-                                          }
-                              },
-                  "production":  {
-                                     "ios":  {
-                                                 "resourceClass":  "m-medium"
-                                             },
-                                     "autoIncrement":  true
-                                 }
-              },
-    "submit":  {
-                   "production":  {
-                                      "ios":  {
-                                                  "ascAppId":  "6772601131",
-                                                  "appleTeamId":  "45THXG6KRC"
-                                              }
-                                  }
-               }
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "ios": {
+        "simulator": false,
+        "resourceClass": "m-medium"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview",
+      "ios": {
+        "resourceClass": "m-medium",
+        "image": "macos-sequoia-15.4-xcode-16.3"
+      },
+      "env": {
+        "EXPO_USE_HERMES": "0"
+      }
+    },
+    "production": {
+      "channel": "production",
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "6772601131",
+        "appleTeamId": "45THXG6KRC"
+      }
+    }
+  }
 }
