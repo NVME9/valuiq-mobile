@@ -314,6 +314,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const isPass          = verdict === "PASS";
     const specialtyMatch  = matchSpecialtyCategory(result.category, result.itemName || result.item_name);
 
+    // Single source of truth for profit + ROI: whichever number is actually
+    // shown as the hero (Oracle real/est profit when present, else the
+    // lens's own netProfit), paired with the same buyTarget. Every ROI
+    // display on this screen reads from this pairing instead of mixing lens
+    // netProfit with Oracle medianProfit, so profit and ROI always reconcile.
+    const oraclePred    = oracle?.prediction;
+    const oracleProfit  = oraclePred
+      ? Number(oracle.dataMode === "crowd-led" ? oraclePred.medianProfit : oraclePred.estProfit)
+      : NaN;
+    const heroProfit     = !isNaN(oracleProfit) ? oracleProfit : (Number(result.netProfit) || 0);
+    const heroBuyTarget  = Number(result.buyTarget) || 0;
+    const heroRoi         = heroBuyTarget > 0
+      ? Math.round((heroProfit / heroBuyTarget) * 100)
+      : (Number(result.roi) || 0);
+
     return (
       <SafeAreaView style={s.safe}>
         <StatusBar barStyle="light-content"/>
@@ -352,8 +367,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             <TouchableOpacity
               style={s.editTopBtn}
               onPress={()=>{
+                // Deliberately NOT clearing result here - the review screen
+                // never reads it, and keeping it around is what lets that
+                // screen's back button tell "editing an existing result"
+                // apart from "starting a fresh scan" and return to it.
                 setDescription(result.itemName||"");
-                setResult(null);
                 setStep("review");
               }}
               activeOpacity={0.8}
@@ -490,6 +508,24 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   </Text>
                 </View>
               )}
+
+              {/* Share result as image - promoted out of the collapsed Share &
+                  Content section since it's the highest-intent share action */}
+              <TouchableOpacity
+                style={{backgroundColor:C.green,borderRadius:14,paddingVertical:15,marginBottom:12,alignItems:"center",justifyContent:"center",flexDirection:"row",gap:8,minHeight:52,opacity:sharingImage?0.6:1}}
+                disabled={sharingImage}
+                activeOpacity={0.85}
+                onPress={shareResultImage}
+              >
+                {sharingImage ? (
+                  <ActivityIndicator color={C.greenDark} size="small" />
+                ) : (
+                  <>
+                    <Text style={{fontSize:16}}>{"📷"}</Text>
+                    <Text style={{color:C.greenDark,fontSize:15,fontWeight:"900"}}>Share result as image</Text>
+                  </>
+                )}
+              </TouchableOpacity>
 
               {/* SOFT NOTIFICATION ASK - only after a BUY, in context, never a cold OS prompt */}
               {pendingCheckIn && !checkInAsked && (
@@ -690,39 +726,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               </TouchableOpacity>
               {showShare && (
                 <View style={[s.infoCard,{marginTop:-8,borderTopLeftRadius:0,borderTopRightRadius:0}]}>
-                  {result.decision==="BUY" && photos[0] && (
-                    <View style={s.shareCard}>
-                      <Image source={{uri:`data:image/jpeg;base64,${photos[0]}`}}
-                        style={s.shareCardImg} resizeMode="cover"/>
-                      <View style={s.shareCardBody}>
-                        <Text style={s.shareCardItem} numberOfLines={1}>{result.itemName||result.item_name||"Item"}</Text>
-                        <Text style={s.shareHeroLbl}>PROFIT POTENTIAL</Text>
-                        <Text style={s.shareHeroVal}>+${Math.round(result.netProfit||0)}</Text>
-                        <View style={s.shareCardRow}>
-                          <View style={s.shareCardStat}>
-                            <Text style={s.shareStatVal}>{Math.round(result.roi||0)}%</Text>
-                            <Text style={s.shareStatLbl}>ROI</Text>
-                          </View>
-                          <View style={s.shareCardStat}>
-                            <Text style={s.shareStatVal}>${Math.round(result.sellPrice||0)}</Text>
-                            <Text style={s.shareStatLbl}>SELLS FOR</Text>
-                          </View>
-                          <View style={s.shareCardStat}>
-                            <Text style={s.shareStatVal}>${Math.round(result.buyTarget||result.suggestedBuy||0)}</Text>
-                            <Text style={s.shareStatLbl}>BUY UNDER</Text>
-                          </View>
-                        </View>
-                        <View style={s.shareBrandRow}>
-                          <Text style={s.shareBrandName}>ValuIQ</Text>
-                          <Text style={s.shareBrandTag}>Scan it. Know it. Flip it.</Text>
-                        </View>
-                      </View>
-                    </View>
-                  )}
                    <ShareButton
                      message={
                        (result?.decision==="BUY"
-                         ? " Just found a $" + Math.round(result.netProfit||0) + " profit flip! " + (result.itemName||"Item") + " - " + Math.round(result.roi||0) + "% ROI on " + (result.bestPlatform||"eBay")
+                         ? " Just found a $" + Math.round(heroProfit) + " profit flip! " + (result.itemName||"Item") + " - " + heroRoi + "% ROI on " + (result.bestPlatform||"eBay")
                          : result?.decision==="WATCH"
                          ? " Watching this one... " + (result.itemName||"Item")
                          : " ValuIQ saved me from a bad buy - " + (result?.itemName||"Item") + " doesn't pencil out"
@@ -731,18 +738,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                      title="My ValuIQ Find"
                      compact
                    />
-                   <TouchableOpacity
-                     style={[s.shareImageBtn, sharingImage && { opacity: 0.6 }]}
-                     disabled={sharingImage}
-                     activeOpacity={0.85}
-                     onPress={shareResultImage}
-                   >
-                     {sharingImage ? (
-                       <ActivityIndicator color={C.green} size="small" />
-                     ) : (
-                       <Text style={s.shareImageBtnText}>Share result as image</Text>
-                     )}
-                   </TouchableOpacity>
                    {result.decision === "BUY" && (result.netProfit || 0) >= 20 && (
                      <TouchableOpacity
                        style={s.communityShareBtn}
@@ -796,7 +791,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         onSkip={() => skipTour && skipTour()}
       />
       <View style={s.nav}>
-        <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
+        {/* result survives here only when this screen was reached via the
+            Edit & Rerun pencil - route back to it instead of wiping state
+            and dropping to the camera like a fresh scan would. */}
+        <TouchableOpacity onPress={() => (result ? setStep("result") : reset())} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
         <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
         <Text style={s.logoText}>ValuIQ</Text>
       </View>
@@ -1144,19 +1142,6 @@ veloSub: { fontSize: 12, color: C.text3, marginTop: 3 },
   refBtn:    { backgroundColor:"#a8e63d", borderRadius:10, padding:11, alignItems:"center" as any },
   refBtnTxt: { color:"#0f1500", fontSize:13, fontWeight:"900" as any },
 
-  shareCard:        { backgroundColor:C.surface, borderWidth:1.5, borderColor:C.greenBorder, borderRadius:16, overflow:"hidden" as any, marginBottom:10 },
-  shareCardImg:     { width:"100%" as any, height:200 },
-  shareCardBody:    { padding:14 },
   shareCardBadge:   { backgroundColor:C.green, borderRadius:100, paddingHorizontal:12, paddingTop:16, paddingBottom:10, alignSelf:"flex-start" as any, marginBottom:8 },
   shareCardBadgeTxt:{ color:C.greenDark, fontSize:10, fontWeight:"900" as any },
-  shareCardItem:    { color:C.text1, fontSize:16, fontWeight:"800" as any, marginBottom:10 },
-  shareHeroLbl:     { color:C.green, fontSize:11, fontWeight:"900" as any, letterSpacing:1.5, marginBottom:2 },
-  shareHeroVal:     { color:C.green, fontSize:52, fontWeight:"900" as any, marginBottom:12, letterSpacing:-1 },
-  shareBrandRow:    { flexDirection:"row" as any, alignItems:"center" as any, justifyContent:"space-between" as any, marginTop:12, paddingTop:12, borderTopWidth:1, borderTopColor:C.border },
-  shareBrandName:   { color:C.text1, fontSize:18, fontWeight:"900" as any, letterSpacing:0.5 },
-  shareBrandTag:    { color:C.text4, fontSize:11, fontWeight:"600" as any },
-  shareCardRow:     { flexDirection:"row" as any, gap:8, marginBottom:8 },
-  shareCardStat:    { flex:1, backgroundColor:C.bg, borderRadius:8, padding:8, alignItems:"center" as any },
-  shareStatVal:     { color:C.green, fontSize:16, fontWeight:"900" as any },
-  shareStatLbl:     { color:C.text4, fontSize:8, fontWeight:"700" as any, textTransform:"uppercase" as any, marginTop:2 },
   shareCardFooter:  { color:C.text4, fontSize:10, textAlign:"center" as any } });
