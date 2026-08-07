@@ -433,9 +433,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     <Text style={s.oracleHeroBadge} numberOfLines={1}>{"\uD83D\uDD2E PROFIT ORACLE"}</Text>
                     <Text
                       numberOfLines={1}
-                      style={oracle.dataMode === "crowd-led" ? s.oracleHeroLive : s.oracleHeroEst}
+                      style={oracle.prediction.medianProfitIsReal ? s.oracleHeroLive : s.oracleHeroEst}
                     >
-                      {oracle.dataMode === "crowd-led" ? "\u25CF REAL DATA" : "ESTIMATE"}
+                      {oracle.prediction.medianProfitIsReal
+                        ? "\u25CF REAL DATA"
+                        : (result.priceData?.isRealData && result.priceData?.count
+                            ? `Based on ${result.priceData.count} listings`
+                            : "ESTIMATE")}
                     </Text>
                   </View>
 
@@ -454,6 +458,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     const profOk = prof != null && !isNaN(profNum);
                     const profTxt = profOk ? (profNum < 0 ? "-$" + Math.abs(profNum) : "$" + profNum) : "\u2014";
                     const profCol = profOk ? (profNum < 0 ? C.red : C.green) : C.text4;
+                    const isRealProfit = oracle.prediction.medianProfitIsReal === true;
+                    // medianDaysLabel is always present now (real "~Nd" or an
+                    // honest "not enough data yet") - never fall back to
+                    // velocity.estDaysToSale, which is a bucketed guess, not
+                    // a real measurement.
+                    const daysLabel = oracle.prediction.medianDaysLabel || "not enough data yet";
                     return (
                       <>
                         <Text style={s.oracleHeroTag}>Don't pay more than</Text>
@@ -463,39 +473,29 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                         <View style={s.oracleHeroStats}>
                           <View style={s.oracleHeroStat}>
                             <Text style={[s.oracleHeroVal,{color:profCol}]} numberOfLines={1} adjustsFontSizeToFit>{profTxt}</Text>
-                            <Text style={s.oracleHeroLbl}>{oracle.dataMode === "crowd-led" ? "real profit" : "est. profit"}</Text>
+                            <Text style={s.oracleHeroLbl}>{isRealProfit ? "real profit" : "est. profit"}</Text>
                           </View>
                           {oracle.dataMode === "crowd-led" ? (
-                            <>
-                              {oracle.prediction.sellRate != null && (
-                                <View style={s.oracleHeroStat}>
-                                  <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>{oracle.prediction.sellRate}%</Text>
-                                  <Text style={s.oracleHeroLbl}>actually sold</Text>
-                                </View>
-                              )}
-                              {oracle.prediction.medianDays != null && (
-                                <View style={s.oracleHeroStat}>
-                                  <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>~{oracle.prediction.medianDays}d</Text>
-                                  <Text style={s.oracleHeroLbl}>to sell</Text>
-                                </View>
-                              )}
-                            </>
+                            oracle.prediction.sellRate != null && (
+                              <View style={s.oracleHeroStat}>
+                                <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>{oracle.prediction.sellRate}%</Text>
+                                <Text style={s.oracleHeroLbl}>actually sold</Text>
+                              </View>
+                            )
                           ) : (
-                            <>
-                              {resale != null && (
-                                <View style={s.oracleHeroStat}>
-                                  <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>${resale}</Text>
-                                  <Text style={s.oracleHeroLbl}>sells for</Text>
-                                </View>
-                              )}
-                              {result.velocity && result.velocity.estDaysToSale ? (
-                                <View style={s.oracleHeroStat}>
-                                  <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>~{result.velocity.estDaysToSale}d</Text>
-                                  <Text style={s.oracleHeroLbl}>to sell</Text>
-                                </View>
-                              ) : null}
-                            </>
+                            resale != null && (
+                              <View style={s.oracleHeroStat}>
+                                <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>${resale}</Text>
+                                <Text style={s.oracleHeroLbl}>sells for</Text>
+                              </View>
+                            )
                           )}
+                          <View style={s.oracleHeroStat}>
+                            <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>
+                              {oracle.prediction.medianDays != null ? `~${oracle.prediction.medianDays}d` : daysLabel}
+                            </Text>
+                            <Text style={s.oracleHeroLbl}>to sell</Text>
+                          </View>
                         </View>
                       </>
                     );
