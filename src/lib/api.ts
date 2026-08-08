@@ -204,6 +204,24 @@ export async function scanBarcode(token: string, upc: string): Promise<any> {
   const r = await fetch(`${API_BASE}/api/lens`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, upc}) });
   return r.json();
 }
+export async function analyzeSales(token: string, csvText: string, targetProfit?: number): Promise<any> {
+  let r: Response;
+  try {
+    r = await fetch(`${API_BASE}/api/analyze-sales`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userToken: token, csvText, targetProfit }),
+    });
+  } catch {
+    return { success: false, error: "Network error. Check your connection and try again." };
+  }
+  const text = await r.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { success: false, error: r.status === 504 || r.status === 502 ? "Analysis timed out. Try a smaller file." : "Analysis failed. Try again." };
+  }
+}
 export async function priceBattle(token: string, itemName: string, brand: string, category: string, condition: string, buyPrice: number): Promise<any> {
   const r = await fetch(`${API_BASE}/api/price-battle`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, itemName, brand, category, condition, buyPrice}) });
   return r.json();

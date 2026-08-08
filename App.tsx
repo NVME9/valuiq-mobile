@@ -12,6 +12,7 @@ import ScannerScreen from "./src/screens/ScannerScreen";
 import DashboardScreen from "./src/screens/DashboardScreen";
 import ThriftRunScreen from "./src/screens/ThriftRunScreen";
 import SpecialtyScreen from "./src/screens/SpecialtyScreen";
+import ImportSalesScreen from "./src/screens/ImportSalesScreen";
 import DeathPileScreen from "./src/screens/DeathPileScreen";
 import CommunityScreen from "./src/screens/CommunityScreen";
 import ProfileScreen from "./src/screens/ProfileScreen";
@@ -45,7 +46,7 @@ export type Screen =
   "scanner"|"dashboard"|"thrift-run"|
   "specialty"|"manifest"|"deathpile"|"community"|
   "profile"|"relist"|"hot-now"|"arbitrage"|"upgrade"|
-  "bundle"|"alerts"|"leaderboard"|"inventory"|"profit-tracker"|"deal-hunter"|"ai-coach"|"history"|"faq"|"admin"|"titan";
+  "bundle"|"alerts"|"leaderboard"|"inventory"|"profit-tracker"|"deal-hunter"|"ai-coach"|"history"|"faq"|"admin"|"titan"|"import-sales";
 
 const { height } = Dimensions.get("window");
 
@@ -309,6 +310,7 @@ export default function App() {
     "dashboard":    <DashboardScreen {...props} />,
     "thrift-run":   <ThriftRunScreen {...props} />,
     "specialty":    <SpecialtyScreen {...props} />,
+    "import-sales": <ImportSalesScreen {...props} />,
     "deathpile":    <DeathPileScreen {...props} />,
     "community":    <CommunityScreen {...props} />,
     "profile":      <ProfileScreen {...props} />,
