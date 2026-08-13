@@ -7,6 +7,8 @@ import * as ImagePicker from "expo-image-picker";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import Coachmark from "../components/Coachmark";
+import LogSaleModal from "../components/LogSaleModal";
+import { toPendingScan } from "../lib/saleCapture";
 import { API_BASE, rerunScan, updateScan, updateThriftItem } from "../lib/api";
 
 interface Props {
@@ -44,6 +46,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
   const [editThriftItem, setEditThriftItem] = useState<{runId:string; itemId:string}|null>(null);
   const [editPhotos, setEditPhotos] = useState<string[]>([]);
   const [rerunning, setRerunning]   = useState(false);
+  const [logSaleScan, setLogSaleScan] = useState<any|null>(null);
 
   function openEditor(scan: any) {
     setEditingId(scan.id);
@@ -490,17 +493,24 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                             </View>
                           </View>
                         ) : (
-                          <View style={s.expandedActions}>
-                            <TouchableOpacity style={[s.actionBtn,{flex:1}]} onPress={() => openEditor(scan)}>
-                              <Text style={s.actionBtnTxt}>Edit & Re-run</Text>
+                          <>
+                            {/* Primary way to log a sale - available on ANY scan, any
+                                time, not gated behind the aging-scan dashboard prompt. */}
+                            <TouchableOpacity style={s.soldBtn} onPress={() => setLogSaleScan(scan)}>
+                              <Text style={s.soldBtnTxt}>I sold this →</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity
-                              style={[s.actionBtn, {backgroundColor:"#ff5a5a15", borderColor:"#ff5a5a30"}]}
-                              onPress={() => deleteItem(scan.id, "scan", scan.item_name||"Item")}
-                            >
-                              <Text style={[s.actionBtnTxt, {color:C.red}]}>Delete</Text>
-                            </TouchableOpacity>
-                          </View>
+                            <View style={s.expandedActions}>
+                              <TouchableOpacity style={[s.actionBtn,{flex:1}]} onPress={() => openEditor(scan)}>
+                                <Text style={s.actionBtnTxt}>Edit & Re-run</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={[s.actionBtn, {backgroundColor:"#ff5a5a15", borderColor:"#ff5a5a30"}]}
+                                onPress={() => deleteItem(scan.id, "scan", scan.item_name||"Item")}
+                              >
+                                <Text style={[s.actionBtnTxt, {color:C.red}]}>Delete</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </>
                         )}
                       </View>
                     )}
@@ -717,6 +727,13 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
           )}
         </ScrollView>
       )}
+
+      <LogSaleModal
+        visible={!!logSaleScan}
+        token={token}
+        scan={logSaleScan ? toPendingScan(logSaleScan) : null}
+        onClose={() => { setLogSaleScan(null); loadData(); }}
+      />
     </SafeAreaView>
   );
 }
@@ -765,6 +782,8 @@ const s = StyleSheet.create({
   expandedVal:   { fontSize:16, fontWeight:"800" },
   expandedLbl:   { color:C.text4, fontSize:10, marginTop:2 },
   expandedActions:{ flexDirection:"row", gap:8 },
+  soldBtn:       { backgroundColor:C.green, borderRadius:10, paddingVertical:13, alignItems:"center", marginBottom:8 },
+  soldBtnTxt:    { color:C.greenDark, fontSize:14, fontWeight:"800" },
   thriftItem:    { flexDirection:"row", alignItems:"center", gap:10, paddingVertical:8, borderBottomWidth:1, borderBottomColor:C.border },
   thriftThumb:   { width:44, height:44, borderRadius:8, flexShrink:0 },
   editPanel:     { marginTop:4 },

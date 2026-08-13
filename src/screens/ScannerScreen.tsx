@@ -15,6 +15,8 @@ import ShareButton from "../components/ShareButton";
 import ShareCard from "../components/ShareCard";
 import { API_BASE, scanImage, scanBarcode , getProfitOracle, shareWin } from "../lib/api";
 import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notifications";
+import { toPendingScan } from "../lib/saleCapture";
+import LogSaleModal from "../components/LogSaleModal";
 import * as Notifications from "expo-notifications";
 import { matchSpecialtyCategory } from "./SpecialtyScreen";
 
@@ -55,6 +57,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // Soft notification ask (never fire Apple's cold prompt un-primed)
   const [pendingCheckIn, setPendingCheckIn] = useState<{scanId:string; itemName:string}|null>(null);
   const [checkInAsked, setCheckInAsked] = useState(false);
+  const [loggingSale, setLoggingSale] = useState(false);
   async function acceptCheckIn() {
     const p = pendingCheckIn;
     setPendingCheckIn(null); setCheckInAsked(true);
@@ -527,6 +530,19 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 )}
               </TouchableOpacity>
 
+              {/* User-initiated sale logging, available the instant a scan is
+                  saved - not gated behind the aging-scan dashboard prompt.
+                  Needs a real saved row (result.id) to log against. */}
+              {result?.id ? (
+                <TouchableOpacity
+                  style={{backgroundColor:C.surface,borderRadius:14,paddingVertical:15,marginBottom:12,alignItems:"center",justifyContent:"center",borderWidth:1,borderColor:C.borderHigh}}
+                  activeOpacity={0.85}
+                  onPress={() => setLoggingSale(true)}
+                >
+                  <Text style={{color:C.green,fontSize:15,fontWeight:"800"}}>I sold this →</Text>
+                </TouchableOpacity>
+              ) : null}
+
               {/* SOFT NOTIFICATION ASK - only after a BUY, in context, never a cold OS prompt */}
               {pendingCheckIn && !checkInAsked && (
                 <View style={s.askCard}>
@@ -772,6 +788,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           )}
 
         </ScrollView>
+
+        <LogSaleModal
+          visible={loggingSale}
+          token={token}
+          scan={result?.id ? toPendingScan(result) : null}
+          onClose={() => setLoggingSale(false)}
+        />
       </SafeAreaView>
     );
   }

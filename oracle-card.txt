@@ -1,0 +1,30 @@
+﻿
+              {/* PROFIT ORACLE Ã¢â‚¬â€ real-outcome prediction */}
+              {oracle && oracle.prediction && (
+                <View style={s.oracleCard}>
+                  <Text style={s.oracleLabel}>
+                    {oracle.dataMode === "crowd-led" ? "\ud83d\udd2e PROFIT ORACLE \u00b7 REAL DATA" : "\ud83d\udd2e PROFIT ORACLE"}
+                  </Text>
+                  <Text style={s.oracleHead}>{oracle.prediction.headline}</Text>
+                  {oracle.dataMode === "crowd-led" && (
+                    <View style={s.oracleStats}>
+                      {oracle.prediction.sellRate != null && (
+                        <View style={s.oracleStat}><Text style={s.oracleVal}>{oracle.prediction.sellRate}%</Text><Text style={s.oracleLbl}>sold</Text></View>
+                      )}
+                      {oracle.prediction.medianProfit != null && (
+                        <View style={s.oracleStat}><Text style={[s.oracleVal,{color:C.green}]}>${oracle.prediction.medianProfit}</Text><Text style={s.oracleLbl}>real profit</Text></View>
+                      )}
+                      {oracle.prediction.medianDays != null && (
+                        <View style={s.oracleStat}><Text style={s.oracleVal}>~{oracle.prediction.medianDays}d</Text><Text style={s.oracleLbl}>to sell</Text></View>
+                      )}
+                    </View>
+                  )}
+                  {oracle.prediction.overpayWarning ? (
+                    <Text style={s.oracleWarn}>\u26a0\ufe0f {oracle.prediction.overpayWarning}</Text>
+                  ) : null}
+                </View>
+              )}
+
+              {/* Key numbers - compact row */}
+              <View style={s.numbersCard}>
+                {([

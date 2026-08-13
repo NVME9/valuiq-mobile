@@ -146,6 +146,30 @@ export function defaultDaysToSale(createdAt?: string): number {
   return Math.max(1, Math.round((Date.now() - new Date(createdAt).getTime()) / 86400000));
 }
 
+// Turns EITHER shape a caller might have on hand into the PendingScan shape
+// SaleCaptureCard needs - a raw /api/scan-history row (snake_case: item_name,
+// net_profit, sell_price, best_platform, created_at - what History's list
+// and the aging-prompt queue both already use) OR a fresh /api/lens response
+// (camelCase: itemName, netProfit, sellPrice, bestPlatform, no created_at
+// yet since it was never saved-and-reloaded - defaults to "now", which is
+// correct: a just-scanned item genuinely was listed today). One helper so
+// History and the scan-result screen don't each reimplement this mapping.
+export function toPendingScan(row: any): PendingScan {
+  const createdAt = row.created_at || new Date().toISOString();
+  return {
+    id: row.id,
+    item_name: row.item_name || row.itemName || "Item",
+    brand: row.brand,
+    category: row.category,
+    image_url: row.image_url,
+    net_profit: row.net_profit ?? row.netProfit,
+    sell_price: row.sell_price ?? row.sellPrice,
+    best_platform: row.best_platform ?? row.bestPlatform,
+    created_at: createdAt,
+    daysListed: Math.max(1, Math.round((Date.now() - new Date(createdAt).getTime()) / 86400000)),
+  };
+}
+
 // User dismissed without answering -> set capture_prompted_at so it goes quiet for the cooldown.
 export async function snoozeCapture(token: string, scanId: string): Promise<boolean> {
   try {

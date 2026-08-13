@@ -17,10 +17,15 @@ interface Props {
   scan: PendingScan;
   channel?: "push" | "in_app";
   onDone: (scanId: string, outcome: SaleOutcome | "dismissed") => void;
+  // Defaults to "ask" (the aging-scan prompt's "Did it sell?" queue, unchanged).
+  // User-initiated logging (History's/the result screen's "I sold this ->")
+  // already KNOWS the answer - starting there skips the redundant question
+  // and keeps the flow at 2 taps total ("I sold this" + "Save").
+  initialStage?: "ask" | "price";
 }
 
-export default function SaleCaptureCard({ token, scan, channel = "in_app", onDone }: Props) {
-  const [stage, setStage] = useState<"ask" | "price">("ask");
+export default function SaleCaptureCard({ token, scan, channel = "in_app", onDone, initialStage = "ask" }: Props) {
+  const [stage, setStage] = useState<"ask" | "price">(initialStage);
   const [price, setPrice] = useState("");
   const [days, setDays] = useState(() => String(defaultDaysToSale(scan.created_at)));
   const [saving, setSaving] = useState(false);

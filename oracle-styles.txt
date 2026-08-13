@@ -1,0 +1,21 @@
+﻿
+LineNumber Line                                                                                               
+---------- ----                                                                                               
+       360                 <View style={s.oracleCard}>                                                        
+       361                   <Text style={s.oracleLabel}>                                                     
+       364                   <Text style={s.oracleHead}>{oracle.prediction.headline}</Text>                   
+       366                     <View style={s.oracleStats}>                                                   
+       368                         <View style={s.oracleStat}><Text style={s.oracleVal}>{oracle.prediction....
+       371                         <View style={s.oracleStat}><Text style={[s.oracleVal,{color:C.green}]}>$...
+       374                         <View style={s.oracleStat}><Text style={s.oracleVal}>~{oracle.prediction...
+       379                     <Text style={s.oracleWarn}>\u26a0\ufe0f {oracle.prediction.overpayWarning}</...
+       929     oracleCard: { backgroundColor: "#1a1424", borderColor: "#b066ff40", borderWidth: 1, borderRa...
+       930   oracleLabel: { color: "#b066ff", fontSize: 11, fontWeight: "800", letterSpacing: 0.5, marginBo...
+       931   oracleHead: { color: C.text1, fontSize: 14, fontWeight: "700", lineHeight: 20, marginBottom: 8 },
+       932   oracleStats: { flexDirection: "row", gap: 20, marginBottom: 6 },                                 
+       933   oracleStat: {},                                                                                  
+       934   oracleVal: { color: C.text1, fontSize: 18, fontWeight: "800" },                                  
+       935   oracleLbl: { color: C.text4, fontSize: 11, marginTop: 1 },                                       
+       936   oracleWarn: { color: C.yellow, fontSize: 13, fontWeight: "600", marginTop: 4 },                  
+
+

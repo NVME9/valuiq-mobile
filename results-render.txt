@@ -1,0 +1,200 @@
+﻿            <Text style={s.navBackText}>{"\u2039"}</Text>
+          </TouchableOpacity>
+          <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
+          <Text style={s.logoText}>ValuIQ</Text>
+          <TouchableOpacity onPress={reset} style={[s.navBtn,{marginLeft:"auto" as any}]}>
+            <Text style={s.navBtnText}>New Scan</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,paddingBottom:60}} showsVerticalScrollIndicator={false}>
+
+          {/* - VERDICT CARD - */}
+          <View style={[s.verdictCard,{borderColor:(hasNoData?C.border:dc)+"40",backgroundColor:(hasNoData?C.surface:dc)+"10"}]}>
+            {photos[0] && (
+              <Image source={{uri:`data:image/jpeg;base64,${photos[0]}`}}
+                style={{width:"100%",height:160,borderRadius:10,marginBottom:12}} resizeMode="cover"/>
+            )}
+            <Text style={[s.verdictText,{color:hasNoData?C.text3:dc,fontSize:42,lineHeight:48}]} numberOfLines={1} adjustsFontSizeToFit>
+              {verdict === "BUY" ? " BUY IT" : verdict === "WATCH" ? " WATCH IT" : verdict === "UNKNOWN" ? "- UNKNOWN" : " PASS"}
+            </Text>
+            <Text style={s.itemName} numberOfLines={2}>{result.itemName || result.item_name || "Unknown Item"}</Text>
+            {result.category ? <Text style={s.itemMeta}>{result.category}{result.condition ? " - " + (result.condition) + "" : ""}</Text> : null}
+          </View>
+
+          {/* - UNKNOWN: need more info - */}
+          {hasNoData && (
+            <View style={s.noDataCard}>
+              <Text style={{color:C.text1,fontSize:15,fontWeight:"700",textAlign:"center",marginBottom:8}}>Need More Information</Text>
+              <Text style={{color:C.text3,fontSize:13,textAlign:"center",lineHeight:20,marginBottom:16}}>
+                Try scanning again with the brand name, model number, or a clearer photo for accurate pricing.
+              </Text>
+              <TouchableOpacity style={[s.navBtn,{alignSelf:"center",paddingHorizontal:24,paddingTop: 16, paddingBottom: 10}]} onPress={() => setStep("camera")}>
+                <Text style={s.navBtnText}> Scan Again</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* - PROFIT (only when we have data) - */}
+          {!hasNoData && (
+            <>
+              {/* Data confidence */}
+              {hasGoodData && result.priceData && result.priceData.isRealData ? (
+                <TouchableOpacity style={s.goodBanner} onPress={()=>Linking.openURL(result.priceData.ebaySearchUrl)}>
+                  <Text></Text>
+                  <View style={{flex:1}}>
+                    <Text style={s.goodBannerTitle}>{result.priceData.count} real sold listings</Text>
+                    <Text style={s.goodBannerSub}>eBay avg ${result.priceData.avgPrice} - ${result.priceData.minPrice}-${result.priceData.maxPrice}</Text>
+                  </View>
+                  <Text style={{color:C.green}}>{'>'}</Text>
+                </TouchableOpacity>
+              ) : hasLimitedData ? (
+                <View style={s.limitedBanner}>
+                  <Text></Text>
+                  <Text style={s.limitedText}>Estimated - limited data. Verify before buying.</Text>
+                </View>
+              ) : null}
+
+              {/* AI tier disclosure */}
+              {plan === "free" && !hasNoData && (
+                <View style={{flexDirection:"row",alignItems:"center",gap:6,backgroundColor:C.surface,borderRadius:8,padding: 8 as any,marginBottom:8,borderWidth:1,borderColor:C.border}}>
+                  <Text style={{fontSize:12}}></Text>
+                  <Text style={{color:C.text4,fontSize:11,flex:1}}>Standard AI analysis. Upgrade for deeper market intelligence.</Text>
+                </View>
+              )}
+
+              {/* Profit number */}
+              <View style={[s.profitCard,{borderColor:isProfit?C.green+"25":C.red+"25"}]}>
+                <Text style={s.profitLabel}>{hasLimitedData?"EST. PROFIT AFTER FEES":"YOUR PROFIT AFTER FEES"}</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={[s.profitAmount,{color:isProfit?C.green:C.red,fontSize:44,opacity:hasLimitedData?0.8:1}]}>
+                  {isProfit?"+":""}${Math.abs(result.netProfit||0).toFixed(2)}
+                </Text>
+                <Text style={s.profitSub}>
+                  Sell ${result.sellPrice} on {result.bestPlatform} - {result.roi}% ROI
+                  {hasLimitedData?" - verify before buying":""}
+                </Text>
+              </View>
+
+              {/* VELOCITY ENGINE badge */}
+              {result.velocity && result.velocity.tier !== "unknown" && (() => {
+                const vt = result.velocity.tier;
+                const vColor = vt === "fast" ? C.green : vt === "steady" ? C.yellow : C.orange;
+                const vLabel = vt === "fast" ? "Fast mover" : vt === "steady" ? "Steady seller" : "Slow mover";
+                return (
+                  <View style={[s.veloBadge, { borderColor: vColor + "40", backgroundColor: vColor + "12" }]}>
+                    <Text style={[s.veloText, { color: vColor }]}>
+                      {vLabel}{result.velocity.estDaysToSale ? "  -  ~" + result.velocity.estDaysToSale + " days to sell" : ""}
+                    </Text>
+                    {result.velocity.sellThrough !== null && (
+                      <Text style={s.veloSub}>{result.velocity.sellThrough}% of listings sell{result.velocity.soldCount ? " (" + result.velocity.soldCount + " recent sales)" : ""}</Text>
+                    )}
+                  </View>
+                );
+              })()}
+
+              {/* PROFIT ORACLE Ã¢â‚¬â€ real-outcome prediction */}
+              {oracle && oracle.prediction && (
+                <View style={s.oracleHero}>
+                  <View style={s.oracleHeroTop}>
+                    <Text style={s.oracleHeroBadge}>{"\uD83D\uDD2E  PROFIT ORACLE"}</Text>
+                    <Text style={oracle.dataMode === "crowd-led" ? s.oracleHeroLive : s.oracleHeroEst}>
+                      {oracle.dataMode === "crowd-led" ? "\u25CF REAL RESELLER DATA" : "MARKET ESTIMATE"}
+                    </Text>
+                  </View>
+                  <Text style={s.oracleHeroTag}>What resellers actually make on this</Text>
+                  {oracle.dataMode === "crowd-led" ? (
+                    <View style={s.oracleHeroStats}>
+                      {oracle.prediction.sellRate != null && (
+                        <View style={s.oracleHeroStat}><Text style={s.oracleHeroVal}>{oracle.prediction.sellRate}%</Text><Text style={s.oracleHeroLbl}>actually sold</Text></View>
+                      )}
+                      {oracle.prediction.medianProfit != null && (
+                        <View style={s.oracleHeroStat}><Text style={[s.oracleHeroVal,{color:C.green}]}>${oracle.prediction.medianProfit}</Text><Text style={s.oracleHeroLbl}>median profit</Text></View>
+                      )}
+                      {oracle.prediction.medianDays != null && (
+                        <View style={s.oracleHeroStat}><Text style={s.oracleHeroVal}>~{oracle.prediction.medianDays}d</Text><Text style={s.oracleHeroLbl}>to sell</Text></View>
+                      )}
+                    </View>
+                  ) : (
+                    <View style={s.oracleHeroStats}>
+                      {oracle.prediction.estResale != null && (
+                        <View style={s.oracleHeroStat}><Text style={s.oracleHeroVal}>${oracle.prediction.estResale}</Text><Text style={s.oracleHeroLbl}>est. resale</Text></View>
+                      )}
+                      {oracle.prediction.estProfit != null && (
+                        <View style={s.oracleHeroStat}><Text style={[s.oracleHeroVal,{color:C.green}]}>${oracle.prediction.estProfit}</Text><Text style={s.oracleHeroLbl}>est. profit</Text></View>
+                      )}
+                      {oracle.prediction.estMaxBuy != null && (
+                        <View style={s.oracleHeroStat}><Text style={s.oracleHeroVal}>${oracle.prediction.estMaxBuy}</Text><Text style={s.oracleHeroLbl}>max buy</Text></View>
+                      )}
+                    </View>
+                  )}
+                  {oracle.prediction.headline ? (
+                    <Text style={s.oracleHeroLine}>{oracle.prediction.headline}</Text>
+                  ) : null}
+                  {oracle.prediction.overpayWarning ? (
+                    <Text style={s.oracleHeroWarn}>{"\u26A0\uFE0F "}{oracle.prediction.overpayWarning}</Text>
+                  ) : null}
+                  {oracle.dataMode !== "crowd-led" && (
+                    <Text style={s.oracleHeroFoot}>Sharpens with real reseller outcomes as the community sells.</Text>
+                  )}
+                </View>
+              )}
+
+              {/* SOFT NOTIFICATION ASK - only after a BUY, in context, never a cold OS prompt */}
+              {pendingCheckIn && !checkInAsked && (
+                <View style={s.askCard}>
+                  <Text style={s.askTitle}>Want a reminder to log what this sells for?</Text>
+                  <Text style={s.askBody}>
+                    We'll check back in about 2 weeks. Logging what actually sold keeps your profit
+                    stats real - and sharpens the Oracle for everyone.
+                  </Text>
+                  <View style={s.askRow}>
+                    <TouchableOpacity style={s.askNo} onPress={declineCheckIn} activeOpacity={0.8}>
+                      <Text style={s.askNoTxt}>Not now</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.askYes} onPress={acceptCheckIn} activeOpacity={0.85}>
+                      <Text style={s.askYesTxt}>Yes, remind me</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* Key numbers - compact row */}
+              <View style={s.numbersCard}>
+                {([
+                  ["MAX TO PAY", `$${result.buyTarget||0}`, C.yellow],
+                  ["SELL FOR",   `$${result.sellPrice||0}`, C.text1],
+                  ["PLATFORM",   result.bestPlatform||"eBay", C.text1],
+                ] as [string,string,string][]).map(([label,value,color])=>(
+                  <View key={label} style={s.numberItem}>
+                    <Text style={s.numberLabel}>{label}</Text>
+                    <Text style={[s.numberValue,{color}]} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* Platform comparison - profit ranked */}
+              {result.platformBreakdown && result.platformBreakdown.length > 0 && (
+                <View style={s.infoCard}>
+                  <Text style={[s.infoLabel,{marginBottom:10}]}>BEST PLACE TO SELL</Text>
+                  {(goDeeper ? result.platformBreakdown : result.platformBreakdown.slice(0,3)).map((pb:any, i:number) => (
+                    <View key={pb.platform} style={{marginBottom:goDeeper?14:8}}>
+                      <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}}>
+                        <View style={{flexDirection:"row",alignItems:"center",gap:6}}>
+                          <View style={{width:3,height:16,borderRadius:2,backgroundColor:i===0?C.green:C.border}}/>
+                          <Text style={{color:i===0?C.text1:C.text3,fontSize:14,fontWeight:i===0?"800":"500"}}>{pb.platform}</Text>
+                          {i===0 && <Text style={{color:C.green,fontSize:9,fontWeight:"900"}}>BEST</Text>}
+                        </View>
+                        <Text style={{color:i===0?C.green:C.text2,fontSize:15,fontWeight:"800"}}>+${pb.netProfit} profit</Text>
+                      </View>
+                      {goDeeper && (
+                        <View style={{flexDirection:"row",flexWrap:"wrap",gap:10,marginTop:4,marginLeft:9}}>
+                          <Text style={{color:C.text4,fontSize:11}}>Sells ${pb.sellPrice}</Text>
+                          <Text style={{color:C.text4,fontSize:11}}>Fees {pb.feeRate}</Text>
+                          <Text style={{color:C.text4,fontSize:11}}>{pb.roi}% ROI</Text>
+                          <Text style={{color:C.text4,fontSize:11}}>Paid out {pb.payoutSpeed}</Text>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                  <TouchableOpacity onPress={()=>setGoDeeper(g=>!g)} style={{marginTop:4,paddingVertical:8,alignItems:"center"}}>
+                    <Text style={{color:C.green,fontSize:13,fontWeight:"800"}}>{goDeeper?"Show less":"Go Deeper - full breakdown"}</Text>
