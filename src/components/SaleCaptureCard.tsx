@@ -22,9 +22,17 @@ interface Props {
   // already KNOWS the answer - starting there skips the redundant question
   // and keeps the flow at 2 taps total ("I sold this" + "Save").
   initialStage?: "ask" | "price";
+  // When this card is rendered INSIDE another Modal (LogSaleModal, for the
+  // user-initiated flow), it must NOT also render its own FlexRevealCard -
+  // React Native's Modal breaks/hangs when a second native Modal is
+  // presented while the first is still up. Passing onReveal hands the stat
+  // to the caller instead, which shows FlexRevealCard as a sibling, not
+  // nested. Omit it (the dashboard aging-prompt path, never inside a Modal)
+  // to keep the original self-contained behavior exactly as before.
+  onReveal?: (stat: FlexStat, itemName: string, brand: string | null) => void;
 }
 
-export default function SaleCaptureCard({ token, scan, channel = "in_app", onDone, initialStage = "ask" }: Props) {
+export default function SaleCaptureCard({ token, scan, channel = "in_app", onDone, initialStage = "ask", onReveal }: Props) {
   const [stage, setStage] = useState<"ask" | "price">(initialStage);
   const [price, setPrice] = useState("");
   const [days, setDays] = useState(() => String(defaultDaysToSale(scan.created_at)));
@@ -43,6 +51,12 @@ export default function SaleCaptureCard({ token, scan, channel = "in_app", onDon
     if (outcome === "sold" && result.success && result.scan?.id) {
       const stat = await fetchFlexStat(token, result.scan.id);
       if (stat) {
+        if (onReveal) {
+          // Caller owns presentation (not nested inside this card's own tree).
+          onReveal(stat, _name, _brand || null);
+          onDone(scan.id, outcome);
+          return;
+        }
         setReveal(stat);
         return; // onDone fires when the reveal is dismissed, not before
       }
@@ -177,13 +191,15 @@ export default function SaleCaptureCard({ token, scan, channel = "in_app", onDon
         </>
       )}
 
-      <FlexRevealCard
-        visible={!!reveal}
-        stat={reveal}
-        itemName={_name}
-        brand={_brand || null}
-        onClose={closeReveal}
-      />
+      {!onReveal && (
+        <FlexRevealCard
+          visible={!!reveal}
+          stat={reveal}
+          itemName={_name}
+          brand={_brand || null}
+          onClose={closeReveal}
+        />
+      )}
     </View>
   );
 }

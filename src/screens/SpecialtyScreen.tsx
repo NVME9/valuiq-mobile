@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Image, Linking } from "react-native";
+import React, { useState, useEffect, useRef } from "react";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Image, Linking, Animated } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { compressPhoto } from "../lib/image";
@@ -85,6 +85,15 @@ export function matchSpecialtyCategory(...texts: (string|undefined|null)[]): typ
   return null;
 }
 
+const LOADING_MESSAGES = [
+  "Reading expert appraisal signals...",
+  "Checking real eBay sold comps...",
+  "Applying category-specific expertise...",
+  "Weighing variant & condition value...",
+  "Calculating dealer-level value...",
+  "Finalizing your appraisal...",
+];
+
 interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string, data?:any)=>void; onBack?:()=>void; onLogout:()=>void; navData?:any; }
 
 export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: Props) {
@@ -96,6 +105,19 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState("");
+  const [loadMsg, setLoadMsg] = useState(0);
+  const loadBar = useRef(new Animated.Value(0)).current;
+
+  // Staged progress feedback so a 5-15s expert appraisal never reads as a
+  // dead spinner - same pattern as the main scanner's loading screen.
+  useEffect(() => {
+    if (!loading) { loadBar.setValue(0); return; }
+    setLoadMsg(0);
+    const id = setInterval(() => setLoadMsg(m => (m + 1) % LOADING_MESSAGES.length), 2200);
+    loadBar.setValue(0);
+    Animated.timing(loadBar, { toValue: 0.92, duration: 9000, useNativeDriver: false }).start();
+    return () => clearInterval(id);
+  }, [loading]);
 
   useEffect(() => {
     if (navData?.category) {
@@ -368,10 +390,15 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
 
         <TouchableOpacity style={[s.greenBtn, { marginTop: 8 }]} onPress={analyze} disabled={loading}>
           {loading
-            ? <><ActivityIndicator color={C.greenDark} /><Text style={[s.greenBtnText, { marginTop: 4 }]}>Analyzing with expert AI...</Text></>
+            ? <><ActivityIndicator color={C.greenDark} /><Text style={[s.greenBtnText, { marginTop: 4 }]}>{LOADING_MESSAGES[loadMsg]}</Text></>
             : <Text style={s.greenBtnText}>Get Expert Analysis →</Text>
           }
         </TouchableOpacity>
+        {loading && (
+          <View style={s.progressTrack}>
+            <Animated.View style={[s.progressFill, { width: loadBar.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }) }]} />
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -406,6 +433,8 @@ const s = StyleSheet.create({
   photoHalf:     { flex:1, backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:14, padding:16, alignItems:"center" },
   greenBtn:      { backgroundColor: C.green, borderRadius: 14, paddingVertical: 16, alignItems: "center" },
   greenBtnText:  { color: C.greenDark, fontSize: 16, fontWeight: "900" },
+  progressTrack: { width: "100%", height: 6, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 3, marginTop: 12, overflow: "hidden" },
+  progressFill:  { height: 6, backgroundColor: C.green, borderRadius: 3 },
   errBox:        { backgroundColor: "#1a0505", borderWidth: 1, borderColor: C.red + "40", borderRadius: 10, padding: 12, marginBottom: 12 },
   errText:       { color: C.red, fontSize: 13 },
   valCard:       { backgroundColor: "rgba(0,0,0,0.4)", borderWidth: 2, borderColor: C.green + "30", borderRadius: 20, padding: 24, alignItems: "center", marginBottom: 12 },

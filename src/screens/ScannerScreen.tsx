@@ -16,7 +16,9 @@ import ShareCard from "../components/ShareCard";
 import { API_BASE, scanImage, scanBarcode , getProfitOracle, shareWin } from "../lib/api";
 import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notifications";
 import { toPendingScan } from "../lib/saleCapture";
+import { FlexStat } from "../lib/flexReveal";
 import LogSaleModal from "../components/LogSaleModal";
+import FlexRevealCard from "../components/FlexRevealCard";
 import * as Notifications from "expo-notifications";
 import { matchSpecialtyCategory } from "./SpecialtyScreen";
 
@@ -58,6 +60,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [pendingCheckIn, setPendingCheckIn] = useState<{scanId:string; itemName:string}|null>(null);
   const [checkInAsked, setCheckInAsked] = useState(false);
   const [loggingSale, setLoggingSale] = useState(false);
+  const [reveal, setReveal] = useState<{ stat: FlexStat; itemName: string; brand: string|null } | null>(null);
   async function acceptCheckIn() {
     const p = pendingCheckIn;
     setPendingCheckIn(null); setCheckInAsked(true);
@@ -794,6 +797,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           token={token}
           scan={result?.id ? toPendingScan(result) : null}
           onClose={() => setLoggingSale(false)}
+          onReveal={(stat, itemName, brand) => setReveal({ stat, itemName, brand })}
+        />
+
+        {/* Top-level, not nested inside LogSaleModal's Modal - React Native
+            breaks/hangs when a second Modal is presented while the first is
+            still up, so this only ever mounts after LogSaleModal has closed. */}
+        <FlexRevealCard
+          visible={!!reveal}
+          stat={reveal?.stat || null}
+          itemName={reveal?.itemName}
+          brand={reveal?.brand}
+          onClose={() => setReveal(null)}
         />
       </SafeAreaView>
     );

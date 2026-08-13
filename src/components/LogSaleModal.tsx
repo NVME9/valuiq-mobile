@@ -8,15 +8,21 @@ import { Modal, View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { C } from "../lib/theme";
 import SaleCaptureCard from "./SaleCaptureCard";
 import { PendingScan, SaleOutcome } from "../lib/saleCapture";
+import { FlexStat } from "../lib/flexReveal";
 
 interface Props {
   visible: boolean;
   token: string;
   scan: PendingScan | null;
   onClose: () => void;
+  // Required in practice: this modal never shows FlexRevealCard itself
+  // (that would be a second native Modal stacked on top of this one, which
+  // React Native breaks on) - it hands the stat up to whichever screen
+  // opened it, which renders FlexRevealCard as a top-level sibling instead.
+  onReveal?: (stat: FlexStat, itemName: string, brand: string | null) => void;
 }
 
-export default function LogSaleModal({ visible, token, scan, onClose }: Props) {
+export default function LogSaleModal({ visible, token, scan, onClose, onReveal }: Props) {
   if (!scan) return null;
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -35,6 +41,16 @@ export default function LogSaleModal({ visible, token, scan, onClose }: Props) {
             channel="in_app"
             initialStage="price"
             onDone={(_id: string, _outcome: SaleOutcome | "dismissed") => onClose()}
+            onReveal={
+              onReveal
+                ? (stat, itemName, brand) => {
+                    // Close THIS modal first so the reveal never renders
+                    // while this sheet's Modal is still presented.
+                    onClose();
+                    onReveal(stat, itemName, brand);
+                  }
+                : undefined
+            }
           />
         </View>
       </View>
