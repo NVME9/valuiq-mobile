@@ -1,12 +1,16 @@
 // SaleCaptureCard.tsx — the moat's capture UI.
 // Shows one aging BUY scan and records the real outcome (sold/passed/not_yet + price).
 // Used by the in-app prompt and (later) the push-notification landing screen.
+// A "sold" log fires the Flex Reveal - a full-screen trophy card with one
+// true, honest stat picked by selectFlexStat() (src/lib/flexReveal.ts).
 import React, { useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Image, ActivityIndicator,
 } from "react-native";
 import { C } from "../lib/theme";
-import { recordSaleOutcome, snoozeCapture, PendingScan, SaleOutcome } from "../lib/saleCapture";
+import { recordSaleOutcome, snoozeCapture, defaultDaysToSale, PendingScan, SaleOutcome } from "../lib/saleCapture";
+import { fetchFlexStat, FlexStat } from "../lib/flexReveal";
+import FlexRevealCard from "./FlexRevealCard";
 
 interface Props {
   token: string;
@@ -18,13 +22,32 @@ interface Props {
 export default function SaleCaptureCard({ token, scan, channel = "in_app", onDone }: Props) {
   const [stage, setStage] = useState<"ask" | "price">("ask");
   const [price, setPrice] = useState("");
+  const [days, setDays] = useState(() => String(defaultDaysToSale(scan.created_at)));
   const [saving, setSaving] = useState(false);
+  const [reveal, setReveal] = useState<FlexStat | null>(null);
 
-  async function record(outcome: SaleOutcome, actualPrice?: number) {
+  async function record(outcome: SaleOutcome, actualPrice?: number, daysOverride?: number) {
     setSaving(true);
-    await recordSaleOutcome(token, scan.id, outcome, channel, scan.created_at, actualPrice);
+    const result = await recordSaleOutcome(token, scan.id, outcome, channel, scan.created_at, actualPrice, daysOverride);
     setSaving(false);
+
+    // Fire the reveal on any successful "sold" log - even a no-price /
+    // thin-data flip gets an honest fallback stat (see selectFlexStat),
+    // never a blank confirmation. Non-sold outcomes advance immediately,
+    // same as before.
+    if (outcome === "sold" && result.success && result.scan?.id) {
+      const stat = await fetchFlexStat(token, result.scan.id);
+      if (stat) {
+        setReveal(stat);
+        return; // onDone fires when the reveal is dismissed, not before
+      }
+    }
     onDone(scan.id, outcome);
+  }
+
+  function closeReveal() {
+    setReveal(null);
+    onDone(scan.id, "sold");
   }
 
   async function dismiss() {
@@ -95,17 +118,29 @@ export default function SaleCaptureCard({ token, scan, channel = "in_app", onDon
       ) : (
         <>
           <Text style={s.prompt}>Nice! What did it sell for?</Text>
-          <View style={s.priceRow}>
-            <Text style={s.dollar}>$</Text>
-            <TextInput
-              style={s.priceInput}
-              value={price}
-              onChangeText={setPrice}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor={C.text4}
-              autoFocus
-            />
+          <View style={s.fieldRow}>
+            <View style={s.priceRow}>
+              <Text style={s.dollar}>$</Text>
+              <TextInput
+                style={s.priceInput}
+                value={price}
+                onChangeText={setPrice}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                placeholderTextColor={C.text4}
+                autoFocus
+              />
+            </View>
+            <View style={s.daysField}>
+              <TextInput
+                style={s.daysInput}
+                value={days}
+                onChangeText={setDays}
+                keyboardType="number-pad"
+                placeholderTextColor={C.text4}
+              />
+              <Text style={s.daysLabel}>days</Text>
+            </View>
           </View>
           <View style={s.btnRow}>
             <TouchableOpacity
@@ -113,7 +148,8 @@ export default function SaleCaptureCard({ token, scan, channel = "in_app", onDon
               disabled={saving}
               onPress={() => {
                 const p = parseFloat(price);
-                record("sold", isNaN(p) ? undefined : p);
+                const d = parseInt(days, 10);
+                record("sold", isNaN(p) ? undefined : p, isNaN(d) ? undefined : d);
               }}
             >
               {saving ? (
@@ -125,13 +161,24 @@ export default function SaleCaptureCard({ token, scan, channel = "in_app", onDon
             <TouchableOpacity
               style={[s.btn, s.btnNeutral, { flex: 0.5 }]}
               disabled={saving}
-              onPress={() => record("sold")}
+              onPress={() => {
+                const d = parseInt(days, 10);
+                record("sold", undefined, isNaN(d) ? undefined : d);
+              }}
             >
               <Text style={s.btnNeutralText}>Skip price</Text>
             </TouchableOpacity>
           </View>
         </>
       )}
+
+      <FlexRevealCard
+        visible={!!reveal}
+        stat={reveal}
+        itemName={_name}
+        brand={_brand || null}
+        onClose={closeReveal}
+      />
     </View>
   );
 }
@@ -161,10 +208,17 @@ const s = StyleSheet.create({
   btnNeutralText: { color: C.text2, fontSize: 14, fontWeight: "600" },
   dismiss: { marginTop: 10, alignItems: "center" },
   dismissText: { color: C.text4, fontSize: 13 },
+  fieldRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
   priceRow: {
-    flexDirection: "row", alignItems: "center", backgroundColor: C.surfaceHigh,
-    borderColor: C.borderHigh, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, marginBottom: 12,
+    flex: 1.4, flexDirection: "row", alignItems: "center", backgroundColor: C.surfaceHigh,
+    borderColor: C.borderHigh, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14,
   },
   dollar: { color: C.green, fontSize: 24, fontWeight: "800", marginRight: 4 },
   priceInput: { flex: 1, color: C.text1, fontSize: 24, fontWeight: "700", paddingVertical: 12 },
+  daysField: {
+    flex: 1, flexDirection: "row", alignItems: "baseline", justifyContent: "center", backgroundColor: C.surfaceHigh,
+    borderColor: C.borderHigh, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10,
+  },
+  daysInput: { color: C.text1, fontSize: 24, fontWeight: "700", paddingVertical: 12, minWidth: 30, textAlign: "right" },
+  daysLabel: { color: C.text3, fontSize: 14, fontWeight: "600", marginLeft: 5 },
 });
