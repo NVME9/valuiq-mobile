@@ -19,6 +19,7 @@ import { toPendingScan } from "../lib/saleCapture";
 import { FlexStat } from "../lib/flexReveal";
 import LogSaleModal from "../components/LogSaleModal";
 import FlexRevealCard from "../components/FlexRevealCard";
+import StagedProgress from "../components/StagedProgress";
 import * as Notifications from "expo-notifications";
 import { matchSpecialtyCategory } from "./SpecialtyScreen";
 
@@ -49,8 +50,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [sharingImage, setSharingImage] = useState(false);
   const shareCardRef = useRef<ViewShot>(null);
   const [brandInput, setBrandInput] = useState("");
-  const [loadMsg, setLoadMsg] = useState(0);
-  const loadBar = useRef(new Animated.Value(0)).current;
   const [goDeeper, setGoDeeper] = useState(false);
   const [description, setDescription] = useState("");
   const [buyPrice, setBuyPrice] = useState("");
@@ -212,16 +211,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     }
   }
 
-  // - PERMISSION -
-  useEffect(() => {
-    if (step !== "loading") { loadBar.setValue(0); return; }
-    const msgs = ["Identifying your item...","Reading brand & model details...","Pulling real eBay sold comps...","Estimating prices across platforms...","Calculating profit & fees...","Finding the best place to sell..."];
-    const id = setInterval(() => setLoadMsg(m => (m + 1) % msgs.length), 1800);
-    loadBar.setValue(0);
-    Animated.timing(loadBar, { toValue: 0.92, duration: 6000, useNativeDriver: false }).start();
-    return () => clearInterval(id);
-  }, [step]);
-
   if (!permission) return <View style={s.center}><ActivityIndicator color={C.green} size="large" /></View>;
   if (!permission.granted) return (
     <SafeAreaView style={s.safe}>
@@ -237,6 +226,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   );
 
   // - LOADING -
+  // Step durations calibrated to REAL measured lens/route.ts timing
+  // (_debug.timing from live production runs, post-Haiku-swap):
+  // identify ~1.6-2s, comps+pricing LLM ~2-2.5s. Forward-only, holds on the
+  // last step if the real call runs long - never loops, never claims done
+  // early. See src/components/StagedProgress.tsx.
   if (step === "loading") return (
     <SafeAreaView style={s.safe}>
       <View style={s.center}>
@@ -244,12 +238,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
           <Text style={s.logoText}>ValuIQ</Text>
         </View>
-        <ActivityIndicator size="large" color={C.green} style={{ marginTop: 40, marginBottom: 16 }} />
-        <Text style={s.h2}>{["Identifying your item...","Reading brand & model details...","Pulling real eBay sold comps...","Estimating prices across platforms...","Calculating profit & fees...","Finding the best place to sell..."][loadMsg]}</Text>
-        <View style={s.progressTrack}>
-          <Animated.View style={[s.progressFill, { width: loadBar.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }) }]} />
-        </View>
-        <Text style={s.body}>This usually takes a few seconds</Text>
+        <StagedProgress
+          active
+          steps={[
+            { label: "Identifying item", ms: 1800 },
+            { label: "Checking real sold data", ms: 2100 },
+            { label: "Calculating profit", ms: 600 },
+          ]}
+        />
       </View>
     </SafeAreaView>
   );
@@ -1070,8 +1066,6 @@ const s = StyleSheet.create({
   shutterBadgeTxt:{ color: "#000", fontSize: 13, fontWeight: "900" },
   doneBtn: { width: 72, height: 50, borderRadius: 25, backgroundColor: C.green, alignItems: "center", justifyContent: "center" },
   doneBtnTxt: { color: "#000", fontSize: 14, fontWeight: "900" },
-  progressTrack: { width: "70%", height: 6, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 3, marginTop: 20, marginBottom: 8, overflow: "hidden" },
-  progressFill: { height: 6, backgroundColor: C.green, borderRadius: 3 },
   camControls: { paddingBottom: 48, paddingTop: 20, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 40 },
   camBottomBar:   { paddingBottom: 40, paddingHorizontal: 24 },
 
