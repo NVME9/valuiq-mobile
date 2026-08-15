@@ -5,14 +5,6 @@ import { API_BASE } from "./api";
 
 export type SaleOutcome = "sold" | "passed" | "not_yet";
 
-function cleanItemName(n: string): string {
-  return (n || "")
-    .replace(/^run_\d+\s*/i, "")
-    .split(/\|\|\||data:image|;base64|\/9j\//i)[0]
-    .replace(/\s+(Etsy|eBay|Poshmark|Mercari|Depop)\s*$/i, "")
-    .trim() || "Item";
-}
-
 export interface PendingScan {
   id: string;
   item_name: string;
@@ -24,47 +16,6 @@ export interface PendingScan {
   best_platform?: string;
   created_at: string;
   daysListed: number;
-}
-
-// Fetch BUY scans 10+ days old that still need an outcome (server filters type=pending_sale).
-// Applies a client-side cooldown so we don't re-prompt items asked about in the last `cooldownDays`.
-export async function getPendingSaleScans(
-  token: string,
-  cooldownDays = 4,
-  limit = 5
-): Promise<PendingScan[]> {
-  try {
-    const url =
-      `${API_BASE}/api/scan-history?token=${encodeURIComponent(token)}&type=pending_sale&limit=50`;
-    const rows = await fetch(url).then((r) => r.json());
-    if (!Array.isArray(rows)) return [];
-    const now = Date.now();
-    const cooldownMs = cooldownDays * 86400000;
-    return rows
-      .filter((r: any) => {
-        // skip if prompted recently
-        if (r.capture_prompted_at) {
-          const last = new Date(r.capture_prompted_at).getTime();
-          if (now - last < cooldownMs) return false;
-        }
-        return true;
-      })
-      .slice(0, limit)
-      .map((r: any) => ({
-        id: r.id,
-        item_name: cleanItemName(r.item_name),
-        brand: r.brand,
-        category: r.category,
-        image_url: r.image_url,
-        net_profit: r.net_profit,
-        sell_price: r.sell_price,
-        best_platform: r.best_platform,
-        created_at: r.created_at,
-        daysListed: Math.max(1, Math.round((now - new Date(r.created_at).getTime()) / 86400000)),
-      }));
-  } catch {
-    return [];
-  }
 }
 
 // The saved row PATCH now hands back (deal-ai-pro scan-history/route.ts's
@@ -146,14 +97,9 @@ export function defaultDaysToSale(createdAt?: string): number {
   return Math.max(1, Math.round((Date.now() - new Date(createdAt).getTime()) / 86400000));
 }
 
-// Turns EITHER shape a caller might have on hand into the PendingScan shape
-// SaleCaptureCard needs - a raw /api/scan-history row (snake_case: item_name,
-// net_profit, sell_price, best_platform, created_at - what History's list
-// and the aging-prompt queue both already use) OR a fresh /api/lens response
-// (camelCase: itemName, netProfit, sellPrice, bestPlatform, no created_at
-// yet since it was never saved-and-reloaded - defaults to "now", which is
-// correct: a just-scanned item genuinely was listed today). One helper so
-// History and the scan-result screen don't each reimplement this mapping.
+// Turns a raw /api/scan-history row (snake_case: item_name, net_profit,
+// sell_price, best_platform, created_at) into the PendingScan shape
+// SaleCaptureCard needs.
 export function toPendingScan(row: any): PendingScan {
   const createdAt = row.created_at || new Date().toISOString();
   return {
@@ -168,22 +114,4 @@ export function toPendingScan(row: any): PendingScan {
     created_at: createdAt,
     daysListed: Math.max(1, Math.round((Date.now() - new Date(createdAt).getTime()) / 86400000)),
   };
-}
-
-// User dismissed without answering -> set capture_prompted_at so it goes quiet for the cooldown.
-export async function snoozeCapture(token: string, scanId: string): Promise<boolean> {
-  try {
-    const r = await fetch(
-      `${API_BASE}/api/scan-history?token=${encodeURIComponent(token)}&id=${encodeURIComponent(scanId)}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ capture_prompted_at: new Date().toISOString() }),
-      }
-    );
-    const j = await r.json().catch(() => ({}));
-    return !!j.success;
-  } catch {
-    return false;
-  }
 }

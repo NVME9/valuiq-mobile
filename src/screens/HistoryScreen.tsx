@@ -8,9 +8,7 @@ import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import Coachmark from "../components/Coachmark";
 import LogSaleModal from "../components/LogSaleModal";
-import FlexRevealCard from "../components/FlexRevealCard";
 import { toPendingScan } from "../lib/saleCapture";
-import { FlexStat } from "../lib/flexReveal";
 import { API_BASE, rerunScan, updateScan, updateThriftItem } from "../lib/api";
 
 interface Props {
@@ -49,7 +47,6 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
   const [editPhotos, setEditPhotos] = useState<string[]>([]);
   const [rerunning, setRerunning]   = useState(false);
   const [logSaleScan, setLogSaleScan] = useState<any|null>(null);
-  const [reveal, setReveal] = useState<{ stat: FlexStat; itemName: string; brand: string|null } | null>(null);
 
   function openEditor(scan: any) {
     setEditingId(scan.id);
@@ -300,7 +297,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
         <TouchableOpacity onPress={onBack || (() => onNavigate("dashboard"))}>
           <Text style={s.back}>{"<"}</Text>
         </TouchableOpacity>
-        <Text style={s.headerTitle}>History</Text>
+        <Text style={s.headerTitle}>My Flips</Text>
         <TouchableOpacity onPress={() => selectMode ? exitSelect() : setSelectMode(true)}>
           <Text style={s.selectToggle}>{selectMode ? "Cancel" : "Select"}</Text>
         </TouchableOpacity>
@@ -497,8 +494,8 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                           </View>
                         ) : (
                           <>
-                            {/* Primary way to log a sale - available on ANY scan, any
-                                time, not gated behind the aging-scan dashboard prompt. */}
+                            {/* Only way to log a sale - user-initiated, on their own
+                                time, from My Flips. No scan-time or aging-scan prompt. */}
                             <TouchableOpacity style={s.soldBtn} onPress={() => setLogSaleScan(scan)}>
                               <Text style={s.soldBtnTxt}>I sold this →</Text>
                             </TouchableOpacity>
@@ -736,18 +733,6 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
         token={token}
         scan={logSaleScan ? toPendingScan(logSaleScan) : null}
         onClose={() => { setLogSaleScan(null); loadData(); }}
-        onReveal={(stat, itemName, brand) => setReveal({ stat, itemName, brand })}
-      />
-
-      {/* Top-level, not nested inside LogSaleModal's Modal - React Native
-          breaks/hangs when a second Modal is presented while the first is
-          still up, so this only ever mounts after LogSaleModal has closed. */}
-      <FlexRevealCard
-        visible={!!reveal}
-        stat={reveal?.stat || null}
-        itemName={reveal?.itemName}
-        brand={reveal?.brand}
-        onClose={() => setReveal(null)}
       />
     </SafeAreaView>
   );

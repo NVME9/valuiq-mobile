@@ -2,15 +2,17 @@
 // instant a sale is logged. This screen IS the product: it has to feel
 // premium, not like a dashboard tile or a toast.
 //
-// Two exports:
+// Three exports:
 //   FlexRevealContent - pure presentational card (hero stat, badge, streak
 //     ribbon, brand mark). No Modal, no backdrop. Structured like
 //     ShareCard.tsx so a future step can wrap THIS in <ViewShot> and capture
 //     it off-screen exactly the way ScannerScreen.tsx does for ShareCard.
-//   FlexRevealCard (default) - the interactive full-screen Modal: mounts
-//     FlexRevealContent, drives the entrance/count-up/stamp animations, and
-//     renders the two action buttons (both stubbed - share/leaderboard wire
-//     in a later step).
+//   FlexRevealBody - the interactive reveal screen (entrance/count-up/stamp
+//     animations, close + action buttons) with no Modal of its own, meant to
+//     be embedded inside an already-open Modal (see LogSaleModal.tsx) so a
+//     sale-log flow never presents a second native Modal mid-flow.
+//   FlexRevealCard (default) - FlexRevealBody wrapped in its own Modal, for
+//     any spot that wants to show the reveal standalone.
 //
 // Animation is built entirely on React Native core's Animated API (already
 // used elsewhere in this app, e.g. DashboardScreen.tsx) plus react-native-svg
@@ -163,9 +165,8 @@ export function FlexRevealContent({ stat, itemName, brand, animate = true }: Fle
 
 const CARD_W = Math.min(SCREEN_W, 480);
 
-interface FlexRevealCardProps {
-  visible: boolean;
-  stat: FlexStat | null;
+interface FlexRevealBodyProps {
+  stat: FlexStat;
   itemName?: string | null;
   brand?: string | null;
   onClose: () => void;
@@ -173,19 +174,17 @@ interface FlexRevealCardProps {
   onLeaderboard?: () => void;
 }
 
-export default function FlexRevealCard({
-  visible, stat, itemName, brand, onClose, onShare, onLeaderboard,
-}: FlexRevealCardProps) {
+// The reveal screen's content, with no Modal of its own - meant to be
+// embedded inside whatever single Modal is already presenting the sale-log
+// flow (LogSaleModal), never mounted alongside a second native Modal. The
+// entrance animation triggers on mount, since mounting IS becoming visible
+// here (no separate `visible` prop to watch).
+export function FlexRevealBody({ stat, itemName, brand, onClose, onShare, onLeaderboard }: FlexRevealBodyProps) {
   const entrance = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (visible) {
-      entrance.setValue(0);
-      Animated.spring(entrance, { toValue: 1, friction: 7, tension: 50, useNativeDriver: true }).start();
-    }
-  }, [visible]);
-
-  if (!stat) return null;
+    Animated.spring(entrance, { toValue: 1, friction: 7, tension: 50, useNativeDriver: true }).start();
+  }, []);
 
   const entranceStyle: any = {
     opacity: entrance,
@@ -196,33 +195,55 @@ export default function FlexRevealCard({
   };
 
   return (
-    <Modal visible={visible} animationType="fade" transparent={false} onRequestClose={onClose}>
-      <View style={s.screen}>
-        <TouchableOpacity style={s.closeBtn} onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-          <Text style={s.closeBtnText}>Done</Text>
-        </TouchableOpacity>
+    <View style={s.screen}>
+      <TouchableOpacity style={s.closeBtn} onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+        <Text style={s.closeBtnText}>Done</Text>
+      </TouchableOpacity>
 
-        <View style={s.center}>
-          <Animated.View style={entranceStyle}>
-            <FlexRevealContent stat={stat} itemName={itemName} brand={brand} />
-          </Animated.View>
-        </View>
-
-        <View style={s.actions}>
-          <TouchableOpacity
-            style={s.primaryBtn}
-            onPress={onShare ?? (() => Alert.alert("Coming soon", "Sharing your flex is next up."))}
-          >
-            <Text style={s.primaryBtnText}>Share your flex →</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={s.secondaryBtn}
-            onPress={onLeaderboard ?? (() => Alert.alert("Coming soon", "The leaderboard is next up."))}
-          >
-            <Text style={s.secondaryBtnText}>See the leaderboard →</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={s.center}>
+        <Animated.View style={entranceStyle}>
+          <FlexRevealContent stat={stat} itemName={itemName} brand={brand} />
+        </Animated.View>
       </View>
+
+      <View style={s.actions}>
+        <TouchableOpacity
+          style={s.primaryBtn}
+          onPress={onShare ?? (() => Alert.alert("Coming soon", "Sharing your flex is next up."))}
+        >
+          <Text style={s.primaryBtnText}>Share your flex →</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={s.secondaryBtn}
+          onPress={onLeaderboard ?? (() => Alert.alert("Coming soon", "The leaderboard is next up."))}
+        >
+          <Text style={s.secondaryBtnText}>See the leaderboard →</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+interface FlexRevealCardProps {
+  visible: boolean;
+  stat: FlexStat | null;
+  itemName?: string | null;
+  brand?: string | null;
+  onClose: () => void;
+  onShare?: () => void;
+  onLeaderboard?: () => void;
+}
+
+// Standalone Modal-wrapped version, for any future spot that wants to show
+// the reveal on its own (not mid-flow after LogSaleModal - that path renders
+// FlexRevealBody directly instead, see LogSaleModal.tsx).
+export default function FlexRevealCard({
+  visible, stat, itemName, brand, onClose, onShare, onLeaderboard,
+}: FlexRevealCardProps) {
+  if (!stat) return null;
+  return (
+    <Modal visible={visible} animationType="fade" transparent={false} onRequestClose={onClose}>
+      <FlexRevealBody stat={stat} itemName={itemName} brand={brand} onClose={onClose} onShare={onShare} onLeaderboard={onLeaderboard} />
     </Modal>
   );
 }

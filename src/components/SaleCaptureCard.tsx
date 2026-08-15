@@ -1,79 +1,47 @@
 // SaleCaptureCard.tsx — the moat's capture UI.
-// Shows one aging BUY scan and records the real outcome (sold/passed/not_yet + price).
-// Used by the in-app prompt and (later) the push-notification landing screen.
-// A "sold" log fires the Flex Reveal - a full-screen trophy card with one
-// true, honest stat picked by selectFlexStat() (src/lib/flexReveal.ts).
+// Shows one BUY scan the user already told us they sold, and records the
+// real price + days. Used exclusively by LogSaleModal (user-initiated, from
+// "My Flips"), so the outcome is always known going in - no "did it sell?"
+// question here, just the price+days form.
+// A successful save fires the Flex Reveal - a full-screen trophy card with
+// one true, honest stat picked by selectFlexStat() (src/lib/flexReveal.ts).
 import React, { useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Image, ActivityIndicator,
 } from "react-native";
 import { C } from "../lib/theme";
-import { recordSaleOutcome, snoozeCapture, defaultDaysToSale, PendingScan, SaleOutcome } from "../lib/saleCapture";
+import { recordSaleOutcome, defaultDaysToSale, PendingScan } from "../lib/saleCapture";
 import { fetchFlexStat, FlexStat } from "../lib/flexReveal";
-import FlexRevealCard from "./FlexRevealCard";
 
 interface Props {
   token: string;
   scan: PendingScan;
-  channel?: "push" | "in_app";
-  onDone: (scanId: string, outcome: SaleOutcome | "dismissed") => void;
-  // Defaults to "ask" (the aging-scan prompt's "Did it sell?" queue, unchanged).
-  // User-initiated logging (History's/the result screen's "I sold this ->")
-  // already KNOWS the answer - starting there skips the redundant question
-  // and keeps the flow at 2 taps total ("I sold this" + "Save").
-  initialStage?: "ask" | "price";
-  // When this card is rendered INSIDE another Modal (LogSaleModal, for the
-  // user-initiated flow), it must NOT also render its own FlexRevealCard -
-  // React Native's Modal breaks/hangs when a second native Modal is
-  // presented while the first is still up. Passing onReveal hands the stat
-  // to the caller instead, which shows FlexRevealCard as a sibling, not
-  // nested. Omit it (the dashboard aging-prompt path, never inside a Modal)
-  // to keep the original self-contained behavior exactly as before.
-  onReveal?: (stat: FlexStat, itemName: string, brand: string | null) => void;
+  onDone: (scanId: string) => void;
+  // The caller (LogSaleModal) owns presenting the reveal - this card only
+  // ever hands the stat up, it never renders a Modal of its own.
+  onReveal: (stat: FlexStat, itemName: string, brand: string | null) => void;
 }
 
-export default function SaleCaptureCard({ token, scan, channel = "in_app", onDone, initialStage = "ask", onReveal }: Props) {
-  const [stage, setStage] = useState<"ask" | "price">(initialStage);
+export default function SaleCaptureCard({ token, scan, onDone, onReveal }: Props) {
   const [price, setPrice] = useState("");
   const [days, setDays] = useState(() => String(defaultDaysToSale(scan.created_at)));
   const [saving, setSaving] = useState(false);
-  const [reveal, setReveal] = useState<FlexStat | null>(null);
 
-  async function record(outcome: SaleOutcome, actualPrice?: number, daysOverride?: number) {
+  async function save(withPrice: boolean) {
     setSaving(true);
-    const result = await recordSaleOutcome(token, scan.id, outcome, channel, scan.created_at, actualPrice, daysOverride);
+    const p = withPrice ? parseFloat(price) : NaN;
+    const d = parseInt(days, 10);
+    const result = await recordSaleOutcome(
+      token, scan.id, "sold", "in_app", scan.created_at,
+      isNaN(p) ? undefined : p, isNaN(d) ? undefined : d
+    );
     setSaving(false);
 
-    // Fire the reveal on any successful "sold" log - even a no-price /
-    // thin-data flip gets an honest fallback stat (see selectFlexStat),
-    // never a blank confirmation. Non-sold outcomes advance immediately,
-    // same as before.
-    if (outcome === "sold" && result.success && result.scan?.id) {
+    if (result.success && result.scan?.id) {
       const stat = await fetchFlexStat(token, result.scan.id);
-      if (stat) {
-        if (onReveal) {
-          // Caller owns presentation (not nested inside this card's own tree).
-          onReveal(stat, _name, _brand || null);
-          onDone(scan.id, outcome);
-          return;
-        }
-        setReveal(stat);
-        return; // onDone fires when the reveal is dismissed, not before
-      }
+      if (stat) onReveal(stat, _name, _brand || null);
     }
-    onDone(scan.id, outcome);
-  }
-
-  function closeReveal() {
-    setReveal(null);
-    onDone(scan.id, "sold");
-  }
-
-  async function dismiss() {
-    setSaving(true);
-    await snoozeCapture(token, scan.id);
-    setSaving(false);
-    onDone(scan.id, "dismissed");
+    onDone(scan.id);
   }
 
   const cleanName = (n: string) => (n || "")
@@ -104,102 +72,51 @@ export default function SaleCaptureCard({ token, scan, channel = "in_app", onDon
         </View>
       </View>
 
-      {stage === "ask" ? (
-        <>
-          <Text style={s.prompt}>Did it sell?</Text>
-          <View style={s.btnRow}>
-            <TouchableOpacity
-              style={[s.btn, s.btnSold]}
-              disabled={saving}
-              onPress={() => setStage("price")}
-            >
-              <Text style={s.btnSoldText}>Sold it</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.btn, s.btnNeutral]}
-              disabled={saving}
-              onPress={() => record("not_yet")}
-            >
-              <Text style={s.btnNeutralText}>Still listed</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.btn, s.btnNeutral]}
-              disabled={saving}
-              onPress={() => record("passed")}
-            >
-              <Text style={s.btnNeutralText}>Passed</Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity onPress={dismiss} disabled={saving} style={s.dismiss}>
-            <Text style={s.dismissText}>Ask me later</Text>
-          </TouchableOpacity>
-        </>
-      ) : (
-        <>
-          <Text style={s.prompt}>Nice! What did it sell for?</Text>
-          <View style={s.fieldRow}>
-            <View style={s.priceRow}>
-              <Text style={s.dollar}>$</Text>
-              <TextInput
-                style={s.priceInput}
-                value={price}
-                onChangeText={setPrice}
-                keyboardType="decimal-pad"
-                placeholder="0.00"
-                placeholderTextColor={C.text4}
-                autoFocus
-              />
-            </View>
-            <View style={s.daysField}>
-              <TextInput
-                style={s.daysInput}
-                value={days}
-                onChangeText={setDays}
-                keyboardType="number-pad"
-                placeholderTextColor={C.text4}
-              />
-              <Text style={s.daysLabel}>days</Text>
-            </View>
-          </View>
-          <View style={s.btnRow}>
-            <TouchableOpacity
-              style={[s.btn, s.btnSold, { flex: 1 }]}
-              disabled={saving}
-              onPress={() => {
-                const p = parseFloat(price);
-                const d = parseInt(days, 10);
-                record("sold", isNaN(p) ? undefined : p, isNaN(d) ? undefined : d);
-              }}
-            >
-              {saving ? (
-                <ActivityIndicator color={C.greenDark} />
-              ) : (
-                <Text style={s.btnSoldText}>Save</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.btn, s.btnNeutral, { flex: 0.5 }]}
-              disabled={saving}
-              onPress={() => {
-                const d = parseInt(days, 10);
-                record("sold", undefined, isNaN(d) ? undefined : d);
-              }}
-            >
-              <Text style={s.btnNeutralText}>Skip price</Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
-
-      {!onReveal && (
-        <FlexRevealCard
-          visible={!!reveal}
-          stat={reveal}
-          itemName={_name}
-          brand={_brand || null}
-          onClose={closeReveal}
-        />
-      )}
+      <Text style={s.prompt}>Nice! What did it sell for?</Text>
+      <View style={s.fieldRow}>
+        <View style={s.priceRow}>
+          <Text style={s.dollar}>$</Text>
+          <TextInput
+            style={s.priceInput}
+            value={price}
+            onChangeText={setPrice}
+            keyboardType="decimal-pad"
+            placeholder="0.00"
+            placeholderTextColor={C.text4}
+            autoFocus
+          />
+        </View>
+        <View style={s.daysField}>
+          <TextInput
+            style={s.daysInput}
+            value={days}
+            onChangeText={setDays}
+            keyboardType="number-pad"
+            placeholderTextColor={C.text4}
+          />
+          <Text style={s.daysLabel}>days</Text>
+        </View>
+      </View>
+      <View style={s.btnRow}>
+        <TouchableOpacity
+          style={[s.btn, s.btnSold, { flex: 1 }]}
+          disabled={saving}
+          onPress={() => save(true)}
+        >
+          {saving ? (
+            <ActivityIndicator color={C.greenDark} />
+          ) : (
+            <Text style={s.btnSoldText}>Save</Text>
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.btn, s.btnNeutral, { flex: 0.5 }]}
+          disabled={saving}
+          onPress={() => save(false)}
+        >
+          <Text style={s.btnNeutralText}>Skip price</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -227,8 +144,6 @@ const s = StyleSheet.create({
   btnSoldText: { color: C.greenDark, fontSize: 15, fontWeight: "800" },
   btnNeutral: { backgroundColor: C.surfaceHigh, borderColor: C.border, borderWidth: 1 },
   btnNeutralText: { color: C.text2, fontSize: 14, fontWeight: "600" },
-  dismiss: { marginTop: 10, alignItems: "center" },
-  dismissText: { color: C.text4, fontSize: 13 },
   fieldRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
   priceRow: {
     flex: 1.4, flexDirection: "row", alignItems: "center", backgroundColor: C.surfaceHigh,

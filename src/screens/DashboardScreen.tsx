@@ -7,7 +7,6 @@ import {
 import { SafeAreaView as SAV } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import Coachmark from "../components/Coachmark";
-import SaleCapturePrompt from "../components/SaleCapturePrompt";
 import { API_BASE, hasProAccess, getCommunityWins } from "../lib/api";
 
 const { width } = Dimensions.get("window");
@@ -199,8 +198,6 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
           onRefresh={() => { setRefresh(true); loadData(); }}/>}
       >
 
-        {/* SALE-CAPTURE MOAT: ask about aging BUY scans */}
-        <SaleCapturePrompt token={token} />
         {/* HERO SCAN BUTTON */}
         <Animated.View style={{transform:[{scale:scanPulse}]}}>
           <TouchableOpacity style={s.hero} onPress={() => onNavigate("scanner")} activeOpacity={0.9}>
@@ -375,7 +372,7 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
                   </TouchableOpacity>
                 ))}
                 <TouchableOpacity style={s.viewAll} onPress={() => onNavigate("history")}>
-                  <Text style={s.viewAllTxt}>View full scan history →</Text>
+                  <Text style={s.viewAllTxt}>View My Flips →</Text>
                 </TouchableOpacity>
               </>
             )}
