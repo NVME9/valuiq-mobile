@@ -89,7 +89,7 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal }: Props
           <TextInput
             style={s.daysInput}
             value={days}
-            onChangeText={setDays}
+            onChangeText={(t) => setDays(t.replace(/[^0-9]/g, ""))}
             keyboardType="number-pad"
             placeholderTextColor={C.text4}
           />
