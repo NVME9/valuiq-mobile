@@ -236,9 +236,19 @@ export async function analyzeSpecialty(token: string, category: string, fields: 
       images.push(`data:image/jpeg;base64,${t.base64}`);
     } catch { images.push(raw); }
   }
+  // Small thumb for history/My Flips - same pattern as scanImage()'s `thumb`,
+  // otherwise a specialty appraisal never gets a photo saved anywhere.
+  let thumb: string | undefined;
+  if (photos && photos[0]) {
+    try {
+      const raw = photos[0].startsWith("data:") ? photos[0] : `data:image/jpeg;base64,${photos[0]}`;
+      const t = await ImageManipulator.manipulateAsync(raw, [{ resize: { width: 200 } }], { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG, base64: true });
+      if (t.base64) thumb = `data:image/jpeg;base64,${t.base64}`;
+    } catch {}
+  }
   let r: Response;
   try {
-    r = await fetch(`${API_BASE}/api/specialty`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, category, fields, photos: images}) });
+    r = await fetch(`${API_BASE}/api/specialty`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, category, fields, photos: images, thumb}) });
   } catch {
     return { success: false, error: "Network error. Check your connection and try again." };
   }

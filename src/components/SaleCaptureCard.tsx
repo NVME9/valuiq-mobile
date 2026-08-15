@@ -83,7 +83,6 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal }: Props
             keyboardType="decimal-pad"
             placeholder="0.00"
             placeholderTextColor={C.text4}
-            autoFocus
           />
         </View>
         <View style={s.daysField}>

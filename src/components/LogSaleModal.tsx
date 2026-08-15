@@ -2,21 +2,33 @@
 // from My Flips (HistoryScreen) on the user's own initiative.
 //
 // This owns exactly ONE native <Modal>, for the entire flow (price+days form
-// -> reveal). A prior version used two separate <Modal> components (this
-// sheet, then a sibling FlexRevealCard) and toggled their `visible` flags in
-// the same render commit when a sale saved successfully. That's a confirmed
-// RN failure mode, not a guess: presenting a new native Modal while another
-// is still dismissing races at the native layer and can leave the modal host
-// stuck - unresponsive touches, no working Cancel, exactly the "hangs with a
-// number pad and no exit" behavior seen on device. Making the two Modals
-// siblings instead of JSX-nested (the previous fix attempt) didn't help,
-// because the bug was never about tree nesting - it was two native
-// present/dismiss calls firing together. The only structural fix is to never
-// have two Modals in play for one flow: this component stays mounted as ONE
-// Modal throughout, and swaps its content (form -> FlexRevealBody) via
-// internal state instead of closing and opening a second Modal.
+// -> reveal). Two bugs were found and fixed here, confirmed by tracing the
+// code, not by guessing:
+//
+// 1. A prior version used two separate <Modal> components (this sheet, then
+//    a sibling FlexRevealCard) and toggled their `visible` flags in the same
+//    render commit when a sale saved successfully - two native present/
+//    dismiss calls racing. Fixed by never having two Modals in play: this
+//    component stays mounted as ONE Modal throughout, swapping its content
+//    (form -> FlexRevealBody) via internal state instead of closing one
+//    Modal and opening another.
+//
+// 2. That fix alone did NOT resolve the on-device hang, because it wasn't
+//    the only bug. SaleCaptureCard's price TextInput had `autoFocus`, which
+//    fires the instant the sheet mounts - while this Modal's own
+//    animationType="slide" transition is still in flight. On iOS, a
+//    first-responder change (keyboard appearing) competing with an
+//    in-progress modal presentation transition is a known way to leave the
+//    transition coordinator stuck mid-animation: the sheet visually freezes
+//    partway up the screen, and touch dispatch for that view hierarchy locks
+//    up with it - "half-screen stall, no working exit" is exactly that
+//    symptom, and it happens on open, before the reveal is ever reached, so
+//    fixing only the reveal-transition race couldn't have fixed it. Fixed by
+//    removing autoFocus (see SaleCaptureCard.tsx) and wrapping this sheet in
+//    KeyboardAvoidingView so if the keyboard does come up later, the header
+//    (title + Cancel) can never end up covered or pushed off-screen.
 import React, { useRef, useState } from "react";
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { Modal, View, Text, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from "react-native";
 import { C } from "../lib/theme";
 import SaleCaptureCard from "./SaleCaptureCard";
 import { PendingScan } from "../lib/saleCapture";
@@ -52,29 +64,34 @@ export default function LogSaleModal({ visible, token, scan, onClose }: Props) {
       {reveal ? (
         <FlexRevealBody stat={reveal.stat} itemName={reveal.itemName} brand={reveal.brand} onClose={close} />
       ) : (
-        <View style={s.backdrop}>
-          <TouchableOpacity style={s.backdropTap} activeOpacity={1} onPress={close} />
-          <View style={s.sheet}>
-            <View style={s.sheetHeader}>
-              <Text style={s.sheetTitle}>Log this sale</Text>
-              <TouchableOpacity onPress={close} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Text style={s.cancelTxt}>Cancel</Text>
-              </TouchableOpacity>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <View style={s.backdrop}>
+            <TouchableOpacity style={s.backdropTap} activeOpacity={1} onPress={close} />
+            <View style={s.sheet}>
+              <View style={s.sheetHeader}>
+                <Text style={s.sheetTitle}>Log this sale</Text>
+                <TouchableOpacity onPress={close} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Text style={s.cancelTxt}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+              <SaleCaptureCard
+                token={token}
+                scan={scan}
+                onDone={() => {
+                  if (justRevealedRef.current) { justRevealedRef.current = false; return; }
+                  close();
+                }}
+                onReveal={(stat, itemName, brand) => {
+                  justRevealedRef.current = true;
+                  setReveal({ stat, itemName, brand });
+                }}
+              />
             </View>
-            <SaleCaptureCard
-              token={token}
-              scan={scan}
-              onDone={() => {
-                if (justRevealedRef.current) { justRevealedRef.current = false; return; }
-                close();
-              }}
-              onReveal={(stat, itemName, brand) => {
-                justRevealedRef.current = true;
-                setReveal({ stat, itemName, brand });
-              }}
-            />
           </View>
-        </View>
+        </KeyboardAvoidingView>
       )}
     </Modal>
   );

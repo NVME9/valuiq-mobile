@@ -98,8 +98,10 @@ export function defaultDaysToSale(createdAt?: string): number {
 }
 
 // Turns a raw /api/scan-history row (snake_case: item_name, net_profit,
-// sell_price, best_platform, created_at) into the PendingScan shape
-// SaleCaptureCard needs.
+// sell_price, best_platform, created_at) OR a thrift run item (camelCase:
+// itemName, profit, sellPrice, bestPlatform, thumb - it's the same "scans"
+// table under the hood, just mapped to camelCase by the thrift-run route)
+// into the PendingScan shape SaleCaptureCard needs.
 export function toPendingScan(row: any): PendingScan {
   const createdAt = row.created_at || new Date().toISOString();
   return {
@@ -107,8 +109,8 @@ export function toPendingScan(row: any): PendingScan {
     item_name: row.item_name || row.itemName || "Item",
     brand: row.brand,
     category: row.category,
-    image_url: row.image_url,
-    net_profit: row.net_profit ?? row.netProfit,
+    image_url: row.image_url || row.thumb,
+    net_profit: row.net_profit ?? row.netProfit ?? row.profit,
     sell_price: row.sell_price ?? row.sellPrice,
     best_platform: row.best_platform ?? row.bestPlatform,
     created_at: createdAt,

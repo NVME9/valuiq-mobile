@@ -8,8 +8,16 @@ import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import Coachmark from "../components/Coachmark";
 import LogSaleModal from "../components/LogSaleModal";
+import PhotoLightbox from "../components/PhotoLightbox";
+import FlipActionsRow from "../components/FlipActionsRow";
 import { toPendingScan } from "../lib/saleCapture";
-import { API_BASE, rerunScan, updateScan, updateThriftItem } from "../lib/api";
+import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty } from "../lib/api";
+
+function shareMsg(name: string, profit?: number, platform?: string): string {
+  const p = (platform || "").split("|||")[0];
+  if (profit && profit > 0) return `Found this ${name} - flipping for ~$${Math.round(profit)} profit${p ? ` on ${p}` : ""}. Tracked with ValuIQ.`;
+  return `Checking out this ${name} on ValuIQ.`;
+}
 
 interface Props {
   token:string; plan:string; scansLeft:number|null;
@@ -47,6 +55,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
   const [editPhotos, setEditPhotos] = useState<string[]>([]);
   const [rerunning, setRerunning]   = useState(false);
   const [logSaleScan, setLogSaleScan] = useState<any|null>(null);
+  const [viewingPhoto, setViewingPhoto] = useState<string|null>(null);
 
   function openEditor(scan: any) {
     setEditingId(scan.id);
@@ -131,6 +140,42 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
     }
     setRerunning(false);
   }
+
+  // Specialty re-run: unlike scans, the original per-category form fields
+  // (size, ref number, etc.) were never stored - only the appraisal result
+  // was. Re-run works from the edited item name/description + any new
+  // photos, same depth as scan re-run already offers. Real category comes
+  // from best_platform (deal-ai-pro's specialty insert stores it there -
+  // the row's own `category` column is always the fixed marker
+  // "specialty_scan", used to filter type=specialty in the history query).
+  async function doSpecialtyRerun(item: any) {
+    if (!editName.trim()) { Alert.alert("Name required", "Enter an item name to re-run."); return; }
+    setRerunning(true);
+    try {
+      const data = await analyzeSpecialty(
+        token, item.best_platform, { description: editName.trim() },
+        editPhotos.length > 0 ? editPhotos : undefined
+      );
+      if (data && data.success && data.result) {
+        const r = data.result;
+        const valueNum = Number(String(r.value || "").replace(/[^0-9.]/g, "").split(".")[0]) || 0;
+        const updates = {
+          item_name: r.identification || editName.trim(),
+          decision: r.decision || item.decision,
+          sell_price: valueNum || item.sell_price,
+        };
+        try { await updateScan(token, item.id, updates); } catch {}
+        setSpecialtyScans(prev => prev.map(s => s.id === item.id ? { ...s, ...updates } : s));
+        closeEditor();
+        setExpanded(item.id);
+      } else {
+        Alert.alert("Re-run failed", data?.error || "Could not re-analyze. Try again.");
+      }
+    } catch {
+      Alert.alert("Re-run failed", "Something went wrong. Try again.");
+    }
+    setRerunning(false);
+  }
   const loadData = useCallback(async () => {
     if (!token) { setLoading(false); return; }
     try {
@@ -153,7 +198,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
   useEffect(() => { loadData(); }, [token]);
 
   // Reset selection when switching tabs or leaving select mode
-  useEffect(() => { setSelected({}); setExpanded(null); }, [tab]);
+  useEffect(() => { setSelected({}); setExpanded(null); setEditingId(null); }, [tab]);
 
   async function deleteOne(id: string) {
     try {
@@ -405,6 +450,19 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                       </View>
                     </View>
 
+                    {!selectMode && (
+                      <View style={s.cardActionsWrap}>
+                        <FlipActionsRow
+                          hasPhoto={!!scan.image_url}
+                          onView={() => setViewingPhoto(scan.image_url)}
+                          onSold={() => setLogSaleScan(scan)}
+                          onEdit={() => { openEditor(scan); setExpanded(scan.id); }}
+                          shareMessage={shareMsg(scan.item_name || "Item", scan.profit || scan.net_profit, scan.best_platform)}
+                          onDelete={() => deleteItem(scan.id, "scan", scan.item_name||"Item")}
+                        />
+                      </View>
+                    )}
+
                     {!selectMode && expanded === scan.id && (
                       <View style={s.expanded}>
                         <View style={s.expandedRow}>
@@ -492,26 +550,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                               </TouchableOpacity>
                             </View>
                           </View>
-                        ) : (
-                          <>
-                            {/* Only way to log a sale - user-initiated, on their own
-                                time, from My Flips. No scan-time or aging-scan prompt. */}
-                            <TouchableOpacity style={s.soldBtn} onPress={() => setLogSaleScan(scan)}>
-                              <Text style={s.soldBtnTxt}>I sold this →</Text>
-                            </TouchableOpacity>
-                            <View style={s.expandedActions}>
-                              <TouchableOpacity style={[s.actionBtn,{flex:1}]} onPress={() => openEditor(scan)}>
-                                <Text style={s.actionBtnTxt}>Edit & Re-run</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                style={[s.actionBtn, {backgroundColor:"#ff5a5a15", borderColor:"#ff5a5a30"}]}
-                                onPress={() => deleteItem(scan.id, "scan", scan.item_name||"Item")}
-                              >
-                                <Text style={[s.actionBtnTxt, {color:C.red}]}>Delete</Text>
-                              </TouchableOpacity>
-                            </View>
-                          </>
-                        )}
+                        ) : null}
                       </View>
                     )}
                   </TouchableOpacity>
@@ -600,22 +639,31 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                                 </View>
                               </View>
                             ) : (
-                            <TouchableOpacity key={i} style={s.thriftItem} activeOpacity={0.7} onPress={() => openThriftEditor(run, item)}>
-                              {item.thumb ? (
-                                <Image source={{uri: item.thumb}} style={s.thriftThumb}/>
-                              ) : (
-                                <View style={[s.thriftThumb, {backgroundColor:C.surfaceHigh, alignItems:"center", justifyContent:"center"}]}>
-                                  <Text style={{fontSize:16, color:C.text4, fontWeight:"800"}}>{(item.itemName||"?").charAt(0).toUpperCase()}</Text>
+                            <View key={i} style={s.thriftItemWrap}>
+                              <View style={s.thriftItemRow}>
+                                {item.thumb ? (
+                                  <Image source={{uri: item.thumb}} style={s.thriftThumb}/>
+                                ) : (
+                                  <View style={[s.thriftThumb, {backgroundColor:C.surfaceHigh, alignItems:"center", justifyContent:"center"}]}>
+                                    <Text style={{fontSize:16, color:C.text4, fontWeight:"800"}}>{(item.itemName||"?").charAt(0).toUpperCase()}</Text>
+                                  </View>
+                                )}
+                                <View style={{flex:1}}>
+                                  <Text style={s.cardName} numberOfLines={1}>{item.itemName || "Item"}</Text>
+                                  <Text style={s.cardPlatform} numberOfLines={1}>Pay {"\u2264"}${item.buyTarget} {"\u00B7"} {item.bestPlatform}</Text>
                                 </View>
-                              )}
-                              <View style={{flex:1}}>
-                                <Text style={s.cardName} numberOfLines={1}>{item.itemName || "Item"}</Text>
-                                <Text style={s.cardPlatform} numberOfLines={1}>Pay {"\u2264"}${item.buyTarget} {"\u00B7"} {item.bestPlatform}</Text>
+                                <Text style={[s.profit, {fontSize:14, color:(item.decision==="BUY"?C.green:C.text4)}]}>
+                                  {item.decision==="BUY" ? "+$"+Math.round(item.profit||0) : "PASS"}
+                                </Text>
                               </View>
-                              <Text style={[s.profit, {fontSize:14, color:(item.decision==="BUY"?C.green:C.text4)}]}>
-                                {item.decision==="BUY" ? "+$"+Math.round(item.profit||0) : "PASS"}
-                              </Text>
-                            </TouchableOpacity>
+                              <FlipActionsRow
+                                hasPhoto={!!item.thumb}
+                                onView={() => setViewingPhoto(item.thumb)}
+                                onSold={() => setLogSaleScan({ ...item, created_at: item.created_at || run.created_at })}
+                                onEdit={() => openThriftEditor(run, item)}
+                                shareMessage={shareMsg(item.itemName || "Item", item.profit, item.bestPlatform)}
+                              />
+                            </View>
                             )
                           ))}
                           <View style={[s.expandedActions, {marginTop:10}]}>
@@ -664,9 +712,13 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                             {isSel && <Text style={s.checkboxTick}>{"\u2713"}</Text>}
                           </View>
                         )}
-                        <View style={[s.thumb, {backgroundColor:"#0a1500", alignItems:"center", justifyContent:"center"}]}>
-                          <Text style={{fontSize:18, color:C.green, fontWeight:"900"}}>{"\u2605"}</Text>
-                        </View>
+                        {item.image_url ? (
+                          <Image source={{uri: item.image_url}} style={s.thumb}/>
+                        ) : (
+                          <View style={[s.thumb, {backgroundColor:"#0a1500", alignItems:"center", justifyContent:"center"}]}>
+                            <Text style={{fontSize:18, color:C.green, fontWeight:"900"}}>{"\u2605"}</Text>
+                          </View>
+                        )}
                         <View style={{flex:1}}>
                           <Text style={s.cardName} numberOfLines={1}>{item.item_name || "Appraisal"}</Text>
                           <Text style={s.cardMeta}>{new Date(item.created_at).toLocaleDateString()}</Text>
@@ -677,8 +729,46 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                         </View>
                       </View>
 
+                      {!selectMode && (
+                        <View style={s.cardActionsWrap}>
+                          <FlipActionsRow
+                            hasPhoto={!!item.image_url}
+                            onView={() => setViewingPhoto(item.image_url)}
+                            onSold={() => setLogSaleScan(item)}
+                            onEdit={() => { openEditor(item); setExpanded(item.id); }}
+                            shareMessage={shareMsg(item.item_name || "Appraisal", undefined, item.best_platform)}
+                            onDelete={() => deleteItem(item.id, "scan", item.item_name||"Appraisal")}
+                          />
+                        </View>
+                      )}
+
                       {!selectMode && expanded === item.id && (
                         <View style={s.expanded}>
+                          {editingId === item.id ? (
+                          <View style={s.editPanel}>
+                            <Text style={s.editLabel}>Item name</Text>
+                            <TextInput style={s.editInput} value={editName} onChangeText={setEditName} placeholder="Item name" placeholderTextColor={C.text4}/>
+                            {editPhotos.length > 0 && (
+                              <ScrollView horizontal style={{marginTop:8}} showsHorizontalScrollIndicator={false}>
+                                {editPhotos.map((ph, pi) => (
+                                  <Image key={pi} source={{uri: ph}} style={s.editPhotoThumb}/>
+                                ))}
+                              </ScrollView>
+                            )}
+                            <TouchableOpacity style={s.addPhotoBtn} onPress={addEditPhoto}>
+                              <Text style={s.addPhotoTxt}>+ Add Photo {editPhotos.length > 0 ? "("+editPhotos.length+")" : ""}</Text>
+                            </TouchableOpacity>
+                            <View style={[s.expandedActions, {marginTop:10}]}>
+                              <TouchableOpacity style={[s.actionBtn,{flex:1, opacity: rerunning ? 0.5 : 1}]} disabled={rerunning} onPress={() => doSpecialtyRerun(item)}>
+                                <Text style={s.actionBtnTxt}>{rerunning ? "Re-running..." : "Re-run Analysis"}</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity style={[s.actionBtn,{backgroundColor:C.surfaceHigh, borderColor:C.border}]} disabled={rerunning} onPress={closeEditor}>
+                                <Text style={[s.actionBtnTxt,{color:C.text3}]}>Cancel</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                          ) : (
+                          <>
                           {appr._ebay && appr._ebay.count > 0 ? (
                             <Text style={{color:C.green, fontSize:12, marginBottom:10}}>{appr._ebay.count} live eBay listings {"\u00B7"} ${appr._ebay.min}-${appr._ebay.max} (median ${appr._ebay.median})</Text>
                           ) : null}
@@ -711,12 +801,8 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                               ))}
                             </View>
                           ) : null}
-                          <TouchableOpacity
-                            style={[s.actionBtn, {backgroundColor:"#ff5a5a15", borderColor:"#ff5a5a30", marginTop:6}]}
-                            onPress={() => deleteItem(item.id, "scan", item.item_name||"Appraisal")}
-                          >
-                            <Text style={[s.actionBtnTxt, {color:C.red}]}>Delete</Text>
-                          </TouchableOpacity>
+                          </>
+                          )}
                         </View>
                       )}
                     </TouchableOpacity>
@@ -734,6 +820,8 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
         scan={logSaleScan ? toPendingScan(logSaleScan) : null}
         onClose={() => { setLogSaleScan(null); loadData(); }}
       />
+
+      <PhotoLightbox uri={viewingPhoto} onClose={() => setViewingPhoto(null)} />
     </SafeAreaView>
   );
 }
@@ -765,6 +853,7 @@ const s = StyleSheet.create({
   card:          { backgroundColor:C.surface, borderRadius:14, marginBottom:10, borderWidth:1, borderColor:C.border, overflow:"hidden" },
   cardSelected:  { borderColor:C.green, borderWidth:2 },
   cardHeader:    { flexDirection:"row", alignItems:"center", padding:12, gap:10 },
+  cardActionsWrap:{ paddingHorizontal:12, paddingBottom:12 },
   checkbox:      { width:24, height:24, borderRadius:6, borderWidth:2, borderColor:C.text4, alignItems:"center", justifyContent:"center" },
   checkboxOn:    { backgroundColor:C.green, borderColor:C.green },
   checkboxTick:  { color:"#000", fontSize:14, fontWeight:"900" },
@@ -784,7 +873,8 @@ const s = StyleSheet.create({
   expandedActions:{ flexDirection:"row", gap:8 },
   soldBtn:       { backgroundColor:C.green, borderRadius:10, paddingVertical:13, alignItems:"center", marginBottom:8 },
   soldBtnTxt:    { color:C.greenDark, fontSize:14, fontWeight:"800" },
-  thriftItem:    { flexDirection:"row", alignItems:"center", gap:10, paddingVertical:8, borderBottomWidth:1, borderBottomColor:C.border },
+  thriftItemWrap:{ paddingVertical:8, borderBottomWidth:1, borderBottomColor:C.border },
+  thriftItemRow: { flexDirection:"row", alignItems:"center", gap:10 },
   thriftThumb:   { width:44, height:44, borderRadius:8, flexShrink:0 },
   editPanel:     { marginTop:4 },
   editLabel:     { color:C.text4, fontSize:11, fontWeight:"700", marginBottom:4, marginTop:8, textTransform:"uppercase" },
