@@ -10,7 +10,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Image, ActivityIndicator,
 } from "react-native";
 import { C } from "../lib/theme";
-import { recordSaleOutcome, defaultDaysToSale, PendingScan } from "../lib/saleCapture";
+import { recordSaleOutcome, defaultDaysToSale, buildDisplayTitle, PendingScan } from "../lib/saleCapture";
 import { fetchFlexStat, FlexStat } from "../lib/flexReveal";
 
 interface Props {
@@ -51,7 +51,7 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal }: Props
     .trim() || "Item";
   const _name = cleanName(scan.item_name);
   const _brand = cleanName(scan.brand || "").replace(/^Item$/, "");  // clean brand; drop if it was only junk
-  const title = _brand ? `${_brand} ${_name}` : _name;
+  const title = buildDisplayTitle(_name, _brand);
 
   return (
     <View style={s.card}>
@@ -86,12 +86,19 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal }: Props
           />
         </View>
         <View style={s.daysField}>
+          {/* daysInput previously had no flex - it sized to its own text
+              content (e.g. "19"), a few px wide, inside a much bigger-looking
+              bordered box. Taps anywhere in that box outside the narrow
+              glyph hit the inert parent View, not the input - on-device
+              confirmed as unresponsive. flex:1 makes the whole box the real
+              touch target; hitSlop pads it further. */}
           <TextInput
             style={s.daysInput}
             value={days}
             onChangeText={(t) => setDays(t.replace(/[^0-9]/g, ""))}
             keyboardType="number-pad"
             placeholderTextColor={C.text4}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 4 }}
           />
           <Text style={s.daysLabel}>days</Text>
         </View>
@@ -154,6 +161,6 @@ const s = StyleSheet.create({
     flex: 1, flexDirection: "row", alignItems: "baseline", justifyContent: "center", backgroundColor: C.surfaceHigh,
     borderColor: C.borderHigh, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10,
   },
-  daysInput: { color: C.text1, fontSize: 24, fontWeight: "700", paddingVertical: 12, minWidth: 30, textAlign: "right" },
+  daysInput: { flex: 1, color: C.text1, fontSize: 24, fontWeight: "700", paddingVertical: 12, minWidth: 30, textAlign: "right" },
   daysLabel: { color: C.text3, fontSize: 14, fontWeight: "600", marginLeft: 5 },
 });

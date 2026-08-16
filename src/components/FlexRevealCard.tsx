@@ -25,6 +25,7 @@ import {
 import Svg, { Defs, RadialGradient, Stop, Rect } from "react-native-svg";
 import { C } from "../lib/theme";
 import { FlexStat } from "../lib/flexReveal";
+import { buildDisplayTitle } from "../lib/saleCapture";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -115,7 +116,7 @@ export function FlexRevealContent({ stat, itemName, brand, animate = true }: Fle
     transform: [{ translateY: ribbonAnim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
   };
 
-  const title = brand ? `${brand} ${itemName || ""}`.trim() : itemName || "";
+  const title = buildDisplayTitle(itemName, brand);
 
   return (
     <View style={s.card}>

@@ -5,6 +5,25 @@ import { API_BASE } from "./api";
 
 export type SaleOutcome = "sold" | "passed" | "not_yet";
 
+// Item names often already include the brand (e.g. item_name "Qunol
+// Minerals Extra Strength..." with brand "Qunol"), so naively concatenating
+// `${brand} ${name}` for display doubles it: "Qunol Qunol Minerals...".
+// Strips ONLY a leading occurrence of the brand token from the name before
+// joining - deliberately narrow (word-boundary match of the brand string
+// specifically, not a generic "collapse repeated words" pass) so a name
+// that's legitimately repetitive for reasons unrelated to the brand is left
+// alone. Shared by SaleCaptureCard.tsx and FlexRevealCard.tsx so the title
+// is deduped identically everywhere it's shown, without mutating the stored
+// record.
+export function buildDisplayTitle(name: string | null | undefined, brand: string | null | undefined): string {
+  const n = (name || "").trim();
+  const b = (brand || "").trim();
+  if (!b) return n;
+  const escaped = b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const deduped = n.replace(new RegExp(`^${escaped}\\b\\s*`, "i"), "").trim();
+  return deduped ? `${b} ${deduped}` : b;
+}
+
 export interface PendingScan {
   id: string;
   item_name: string;
