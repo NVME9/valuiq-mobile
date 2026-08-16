@@ -10,7 +10,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Image, ActivityIndicator,
 } from "react-native";
 import { C } from "../lib/theme";
-import { recordSaleOutcome, defaultDaysToSale, buildDisplayTitle, PendingScan, ProfitDebug } from "../lib/saleCapture";
+import { recordSaleOutcome, defaultDaysToSale, buildDisplayTitle, PendingScan } from "../lib/saleCapture";
 import { fetchFlexStat, FlexStat } from "../lib/flexReveal";
 
 interface Props {
@@ -19,8 +19,7 @@ interface Props {
   onDone: (scanId: string) => void;
   // The caller (LogSaleModal) owns presenting the reveal - this card only
   // ever hands the stat up, it never renders a Modal of its own.
-  // debug is the TEMPORARY ceiling-fallback profit readout - see ProfitDebug.
-  onReveal: (stat: FlexStat, itemName: string, brand: string | null, debug?: ProfitDebug) => void;
+  onReveal: (stat: FlexStat, itemName: string, brand: string | null) => void;
 }
 
 export default function SaleCaptureCard({ token, scan, onDone, onReveal }: Props) {
@@ -40,7 +39,7 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal }: Props
 
     if (result.success && result.scan?.id) {
       const stat = await fetchFlexStat(token, result.scan.id);
-      if (stat) onReveal(stat, _name, _brand || null, result.debug);
+      if (stat) onReveal(stat, _name, _brand || null);
     }
     onDone(scan.id);
   }

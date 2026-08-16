@@ -53,23 +53,9 @@ export interface SavedSale {
   sold_status?: string;
 }
 
-// TEMPORARY - on-screen diagnostic for the ceiling-fallback profit bug.
-// Mirrors exactly what deal-ai-pro's scan-history PATCH used to compute
-// net_profit, so it can be read back verbatim off a real device with no
-// console access, instead of trusting a code-trace. Remove once confirmed
-// fixed on-device.
-export interface ProfitDebug {
-  sale: number;
-  cost: number;
-  costSource: "entered" | "ceiling" | "zero";
-  fee: number;
-  profitExact: number;
-}
-
 export interface RecordSaleResult {
   success: boolean;
   scan: SavedSale | null;
-  debug?: ProfitDebug;
 }
 
 // Record an outcome via the web PATCH (whitelisted moat fields).
@@ -116,7 +102,7 @@ export async function recordSaleOutcome(
       }
     );
     const j = await r.json().catch(() => ({}));
-    return { success: !!j.success, scan: j.scan || null, debug: j.debug || undefined };
+    return { success: !!j.success, scan: j.scan || null };
   } catch {
     return { success: false, scan: null };
   }

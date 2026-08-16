@@ -31,7 +31,7 @@ import React, { useRef, useState } from "react";
 import { Modal, View, Text, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from "react-native";
 import { C } from "../lib/theme";
 import SaleCaptureCard from "./SaleCaptureCard";
-import { PendingScan, ProfitDebug } from "../lib/saleCapture";
+import { PendingScan } from "../lib/saleCapture";
 import { FlexStat } from "../lib/flexReveal";
 import { FlexRevealBody } from "./FlexRevealCard";
 
@@ -43,7 +43,7 @@ interface Props {
 }
 
 export default function LogSaleModal({ visible, token, scan, onClose }: Props) {
-  const [reveal, setReveal] = useState<{ stat: FlexStat; itemName: string; brand: string | null; debug?: ProfitDebug } | null>(null);
+  const [reveal, setReveal] = useState<{ stat: FlexStat; itemName: string; brand: string | null } | null>(null);
   // SaleCaptureCard calls onReveal then onDone back to back, synchronously,
   // on a successful "sold" save. This ref lets onDone tell the two cases
   // apart: a reveal just got queued (skip closing - the reveal owns closing
@@ -62,7 +62,7 @@ export default function LogSaleModal({ visible, token, scan, onClose }: Props) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
       {reveal ? (
-        <FlexRevealBody stat={reveal.stat} itemName={reveal.itemName} brand={reveal.brand} debug={reveal.debug} onClose={close} />
+        <FlexRevealBody stat={reveal.stat} itemName={reveal.itemName} brand={reveal.brand} onClose={close} />
       ) : (
         <KeyboardAvoidingView
           style={{ flex: 1 }}
@@ -84,9 +84,9 @@ export default function LogSaleModal({ visible, token, scan, onClose }: Props) {
                   if (justRevealedRef.current) { justRevealedRef.current = false; return; }
                   close();
                 }}
-                onReveal={(stat, itemName, brand, debug) => {
+                onReveal={(stat, itemName, brand) => {
                   justRevealedRef.current = true;
-                  setReveal({ stat, itemName, brand, debug });
+                  setReveal({ stat, itemName, brand });
                 }}
               />
             </View>
