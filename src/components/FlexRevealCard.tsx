@@ -20,12 +20,12 @@
 // Haptics, no new native module - this ships over-the-air.
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Modal, View, Text, StyleSheet, TouchableOpacity, Animated, Easing, Dimensions, Alert,
+  Modal, View, Text, StyleSheet, TouchableOpacity, Animated, Easing, Dimensions, Alert, Platform,
 } from "react-native";
 import Svg, { Defs, RadialGradient, Stop, Rect } from "react-native-svg";
 import { C } from "../lib/theme";
 import { FlexStat } from "../lib/flexReveal";
-import { buildDisplayTitle } from "../lib/saleCapture";
+import { buildDisplayTitle, ProfitDebug } from "../lib/saleCapture";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -173,6 +173,11 @@ interface FlexRevealBodyProps {
   onClose: () => void;
   onShare?: () => void;
   onLeaderboard?: () => void;
+  // TEMPORARY - on-screen diagnostic for the ceiling-fallback profit bug,
+  // read verbatim off-device (no console access). Remove once confirmed
+  // fixed: search this file and LogSaleModal.tsx/SaleCaptureCard.tsx for
+  // "TEMPORARY" and ProfitDebug/debug wiring.
+  debug?: ProfitDebug;
 }
 
 // The reveal screen's content, with no Modal of its own - meant to be
@@ -180,7 +185,7 @@ interface FlexRevealBodyProps {
 // flow (LogSaleModal), never mounted alongside a second native Modal. The
 // entrance animation triggers on mount, since mounting IS becoming visible
 // here (no separate `visible` prop to watch).
-export function FlexRevealBody({ stat, itemName, brand, onClose, onShare, onLeaderboard }: FlexRevealBodyProps) {
+export function FlexRevealBody({ stat, itemName, brand, onClose, onShare, onLeaderboard, debug }: FlexRevealBodyProps) {
   const entrance = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -221,6 +226,12 @@ export function FlexRevealBody({ stat, itemName, brand, onClose, onShare, onLead
           <Text style={s.secondaryBtnText}>See the leaderboard →</Text>
         </TouchableOpacity>
       </View>
+
+      {debug ? (
+        <Text style={s.debugLine} selectable>
+          {`dbg: sale=${debug.sale} cost=${debug.cost} costSource=${debug.costSource} fee=${debug.fee} profit=${debug.profitExact}`}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -233,18 +244,19 @@ interface FlexRevealCardProps {
   onClose: () => void;
   onShare?: () => void;
   onLeaderboard?: () => void;
+  debug?: ProfitDebug;
 }
 
 // Standalone Modal-wrapped version, for any future spot that wants to show
 // the reveal on its own (not mid-flow after LogSaleModal - that path renders
 // FlexRevealBody directly instead, see LogSaleModal.tsx).
 export default function FlexRevealCard({
-  visible, stat, itemName, brand, onClose, onShare, onLeaderboard,
+  visible, stat, itemName, brand, onClose, onShare, onLeaderboard, debug,
 }: FlexRevealCardProps) {
   if (!stat) return null;
   return (
     <Modal visible={visible} animationType="fade" transparent={false} onRequestClose={onClose}>
-      <FlexRevealBody stat={stat} itemName={itemName} brand={brand} onClose={onClose} onShare={onShare} onLeaderboard={onLeaderboard} />
+      <FlexRevealBody stat={stat} itemName={itemName} brand={brand} onClose={onClose} onShare={onShare} onLeaderboard={onLeaderboard} debug={debug} />
     </Modal>
   );
 }
@@ -290,4 +302,6 @@ const s = StyleSheet.create({
   },
   ribbonText: { color: C.text2, fontSize: 13, fontWeight: "700" },
   footer: { color: C.text4, fontSize: 11, fontWeight: "600", letterSpacing: 1, marginTop: 34, textTransform: "uppercase" },
+  // TEMPORARY - see debug prop on FlexRevealBody.
+  debugLine: { color: "#ff9900", fontSize: 11, fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }), textAlign: "center", paddingHorizontal: 20, paddingBottom: 16 },
 });
