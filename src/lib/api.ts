@@ -181,7 +181,14 @@ export async function getScanHistory(token: string): Promise<any[]> {
 export async function scanImage(token: string, photos: string[], description?: string, buyPrice?: number): Promise<any> {
   const body: any = {
     userToken: token,
-    images: photos.map(b => `data:image/jpeg;base64,${b}`),
+    // lens/route.ts only ever reads images[0] for identification - the
+    // review screen lets a user capture up to 5 photos, but uploading all
+    // of them here was pure waste, silently discarded server-side. On a
+    // real phone upload, that's several extra MB (each ~1024px/0.6-quality
+    // JPEG) over cellular for zero benefit - a real contributor to scan
+    // latency that server-side timing can't even see (it starts after the
+    // request body has already arrived).
+    images: photos.length ? [`data:image/jpeg;base64,${photos[0]}`] : [],
     textInput: description || "",
     buyPrice: buyPrice || 0,
     // Surfaces _debug.timing (per-stage ms) on every scan - the on-screen
