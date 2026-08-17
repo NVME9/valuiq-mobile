@@ -37,6 +37,29 @@ interface Props {
   tourStep?: string|null; advanceTour?: (s: string|null) => void; skipTour?: () => void;
 }
 
+// Reusable collapsed-by-default section: the hero answers the question
+// immediately, everything else (best-place-to-sell, verify-prices, payout,
+// risk, analysis & tips, share & content) is one tap away instead of
+// sprawled down the screen.
+function CollapsibleSection({ title, expanded, onToggle, children }: { title: string; expanded: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return (
+    <>
+      <TouchableOpacity
+        style={[s.infoCard,{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}]}
+        onPress={onToggle} activeOpacity={0.85}
+      >
+        <Text style={s.infoLabel}>{title}</Text>
+        <Text style={{color:C.text4,fontSize:12,fontWeight:"700"}}>{expanded ? "▲" : "▼"}</Text>
+      </TouchableOpacity>
+      {expanded && (
+        <View style={[s.infoCard,{marginTop:-8,borderTopLeftRadius:0,borderTopRightRadius:0}]}>
+          {children}
+        </View>
+      )}
+    </>
+  );
+}
+
 export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, onNavigate, onLogout, tourStep, advanceTour, skipTour }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const insets = useSafeAreaInsets();
@@ -115,6 +138,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const cameraRef        = useRef<any>(null);
   const [showAnalysis,   setShowAnalysis]   = useState(false);
   const [showShare,      setShowShare]      = useState(false);
+  const [showPlatforms,  setShowPlatforms]  = useState(false);
+  const [showVerify,     setShowVerify]     = useState(false);
+  const [showPayout,     setShowPayout]     = useState(false);
+  const [showRisk,       setShowRisk]       = useState(false);
 
   function reset() {
     setStep("camera");
@@ -310,46 +337,101 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const hasGoodData   = result.dataQuality === "strong";
     const hasLimitedData = result.dataQuality === "limited";
     const hasNoData      = !hasGoodData && !hasLimitedData;
-    const isProfit       = (result.netProfit || 0) > 0;
-    const dc             = result.decision === "BUY" ? C.green : result.decision === "WATCH" ? C.yellow : C.red;
-    const verdict        = hasNoData ? "UNKNOWN" : result.decision || "PASS";
-    const isPass          = verdict === "PASS";
     const specialtyMatch  = matchSpecialtyCategory(result.category, result.itemName || result.item_name);
 
-    // Single source of truth for profit + ROI: whichever number is actually
-    // shown as the hero (Oracle real/est profit when present, else the
-    // lens's own netProfit), paired with the same buyTarget. Every ROI
-    // display on this screen reads from this pairing instead of mixing lens
-    // netProfit with Oracle medianProfit, so profit and ROI always reconcile.
+    // Profit: whichever number is actually shown as the hero (Oracle
+    // real/est profit when present, else the lens's own netProfit). Both are
+    // computed against the SAME cost basis - the user's entered buy price
+    // when they gave one, else the max-buy ceiling - so this is genuinely
+    // "actual profit" whenever a price was entered, not a projection.
     const oraclePred    = oracle?.prediction;
     const oracleProfit  = oraclePred
       ? Number(oracle.dataMode === "crowd-led" ? oraclePred.medianProfit : oraclePred.estProfit)
       : NaN;
     const heroProfit     = !isNaN(oracleProfit) ? oracleProfit : (Number(result.netProfit) || 0);
-    const heroBuyTarget  = Number(result.buyTarget) || 0;
-    const heroRoi         = heroBuyTarget > 0
-      ? Math.round((heroProfit / heroBuyTarget) * 100)
+
+    const enteredBp = Number(buyPrice) || 0;
+    // Hoisted so the hero and the debug readout read the exact same value.
+    const oracleMaxBuy = oraclePred
+      ? (oracle.dataMode === "crowd-led" ? oraclePred.safeMaxBuy : oraclePred.estMaxBuy)
+      : null;
+    const maxBuy = oracleMaxBuy != null ? Number(oracleMaxBuy) : (Number(result.buyTarget) || null);
+    const profitLabel = enteredBp > 0 ? "actual profit" : "projected profit";
+
+    // ROI MUST be computed against the SAME cost basis as heroProfit - the
+    // entered price when one exists, else the max-buy ceiling. This used to
+    // always divide by buyTarget (the ceiling) even when a real price was
+    // entered, which silently understated ROI (e.g. $13 profit / $5 ceiling
+    // = 260%, instead of the real $13 / $1 entered = 1300%) and fed the
+    // wrong number into the tier classifier - that's what made a 1300%-ROI
+    // flip misread as "not worth the trip."
+    const actualCostBasis = enteredBp > 0 ? enteredBp : (maxBuy || 0);
+    const heroRoi = actualCostBasis > 0
+      ? Math.round((heroProfit / actualCostBasis) * 100)
       : (Number(result.roi) || 0);
 
-    // Outcome tier — reacts to magnitude, not just BUY/WATCH/PASS. Drives the
-    // flex-first hero below; the verdict word above is unchanged.
+    const oracleDaysTxt = oraclePred
+      ? (oraclePred.medianDays != null ? `~${oraclePred.medianDays}d` : (oraclePred.medianDaysLabel || null))
+      : null;
+    const sellTimeLabel = oraclePred
+      ? (oraclePred.medianDays != null
+          ? `~${oraclePred.medianDays} days`
+          : (oraclePred.medianDaysLabel && oraclePred.medianDaysLabel !== "not enough data yet" ? oraclePred.medianDaysLabel : null))
+      : null;
+
+    // Outcome tier — THE single source of truth for the verdict. Dominated
+    // by ROI/margin (not raw profit dollars), so a $13 profit on a $1 buy
+    // (1300% ROI) and a $13 profit on a $100 buy (13% ROI) read as opposite
+    // verdicts even though the dollar amount is identical. Nothing else on
+    // this screen independently computes or displays a conflicting verdict.
     const outcome = classifyOutcome({
       decision: result.decision,
       netProfit: heroProfit,
+      roi: heroRoi,
       velocityTier: result.velocity?.tier,
       sellThrough: result.velocity?.sellThrough,
       dataQuality: result.dataQuality,
       sellPrice: Number(result.sellPrice) || null,
+      sellTimeLabel,
     });
+    const isSkip = outcome.tier === "skip";
 
-    // Hoisted so the hero card and the debug readout below read the exact
-    // same computed values instead of two separate copies that could drift.
-    const oracleMaxBuy = oracle?.prediction
-      ? (oracle.dataMode === "crowd-led" ? oracle.prediction.safeMaxBuy : oracle.prediction.estMaxBuy)
+    const categoryLine = result.category
+      ? `${result.category}${result.condition ? " - " + result.condition : ""}`
       : null;
-    const oracleDaysTxt = oracle?.prediction
-      ? (oracle.prediction.medianDays != null ? `~${oracle.prediction.medianDays}d` : (oracle.prediction.medianDaysLabel || "not enough data yet"))
-      : null;
+
+    // Max-buy ALWAYS ships with the reasoning that makes it trustworthy -
+    // cites the real comp count when we have one, and judges the actual
+    // purchase when a price was entered, instead of appearing as a bare
+    // number asking for trust.
+    const compCount = result.priceData?.count || 0;
+    const isRealComps = !!result.priceData?.isRealData;
+    const dataPhrase = isRealComps && compCount
+      ? `Based on ${compCount} real sold listing${compCount === 1 ? "" : "s"}`
+      : "Based on market estimate";
+    const maxBuyReasoning = maxBuy == null ? "" : (
+      enteredBp > 0
+        ? (enteredBp <= maxBuy
+            ? `${dataPhrase}. You paid $${enteredBp} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
+            : `${dataPhrase}. You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
+        : `${dataPhrase}. Pay this or less to keep a healthy margin.`
+    );
+
+    const dataTag = oraclePred
+      ? (oraclePred.medianProfitIsReal
+          ? "● REAL DATA"
+          : (result.priceData?.isRealData && result.priceData?.count ? `Based on ${result.priceData.count} listings` : "ESTIMATE"))
+      : undefined;
+    const dataTagColor = oraclePred ? (oraclePred.medianProfitIsReal ? "#9ef01a" : "#8a7aa8") : undefined;
+    const footNote = oraclePred
+      ? (oracle.dataMode === "crowd-led" ? "From real reseller outcomes." : "Market estimate. Sharpens as the community logs real sales.")
+      : undefined;
+    const secondaryStats = [
+      { label: "sell price", value: result.sellPrice != null ? "$" + Math.round(result.sellPrice) : "—" },
+      { label: "ROI", value: heroRoi ? heroRoi + "%" : "—" },
+      { label: "to sell", value: oracleDaysTxt || "pending" },
+    ];
+    const skipDetail = isSkip ? (result.reasoning || null) : null;
 
     return (
       <SafeAreaView style={s.safe}>
@@ -384,34 +466,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,paddingBottom:60}} showsVerticalScrollIndicator={false}>
 
-          {/* - VERDICT CARD - */}
-          <View style={[s.verdictCard,{borderColor:(hasNoData?C.border:dc)+"40",backgroundColor:(hasNoData?C.surface:dc)+"10"}]}>
-            <TouchableOpacity
-              style={s.editTopBtn}
-              onPress={()=>{
-                // Deliberately NOT clearing result here - the review screen
-                // never reads it, and keeping it around is what lets that
-                // screen's back button tell "editing an existing result"
-                // apart from "starting a fresh scan" and return to it.
-                setDescription(result.itemName||"");
-                setStep("review");
-              }}
-              activeOpacity={0.8}
-              hitSlop={{top:8,bottom:8,left:8,right:8}}
-            >
-              <Text style={s.editTopBtnIcon}>✏️</Text>
-            </TouchableOpacity>
-            {photos[0] && (
-              <Image source={{uri:`data:image/jpeg;base64,${photos[0]}`}}
-                style={{width:"100%",height:160,borderRadius:10,marginBottom:12}} resizeMode="cover"/>
-            )}
-            <Text style={[s.verdictText,{color:hasNoData?C.text3:dc,fontSize:42,lineHeight:48}]} numberOfLines={1} adjustsFontSizeToFit>
-              {verdict === "BUY" ? "BUY IT" : verdict === "WATCH" ? "WATCH IT" : verdict === "UNKNOWN" ? "UNKNOWN" : "PASS"}
-            </Text>
-            <Text style={s.itemName} numberOfLines={2}>{result.itemName || result.item_name || "Unknown Item"}</Text>
-            {result.category ? <Text style={s.itemMeta}>{result.category}{result.condition ? " - " + (result.condition) + "" : ""}</Text> : null}
-          </View>
-
           {/* TEMPORARY DEBUG READOUT — raw values feeding every headline
               number on this screen, so a wrong number can be traced to its
               source on-device. Remove once the profit-math bugs are
@@ -419,14 +473,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           <View style={{backgroundColor:"#1a1200",borderWidth:1,borderColor:C.yellow+"50",borderRadius:10,padding:10,marginBottom:12}}>
             <Text style={{color:C.yellow,fontSize:10,fontWeight:"900",letterSpacing:0.5,marginBottom:4}}>DEBUG (temporary)</Text>
             <Text style={{color:C.text3,fontSize:11,lineHeight:16}}>
-              enteredBuyPrice: {Number(buyPrice) || 0}{"\n"}
+              enteredBuyPrice: {enteredBp}{"\n"}
               salePrice: {result.sellPrice != null ? result.sellPrice : "—"}{"\n"}
               feeRate: {result.platformBreakdown?.[0]?.feeRate || "—"} ({result.bestPlatform || "—"}){"\n"}
-              computedProfit (heroProfit): {heroProfit}{"\n"}
-              lens netProfit: {result.netProfit != null ? result.netProfit : "—"}{"\n"}
-              maxBuyCeiling (oracle): {oracleMaxBuy != null ? oracleMaxBuy : "—"} · lens buyTarget: {result.buyTarget != null ? result.buyTarget : "—"}{"\n"}
-              sellTime (oracle, real): {oracleDaysTxt || "—"} · lens dataQuality: {result.dataQuality || "—"}{"\n"}
-              chosenTier: {outcome.tier} · decision: {result.decision || "—"} · verdict shown: {verdict}
+              computedProfit: {heroProfit} · costUsed: {actualCostBasis} ({enteredBp > 0 ? "entered price" : "max-buy ceiling"}){"\n"}
+              maxBuyCeiling: {maxBuy != null ? maxBuy : "—"}{"\n"}
+              sellTime: {sellTimeLabel || "pending"}{"\n"}
+              ROI: {heroRoi}%{"\n"}
+              chosenTier: {outcome.tier} · decision: {result.decision || "—"}
             </Text>
           </View>
 
@@ -446,7 +500,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           {/* - PROFIT (only when we have data) - */}
           {!hasNoData && (
             <>
-              {/* Data confidence */}
+              {/* Data confidence - shown in both BUY and SKIP layouts; backs
+                  the max-buy reasoning (and the skip reason) either way. */}
               {hasGoodData && result.priceData && result.priceData.isRealData ? (
                 <TouchableOpacity style={s.goodBanner} onPress={()=>Linking.openURL(result.priceData.ebaySearchUrl)}>
                   <Text></Text>
@@ -463,154 +518,220 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 </View>
               ) : null}
 
-              {/* PROFIT FLEX HERO - leads with the outcome, reacts to tier.
-                  Dont-pay-more-than is demoted to a secondary stat below
-                  the profit number instead of being the hero itself. */}
-              {oracle && oracle.prediction && (() => {
-                const maxBuy = oracleMaxBuy;
-                const daysTxt = oracleDaysTxt;
-                const dataTag = oracle.prediction.medianProfitIsReal
-                  ? "● REAL DATA"
-                  : (result.priceData?.isRealData && result.priceData?.count
-                      ? `Based on ${result.priceData.count} listings`
-                      : "ESTIMATE");
-                const dataTagColor = oracle.prediction.medianProfitIsReal ? "#9ef01a" : "#8a7aa8";
-                const footNote = oracle.dataMode === "crowd-led"
-                  ? "From real reseller outcomes."
-                  : "Market estimate. Sharpens as the community logs real sales.";
-                return (
-                  <ProfitFlexHero
-                    outcome={outcome}
-                    heroProfit={heroProfit}
-                    dataTag={dataTag}
-                    dataTagColor={dataTagColor}
-                    footNote={footNote}
-                    secondaryStats={[
-                      { label: "pay max", value: maxBuy != null ? "$" + Math.round(maxBuy) : "—" },
-                      { label: "sell price", value: result.sellPrice != null ? "$" + Math.round(result.sellPrice) : "—" },
-                      { label: "ROI", value: heroRoi ? heroRoi + "%" : "—" },
-                      { label: "to sell", value: daysTxt },
-                    ]}
-                  />
-                );
-              })()}
+              {/* THE hero: verdict + profit + max-buy (with reasoning) + key
+                  stats, reconciled into one card instead of a separate
+                  verdict card stacked on a separate Profit Oracle card.
+                  outcome (classifyOutcome) is the single source of truth for
+                  buy-vs-skip - nothing else on this screen computes or shows
+                  a different verdict. */}
+              <ProfitFlexHero
+                outcome={outcome}
+                itemName={result.itemName || result.item_name || "Unknown Item"}
+                categoryLine={categoryLine}
+                photoBase64={photos[0]}
+                onEdit={()=>{
+                  // Deliberately NOT clearing result here - the review screen
+                  // never reads it, and keeping it around is what lets that
+                  // screen's back button tell "editing an existing result"
+                  // apart from "starting a fresh scan" and return to it.
+                  setDescription(result.itemName||"");
+                  setStep("review");
+                }}
+                isSkip={isSkip}
+                heroProfit={heroProfit}
+                profitLabel={profitLabel}
+                maxBuy={maxBuy}
+                maxBuyReasoning={maxBuyReasoning}
+                dataTag={dataTag}
+                dataTagColor={dataTagColor}
+                secondaryStats={secondaryStats}
+                footNote={footNote}
+                skipDetail={skipDetail}
+              />
 
-              {/* Share result as image - promoted out of the collapsed Share &
-                  Content section since it's the highest-intent share action */}
-              <TouchableOpacity
-                style={{backgroundColor:C.green,borderRadius:14,paddingVertical:15,marginBottom:12,alignItems:"center",justifyContent:"center",flexDirection:"row",gap:8,minHeight:52,opacity:sharingImage?0.6:1}}
-                disabled={sharingImage}
-                activeOpacity={0.85}
-                onPress={shareResultImage}
-              >
-                {sharingImage ? (
-                  <ActivityIndicator color={C.greenDark} size="small" />
-                ) : (
-                  <>
-                    <Text style={{fontSize:16}}>{"📷"}</Text>
-                    <Text style={{color:C.greenDark,fontSize:15,fontWeight:"900"}}>Share result as image</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              {/* Everything below is buy-oriented - hidden entirely on a
+                  skip verdict, which is shown justified by its one reason
+                  in the hero above and stripped of buy-context clutter. */}
+              {!isSkip && (
+                <>
+                  {/* Share result as image - promoted out of the collapsed
+                      Share & Content section since it's the highest-intent
+                      share action */}
+                  <TouchableOpacity
+                    style={{backgroundColor:C.green,borderRadius:14,paddingVertical:15,marginBottom:12,alignItems:"center",justifyContent:"center",flexDirection:"row",gap:8,minHeight:52,opacity:sharingImage?0.6:1}}
+                    disabled={sharingImage}
+                    activeOpacity={0.85}
+                    onPress={shareResultImage}
+                  >
+                    {sharingImage ? (
+                      <ActivityIndicator color={C.greenDark} size="small" />
+                    ) : (
+                      <>
+                        <Text style={{fontSize:16}}>{"📷"}</Text>
+                        <Text style={{color:C.greenDark,fontSize:15,fontWeight:"900"}}>Share result as image</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
 
-              {/* SOFT NOTIFICATION ASK - only after a BUY, in context, never a cold OS prompt */}
-              {pendingCheckIn && !checkInAsked && (
-                <View style={s.askCard}>
-                  <Text style={s.askTitle}>Want a reminder to log what this sells for?</Text>
-                  <Text style={s.askBody}>
-                    We'll check back in about 2 weeks. Logging what actually sold keeps your profit
-                    stats real - and sharpens the Oracle for everyone.
-                  </Text>
-                  <View style={s.askRow}>
-                    <TouchableOpacity style={s.askNo} onPress={declineCheckIn} activeOpacity={0.8}>
-                      <Text style={s.askNoTxt}>Not now</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.askYes} onPress={acceptCheckIn} activeOpacity={0.85}>
-                      <Text style={s.askYesTxt}>Yes, remind me</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-
-
-              {/* PASS reason - shown in place of the platform breakdown */}
-              {isPass && result.reasoning && (
-                <View style={s.infoCard}>
-                  <Text style={s.infoLabel}>Why PASS</Text>
-                  <Text style={s.infoText}>{result.reasoning}</Text>
-                </View>
-              )}
-
-              {/* Platform comparison - profit ranked (BUY/WATCH only) */}
-              {!isPass && result.platformBreakdown && result.platformBreakdown.length > 0 && (
-                <View style={s.infoCard}>
-                  <Text style={[s.infoLabel,{marginBottom:10}]}>BEST PLACE TO SELL</Text>
-                  {(goDeeper ? result.platformBreakdown : result.platformBreakdown.slice(0,3)).map((pb:any, i:number) => {
-                    const profNum = Number(pb.netProfit) || 0;
-                    const isNeg = profNum < 0;
-                    const isBest = i === 0 && !isNeg;
-                    return (
-                    <View key={pb.platform} style={{marginBottom:goDeeper?14:8}}>
-                      <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}}>
-                        <View style={{flexDirection:"row",alignItems:"center",gap:6}}>
-                          <View style={{width:3,height:16,borderRadius:2,backgroundColor:isBest?C.green:C.border}}/>
-                          <Text style={{color:i===0?C.text1:C.text3,fontSize:14,fontWeight:i===0?"800":"500"}}>{pb.platform}</Text>
-                          {isBest && <Text style={{color:C.green,fontSize:9,fontWeight:"900"}}>BEST</Text>}
-                        </View>
-                        <Text style={{color:isNeg?C.red:(i===0?C.green:C.text2),fontSize:15,fontWeight:"800"}}>
-                          {isNeg ? "-$" + Math.abs(profNum) : "+$" + profNum} profit
-                        </Text>
+                  {/* SOFT NOTIFICATION ASK - only on a real buy verdict, never on a skip */}
+                  {pendingCheckIn && !checkInAsked && (
+                    <View style={s.askCard}>
+                      <Text style={s.askTitle}>Want a reminder to log what this sells for?</Text>
+                      <Text style={s.askBody}>
+                        We'll check back in about 2 weeks. Logging what actually sold keeps your profit
+                        stats real - and sharpens the Oracle for everyone.
+                      </Text>
+                      <View style={s.askRow}>
+                        <TouchableOpacity style={s.askNo} onPress={declineCheckIn} activeOpacity={0.8}>
+                          <Text style={s.askNoTxt}>Not now</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={s.askYes} onPress={acceptCheckIn} activeOpacity={0.85}>
+                          <Text style={s.askYesTxt}>Yes, remind me</Text>
+                        </TouchableOpacity>
                       </View>
-                      {goDeeper && (
-                        <View style={{flexDirection:"row",flexWrap:"wrap",gap:10,marginTop:4,marginLeft:9}}>
-                          <Text style={{color:C.text4,fontSize:11}}>Sells ${pb.sellPrice}</Text>
-                          <Text style={{color:C.text4,fontSize:11}}>Fees {pb.feeRate}</Text>
-                          <Text style={{color:C.text4,fontSize:11}}>{pb.roi}% ROI</Text>
-                          <Text style={{color:C.text4,fontSize:11}}>Paid out {pb.payoutSpeed}</Text>
+                    </View>
+                  )}
+
+                  {/* Collapsed by default - the hero above already answers
+                      the question; everything else is one tap away. */}
+                  {result.platformBreakdown && result.platformBreakdown.length > 0 && (
+                    <CollapsibleSection title="BEST PLACE TO SELL" expanded={showPlatforms} onToggle={()=>setShowPlatforms(v=>!v)}>
+                      {(goDeeper ? result.platformBreakdown : result.platformBreakdown.slice(0,3)).map((pb:any, i:number) => {
+                        const profNum = Number(pb.netProfit) || 0;
+                        const isNeg = profNum < 0;
+                        const isBest = i === 0 && !isNeg;
+                        return (
+                        <View key={pb.platform} style={{marginBottom:goDeeper?14:8}}>
+                          <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}}>
+                            <View style={{flexDirection:"row",alignItems:"center",gap:6}}>
+                              <View style={{width:3,height:16,borderRadius:2,backgroundColor:isBest?C.green:C.border}}/>
+                              <Text style={{color:i===0?C.text1:C.text3,fontSize:14,fontWeight:i===0?"800":"500"}}>{pb.platform}</Text>
+                              {isBest && <Text style={{color:C.green,fontSize:9,fontWeight:"900"}}>BEST</Text>}
+                            </View>
+                            <Text style={{color:isNeg?C.red:(i===0?C.green:C.text2),fontSize:15,fontWeight:"800"}}>
+                              {isNeg ? "-$" + Math.abs(profNum) : "+$" + profNum} profit
+                            </Text>
+                          </View>
+                          {goDeeper && (
+                            <View style={{flexDirection:"row",flexWrap:"wrap",gap:10,marginTop:4,marginLeft:9}}>
+                              <Text style={{color:C.text4,fontSize:11}}>Sells ${pb.sellPrice}</Text>
+                              <Text style={{color:C.text4,fontSize:11}}>Fees {pb.feeRate}</Text>
+                              <Text style={{color:C.text4,fontSize:11}}>{pb.roi}% ROI</Text>
+                              <Text style={{color:C.text4,fontSize:11}}>Paid out {pb.payoutSpeed}</Text>
+                            </View>
+                          )}
+                        </View>
+                        );
+                      })}
+                      <TouchableOpacity onPress={()=>setGoDeeper(g=>!g)} style={{marginTop:4,paddingVertical:8,alignItems:"center"}}>
+                        <Text style={{color:C.green,fontSize:13,fontWeight:"800"}}>{goDeeper?"Show less":"Go Deeper - full breakdown"}</Text>
+                      </TouchableOpacity>
+                    </CollapsibleSection>
+                  )}
+
+                  {result.priceData?.allPlatformLinks && (
+                    <CollapsibleSection title="VERIFY PRICES" expanded={showVerify} onToggle={()=>setShowVerify(v=>!v)}>
+                      <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
+                        {[
+                          {name:"eBay Sold", url:result.priceData.allPlatformLinks?.eBay},
+                          {name:"eBay Active", url:result.priceData.allPlatformLinks?.eBayActive},
+                          {name:"Poshmark", url:result.priceData.allPlatformLinks?.Poshmark},
+                          {name:"Mercari", url:result.priceData.allPlatformLinks?.Mercari},
+                          {name:"Google", url:result.priceData.allPlatformLinks?.Google},
+                        ].filter(l => l.url).map(link => (
+                          <TouchableOpacity key={link.name} style={{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:8,paddingHorizontal:10,paddingVertical:6}}
+                            onPress={()=>Linking.openURL(link.url)}>
+                            <Text style={{color:C.green,fontSize:11,fontWeight:"700"}}>{link.name} {'>'}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </CollapsibleSection>
+                  )}
+
+                  <CollapsibleSection title="PAYOUT" expanded={showPayout} onToggle={()=>setShowPayout(v=>!v)}>
+                    <Text style={{color:C.text1,fontSize:14,fontWeight:"700"}}>{result.payoutSpeed||"3-5 days"}</Text>
+                  </CollapsibleSection>
+
+                  {result.riskScore !== undefined && (
+                    <CollapsibleSection title="RISK" expanded={showRisk} onToggle={()=>setShowRisk(v=>!v)}>
+                      <Text style={{color:C.text1,fontSize:13,fontWeight:"700"}}>Risk Score: {result.riskScore}/10</Text>
+                      {result.watchOutFor ? <Text style={{color:C.text4,fontSize:11,marginTop:4}}>{result.watchOutFor}</Text> : null}
+                    </CollapsibleSection>
+                  )}
+
+                  {(result.hotTip || result.listingTips?.length > 0) && (
+                    <CollapsibleSection title="Analysis & Tips" expanded={showAnalysis} onToggle={()=>setShowAnalysis(v=>!v)}>
+                      {result.hotTip ? (
+                        <View style={{marginBottom:12}}>
+                          <Text style={[s.infoLabel,{color:C.red}]}>Hot Tip</Text>
+                          <Text style={s.infoText}>{result.hotTip}</Text>
+                        </View>
+                      ) : null}
+                      {result.reasoning ? (
+                        <View style={{marginBottom:12}}>
+                          <Text style={s.infoLabel}>Analysis</Text>
+                          <Text style={s.infoText}>{result.reasoning}</Text>
+                        </View>
+                      ) : null}
+                      {result.listingTips?.length > 0 && (
+                        <View>
+                          <Text style={s.infoLabel}>Listing Tips</Text>
+                          {result.listingTips.map((tip:string,i:number)=>(
+                            <View key={i} style={{flexDirection:"row",gap:8,marginBottom:6}}>
+                              <Text style={{color:C.green,fontSize:13}}>{'>'}</Text>
+                              <Text style={{color:C.text2,fontSize:13,lineHeight:20,flex:1}}>{tip}</Text>
+                            </View>
+                          ))}
                         </View>
                       )}
-                    </View>
-                    );
-                  })}
-                  <TouchableOpacity onPress={()=>setGoDeeper(g=>!g)} style={{marginTop:4,paddingVertical:8,alignItems:"center"}}>
-                    <Text style={{color:C.green,fontSize:13,fontWeight:"800"}}>{goDeeper?"Show less":"Go Deeper - full breakdown"}</Text>
-                  </TouchableOpacity>
-                </View>
+                    </CollapsibleSection>
+                  )}
+
+                  <CollapsibleSection title="Share & Content" expanded={showShare} onToggle={()=>setShowShare(v=>!v)}>
+                     <ShareButton
+                       message={
+                         " Just found a $" + Math.round(heroProfit) + " profit flip! " + (result.itemName||"Item") + " - " + heroRoi + "% ROI on " + (result.bestPlatform||"eBay")
+                         + "\n\nI use ValuIQ to find profitable flips > getvaluiq.com"
+                       }
+                       title="My ValuIQ Find"
+                       compact
+                     />
+                     {heroProfit >= 20 && (
+                       <TouchableOpacity
+                         style={s.communityShareBtn}
+                         disabled={winShared || sharingWin}
+                         activeOpacity={0.85}
+                         onPress={async () => {
+                           setSharingWin(true);
+                           const ok = await shareWin(token, result.itemName || "Great find", heroProfit || 0, result.bestPlatform || "eBay", "");
+                           setSharingWin(false);
+                           if (ok) setWinShared(true);
+                         }}>
+                         <Text style={s.communityShareTxt}>
+                           {winShared ? "✓  Shared with the community!" : sharingWin ? "Sharing..." : "🎉  Share this win with the community"}
+                         </Text>
+                       </TouchableOpacity>
+                     )}
+                  </CollapsibleSection>
+                </>
               )}
 
-              {/* Verification links */}
-              {result.priceData?.allPlatformLinks && (
-                <View style={s.infoCard}>
-                  <Text style={[s.infoLabel,{marginBottom:10}]}>VERIFY PRICES</Text>
-                  <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
-                    {[
-                      {name:"eBay Sold", url:result.priceData.allPlatformLinks?.eBay},
-                      {name:"eBay Active", url:result.priceData.allPlatformLinks?.eBayActive},
-                      {name:"Poshmark", url:result.priceData.allPlatformLinks?.Poshmark},
-                      {name:"Mercari", url:result.priceData.allPlatformLinks?.Mercari},
-                      {name:"Google", url:result.priceData.allPlatformLinks?.Google},
-                    ].filter(l => l.url).map(link => (
-                      <TouchableOpacity key={link.name} style={{backgroundColor:C.surface,borderWidth:1,borderColor:C.border,borderRadius:8,paddingHorizontal:10,paddingVertical:6}}
-                        onPress={()=>Linking.openURL(link.url)}>
-                        <Text style={{color:C.green,fontSize:11,fontWeight:"700"}}>{link.name} {'>'}</Text>
-                      </TouchableOpacity>
-                    ))}
+              {/* Deeper specialty scan - useful context regardless of verdict */}
+              {specialtyMatch && (
+                <TouchableOpacity
+                  style={{backgroundColor:C.surface,borderRadius:12,padding:14,marginBottom:8,borderWidth:1,borderColor:C.green+"40",flexDirection:"row",alignItems:"center",gap:8}}
+                  onPress={()=>onNavigate("specialty", {category: specialtyMatch.id})}
+                  activeOpacity={0.8}
+                >
+                  <Text style={{fontSize:16}}>{specialtyMatch.icon}</Text>
+                  <View style={{flex:1}}>
+                    <Text style={{color:C.green,fontSize:13,fontWeight:"800"}}>Get a deeper {specialtyMatch.label} scan</Text>
+                    <Text style={{color:C.text4,fontSize:11}}>Expert AI with category-specific pricing knowledge</Text>
                   </View>
-                </View>
+                </TouchableOpacity>
               )}
 
-              {/* Payout speed. Time-to-sell used to duplicate here too, as
-                  lens's own AI-guessed "timeToSell" (e.g. "Est. 7-14 days")
-                  next to the Profit Oracle's REAL sold-comp velocity in the
-                  hero above ("~60d to sell") - two different numbers for one
-                  fact. The Oracle's real number is the only one shown now;
-                  the AI guess is not rendered anywhere on this screen. */}
-              <View style={[s.infoCard,{marginBottom:8}]}>
-                <Text style={s.infoLabel}>PAYOUT</Text>
-                <Text style={{color:C.text1,fontSize:14,fontWeight:"700",marginTop:4}}>{result.payoutSpeed||"3-5 days"}</Text>
-              </View>
-
-              {/* FREE TIER PAYWALL - blur premium data */}
+              {/* FREE TIER PAYWALL - app-wide upsell, shown regardless of verdict */}
               {plan === "free" && (
                 <TouchableOpacity
                   style={{backgroundColor:"#0a1500",borderRadius:14,padding:16,marginBottom:12,borderWidth:1,borderColor:C.green+"40",alignItems:"center"}}
@@ -627,117 +748,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   </View>
                   <Text style={{color:C.text4,fontSize:10,marginTop:8}}>Used {scansLeft !== null ? 10 - scansLeft : "?"} of 10 free scans this month</Text>
                 </TouchableOpacity>
-              )}
-
-              {/* Risk score */}
-              {result.riskScore !== undefined && (
-                <View style={{flexDirection:"row",alignItems:"center",gap:8,marginBottom:8,backgroundColor:C.surface,borderRadius:10,padding:12,borderWidth:1,borderColor:C.border}}>
-                  <Text style={{fontSize:16}}>{result.riskScore<=2?"":result.riskScore<=4?"":""}</Text>
-                  <View style={{flex:1}}>
-                    <Text style={{color:C.text1,fontSize:13,fontWeight:"700"}}>Risk Score: {result.riskScore}/10</Text>
-                    {result.watchOutFor?<Text style={{color:C.text4,fontSize:11,marginTop:2}} numberOfLines={2}>{result.watchOutFor}</Text>:null}
-                  </View>
-                </View>
-              )}
-
-              {/* Deeper specialty scan, when this category has an expert scanner */}
-              {specialtyMatch && (
-                <TouchableOpacity
-                  style={{backgroundColor:C.surface,borderRadius:12,padding:14,marginBottom:8,borderWidth:1,borderColor:C.green+"40",flexDirection:"row",alignItems:"center",gap:8}}
-                  onPress={()=>onNavigate("specialty", {category: specialtyMatch.id})}
-                  activeOpacity={0.8}
-                >
-                  <Text style={{fontSize:16}}>{specialtyMatch.icon}</Text>
-                  <View style={{flex:1}}>
-                    <Text style={{color:C.green,fontSize:13,fontWeight:"800"}}>Get a deeper {specialtyMatch.label} scan</Text>
-                    <Text style={{color:C.text4,fontSize:11}}>Expert AI with category-specific pricing knowledge</Text>
-                  </View>
-                </TouchableOpacity>
-              )}
-
-              {/* Battle this item */}
-              <TouchableOpacity style={s.battleBtn} onPress={()=>result.priceData?.ebaySearchUrl && Linking.openURL(result.priceData.ebaySearchUrl)} activeOpacity={0.85}>
-                <Text style={s.battleBtnText}>See What It Sold For on eBay</Text>
-                <Text style={s.battleBtnSub}>Real completed sales - verify before you buy</Text>
-              </TouchableOpacity>
-
-              {/* Analysis - collapsible */}
-              {(result.hotTip || result.reasoning || result.listingTips?.length > 0) && (
-                <TouchableOpacity
-                  style={[s.infoCard,{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}]}
-                  onPress={()=>setShowAnalysis(v=>!v)} activeOpacity={0.85}
-                >
-                  <Text style={s.infoLabel}>Analysis & Tips</Text>
-                  <Text style={{color:C.text4,fontSize:18}}>{showAnalysis?"":""}</Text>
-                </TouchableOpacity>
-              )}
-              {showAnalysis && (
-                <View style={[s.infoCard,{marginTop:-8,borderTopLeftRadius:0,borderTopRightRadius:0}]}>
-                  {result.hotTip ? (
-                    <View style={{marginBottom:12}}>
-                      <Text style={[s.infoLabel,{color:C.red}]}>Hot Tip</Text>
-                      <Text style={s.infoText}>{result.hotTip}</Text>
-                    </View>
-                  ) : null}
-                  {result.reasoning ? (
-                    <View style={{marginBottom:12}}>
-                      <Text style={s.infoLabel}>Analysis</Text>
-                      <Text style={s.infoText}>{result.reasoning}</Text>
-                    </View>
-                  ) : null}
-                  {result.listingTips?.length > 0 && (
-                    <View>
-                      <Text style={s.infoLabel}>Listing Tips</Text>
-                      {result.listingTips.map((tip:string,i:number)=>(
-                        <View key={i} style={{flexDirection:"row",gap:8,marginBottom:6}}>
-                          <Text style={{color:C.green,fontSize:13}}>{'>'}</Text>
-                          <Text style={{color:C.text2,fontSize:13,lineHeight:20,flex:1}}>{tip}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                </View>
-              )}
-
-              {/* Share - collapsible */}
-              <TouchableOpacity
-                style={[s.infoCard,{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginTop:8}]}
-                onPress={()=>setShowShare(v=>!v)} activeOpacity={0.85}
-              >
-                <Text style={s.infoLabel}>Share & Content</Text>
-                <Text style={{color:C.text4,fontSize:18}}>{showShare?"":""}</Text>
-              </TouchableOpacity>
-              {showShare && (
-                <View style={[s.infoCard,{marginTop:-8,borderTopLeftRadius:0,borderTopRightRadius:0}]}>
-                   <ShareButton
-                     message={
-                       (result?.decision==="BUY"
-                         ? " Just found a $" + Math.round(heroProfit) + " profit flip! " + (result.itemName||"Item") + " - " + heroRoi + "% ROI on " + (result.bestPlatform||"eBay")
-                         : result?.decision==="WATCH"
-                         ? " Watching this one... " + (result.itemName||"Item")
-                         : " ValuIQ saved me from a bad buy - " + (result?.itemName||"Item") + " doesn't pencil out"
-                       ) + "\n\nI use ValuIQ to find profitable flips > getvaluiq.com"
-                     }
-                     title="My ValuIQ Find"
-                     compact
-                   />
-                   {result.decision === "BUY" && (result.netProfit || 0) >= 20 && (
-                     <TouchableOpacity
-                       style={s.communityShareBtn}
-                       disabled={winShared || sharingWin}
-                       activeOpacity={0.85}
-                       onPress={async () => {
-                         setSharingWin(true);
-                         const ok = await shareWin(token, result.itemName || "Great find", result.netProfit || 0, "eBay", "");
-                         setSharingWin(false);
-                         if (ok) setWinShared(true);
-                       }}>
-                       <Text style={s.communityShareTxt}>
-                         {winShared ? "\u2713  Shared with the community!" : sharingWin ? "Sharing..." : "\uD83C\uDF89  Share this win with the community"}
-                       </Text>
-                     </TouchableOpacity>
-                   )}
-                </View>
               )}
             </>
           )}
@@ -1038,13 +1048,6 @@ const s = StyleSheet.create({
   limitedText:    { color: C.yellow, fontSize: 13, fontWeight: "700", flex: 1 },
   noDataBanner:   { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#1a0808", borderWidth: 1, borderColor: C.red + "30", borderRadius: 12, padding: 12, marginBottom: 12 },
   noDataText:     { color: C.red, fontSize: 13, fontWeight: "700", flex: 1 },
-  verdictCard:    { borderWidth: 2, borderRadius: 20, padding: 24, alignItems: "center", marginBottom: 12 },
-  verdictIcon:    { width: 78, height: 78, borderRadius: 39, alignItems: "center", justifyContent: "center", marginBottom: 12 },
-  verdictText:    { fontWeight: "900", letterSpacing: -1, lineHeight: 52, marginBottom: 8 },
-  itemName:       { color: C.text1, fontSize: 16, fontWeight: "700", textAlign: "center", marginBottom: 4 },
-  itemMeta:       { color: C.text3, fontSize: 13, textAlign: "center" },
-  editTopBtn:     { position: "absolute", top: 14, right: 14, width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(0,0,0,0.35)", borderWidth: 1, borderColor: C.border, alignItems: "center", justifyContent: "center", zIndex: 2 },
-  editTopBtnIcon: { fontSize: 16 },
   profitCard:     { backgroundColor: "rgba(0,0,0,0.35)", borderWidth: 2, borderRadius: 20, padding: 20, marginBottom: 10, alignItems: "center" },
   profitLabel:    { color: C.text3, fontSize: 10, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 },
   profitAmount:   { fontWeight: "900", letterSpacing: -2, lineHeight: 68, marginBottom: 6 },
@@ -1088,9 +1091,6 @@ veloSub: { fontSize: 12, color: C.text3, marginTop: 3 },
 
   greenBtn:       { backgroundColor: C.green, borderRadius: 14, paddingTop: 16, paddingBottom: 10, paddingHorizontal: 32, alignItems: "center" as any, alignSelf: "center" as any },
   greenBtnText:   { color: C.greenDark, fontSize: 15, fontWeight: "900" as any },
-  battleBtn:      { backgroundColor: C.surfaceHigh, borderWidth: 1.5, borderColor: C.orange+"50", borderRadius: 14, padding: 14, alignItems: "center", marginBottom: 10 },
-  battleBtnText:  { color: C.orange, fontSize: 15, fontWeight: "800" },
-  battleBtnSub:   { color: C.text4, fontSize: 11, marginTop: 3 },
   quickActions:   { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 10 },
   quickBtn:       { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.6)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)", borderRadius: 10, paddingVertical: 9, paddingHorizontal: 8 },
   quickBtnIcon:   { fontSize: 16 },
