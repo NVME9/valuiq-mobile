@@ -41,7 +41,7 @@ function parseHeadlineNumber(headline: string): { prefix: string; target: number
   return { prefix: m[1], target, suffix: m[3] };
 }
 
-function useCountUp(target: number, active: boolean, duration = 1000): number {
+export function useCountUp(target: number, active: boolean, duration = 1000): number {
   const [display, setDisplay] = useState(0);
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {

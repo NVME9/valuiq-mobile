@@ -17,6 +17,7 @@ export const C = {
   red:         "#ff6b6b",
   orange:      "#ff8c42",
   purple:      "#b066ff",
+  gold:        "#ffd24d",
 };
 
 // ValuIQ logo SVG path for rendering

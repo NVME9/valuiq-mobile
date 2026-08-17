@@ -18,6 +18,8 @@ import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notif
 import StagedProgress from "../components/StagedProgress";
 import * as Notifications from "expo-notifications";
 import { matchSpecialtyCategory } from "./SpecialtyScreen";
+import ProfitFlexHero from "../components/ProfitFlexHero";
+import { classifyOutcome } from "../lib/outcomeTier";
 
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
@@ -99,6 +101,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         bestPlatform: r.bestPlatform,
         lensBuyTarget: Number(r.buyTarget) || 0,
         lensNetProfit: Number(r.netProfit) || 0,
+        // "Did lens actually price this item" signal for the Oracle - separate
+        // from lensNetProfit, which alone can't tell a real $0 profit apart
+        // from "lens gave us nothing."
+        lensSellPrice: Number(r.sellPrice) || 0,
       }).then((d) => { if (alive && d && d.success) setOracle(d); });
     }
     return () => { alive = false; };
@@ -325,6 +331,26 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       ? Math.round((heroProfit / heroBuyTarget) * 100)
       : (Number(result.roi) || 0);
 
+    // Outcome tier — reacts to magnitude, not just BUY/WATCH/PASS. Drives the
+    // flex-first hero below; the verdict word above is unchanged.
+    const outcome = classifyOutcome({
+      decision: result.decision,
+      netProfit: heroProfit,
+      velocityTier: result.velocity?.tier,
+      sellThrough: result.velocity?.sellThrough,
+      dataQuality: result.dataQuality,
+      sellPrice: Number(result.sellPrice) || null,
+    });
+
+    // Hoisted so the hero card and the debug readout below read the exact
+    // same computed values instead of two separate copies that could drift.
+    const oracleMaxBuy = oracle?.prediction
+      ? (oracle.dataMode === "crowd-led" ? oracle.prediction.safeMaxBuy : oracle.prediction.estMaxBuy)
+      : null;
+    const oracleDaysTxt = oracle?.prediction
+      ? (oracle.prediction.medianDays != null ? `~${oracle.prediction.medianDays}d` : (oracle.prediction.medianDaysLabel || "not enough data yet"))
+      : null;
+
     return (
       <SafeAreaView style={s.safe}>
         <StatusBar barStyle="light-content"/>
@@ -380,10 +406,28 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 style={{width:"100%",height:160,borderRadius:10,marginBottom:12}} resizeMode="cover"/>
             )}
             <Text style={[s.verdictText,{color:hasNoData?C.text3:dc,fontSize:42,lineHeight:48}]} numberOfLines={1} adjustsFontSizeToFit>
-              {verdict === "BUY" ? " BUY IT" : verdict === "WATCH" ? " WATCH IT" : verdict === "UNKNOWN" ? "- UNKNOWN" : " PASS"}
+              {verdict === "BUY" ? "BUY IT" : verdict === "WATCH" ? "WATCH IT" : verdict === "UNKNOWN" ? "UNKNOWN" : "PASS"}
             </Text>
             <Text style={s.itemName} numberOfLines={2}>{result.itemName || result.item_name || "Unknown Item"}</Text>
             {result.category ? <Text style={s.itemMeta}>{result.category}{result.condition ? " - " + (result.condition) + "" : ""}</Text> : null}
+          </View>
+
+          {/* TEMPORARY DEBUG READOUT — raw values feeding every headline
+              number on this screen, so a wrong number can be traced to its
+              source on-device. Remove once the profit-math bugs are
+              confirmed fixed (see chat history for context). */}
+          <View style={{backgroundColor:"#1a1200",borderWidth:1,borderColor:C.yellow+"50",borderRadius:10,padding:10,marginBottom:12}}>
+            <Text style={{color:C.yellow,fontSize:10,fontWeight:"900",letterSpacing:0.5,marginBottom:4}}>DEBUG (temporary)</Text>
+            <Text style={{color:C.text3,fontSize:11,lineHeight:16}}>
+              enteredBuyPrice: {Number(buyPrice) || 0}{"\n"}
+              salePrice: {result.sellPrice != null ? result.sellPrice : "—"}{"\n"}
+              feeRate: {result.platformBreakdown?.[0]?.feeRate || "—"} ({result.bestPlatform || "—"}){"\n"}
+              computedProfit (heroProfit): {heroProfit}{"\n"}
+              lens netProfit: {result.netProfit != null ? result.netProfit : "—"}{"\n"}
+              maxBuyCeiling (oracle): {oracleMaxBuy != null ? oracleMaxBuy : "—"} · lens buyTarget: {result.buyTarget != null ? result.buyTarget : "—"}{"\n"}
+              sellTime (oracle, real): {oracleDaysTxt || "—"} · lens dataQuality: {result.dataQuality || "—"}{"\n"}
+              chosenTier: {outcome.tier} · decision: {result.decision || "—"} · verdict shown: {verdict}
+            </Text>
           </View>
 
           {/* - UNKNOWN: need more info - */}
@@ -394,7 +438,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 Try scanning again with the brand name, model number, or a clearer photo for accurate pricing.
               </Text>
               <TouchableOpacity style={[s.navBtn,{alignSelf:"center",paddingHorizontal:24,paddingTop: 16, paddingBottom: 10}]} onPress={() => setStep("camera")}>
-                <Text style={s.navBtnText}> Scan Again</Text>
+                <Text style={s.navBtnText}>Scan Again</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -408,7 +452,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   <Text></Text>
                   <View style={{flex:1}}>
                     <Text style={s.goodBannerTitle}>{result.priceData.count} real sold listings</Text>
-                    <Text style={s.goodBannerSub}>eBay avg ${result.priceData.avgPrice} - ${result.priceData.minPrice}-${result.priceData.maxPrice}</Text>
+                    <Text style={s.goodBannerSub}>avg ${result.priceData.avgPrice} · range ${result.priceData.minPrice}–${result.priceData.maxPrice}</Text>
                   </View>
                   <Text style={{color:C.green}}>{'>'}</Text>
                 </TouchableOpacity>
@@ -419,91 +463,37 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 </View>
               ) : null}
 
-
-
-
-              {/* PROFIT ORACLE â€” real-outcome prediction */}
-              {oracle && oracle.prediction && (
-                <View style={s.oracleHero}>
-                  <View style={s.oracleHeroTop}>
-                    <Text style={s.oracleHeroBadge} numberOfLines={1}>{"\uD83D\uDD2E PROFIT ORACLE"}</Text>
-                    <Text
-                      numberOfLines={1}
-                      style={oracle.prediction.medianProfitIsReal ? s.oracleHeroLive : s.oracleHeroEst}
-                    >
-                      {oracle.prediction.medianProfitIsReal
-                        ? "\u25CF REAL DATA"
-                        : (result.priceData?.isRealData && result.priceData?.count
-                            ? `Based on ${result.priceData.count} listings`
-                            : "ESTIMATE")}
-                    </Text>
-                  </View>
-
-                  {/* HERO: the number that decides the buy */}
-                  {(() => {
-                    const maxBuy = oracle.dataMode === "crowd-led"
-                      ? oracle.prediction.safeMaxBuy
-                      : oracle.prediction.estMaxBuy;
-                    const prof = oracle.dataMode === "crowd-led"
-                      ? oracle.prediction.medianProfit
-                      : oracle.prediction.estProfit;
-                    const resale = oracle.dataMode === "crowd-led"
-                      ? null
-                      : oracle.prediction.estResale;
-                    const profNum = Number(prof);
-                    const profOk = prof != null && !isNaN(profNum);
-                    const profTxt = profOk ? (profNum < 0 ? "-$" + Math.abs(profNum) : "$" + profNum) : "\u2014";
-                    const profCol = profOk ? (profNum < 0 ? C.red : C.green) : C.text4;
-                    const isRealProfit = oracle.prediction.medianProfitIsReal === true;
-                    // medianDaysLabel is always present now (real "~Nd" or an
-                    // honest "not enough data yet") - never fall back to
-                    // velocity.estDaysToSale, which is a bucketed guess, not
-                    // a real measurement.
-                    const daysLabel = oracle.prediction.medianDaysLabel || "not enough data yet";
-                    return (
-                      <>
-                        <Text style={s.oracleHeroTag}>Don't pay more than</Text>
-                        <Text style={s.oracleMaxBuy} numberOfLines={1} adjustsFontSizeToFit>
-                          {maxBuy != null ? "$" + maxBuy : "\u2014"}
-                        </Text>
-                        <View style={s.oracleHeroStats}>
-                          <View style={s.oracleHeroStat}>
-                            <Text style={[s.oracleHeroVal,{color:profCol}]} numberOfLines={1} adjustsFontSizeToFit>{profTxt}</Text>
-                            <Text style={s.oracleHeroLbl}>{isRealProfit ? "real profit" : "est. profit"}</Text>
-                          </View>
-                          {oracle.dataMode === "crowd-led" ? (
-                            oracle.prediction.sellRate != null && (
-                              <View style={s.oracleHeroStat}>
-                                <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>{oracle.prediction.sellRate}%</Text>
-                                <Text style={s.oracleHeroLbl}>actually sold</Text>
-                              </View>
-                            )
-                          ) : (
-                            resale != null && (
-                              <View style={s.oracleHeroStat}>
-                                <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>${resale}</Text>
-                                <Text style={s.oracleHeroLbl}>sells for</Text>
-                              </View>
-                            )
-                          )}
-                          <View style={s.oracleHeroStat}>
-                            <Text style={s.oracleHeroVal} numberOfLines={1} adjustsFontSizeToFit>
-                              {oracle.prediction.medianDays != null ? `~${oracle.prediction.medianDays}d` : daysLabel}
-                            </Text>
-                            <Text style={s.oracleHeroLbl}>to sell</Text>
-                          </View>
-                        </View>
-                      </>
-                    );
-                  })()}
-
-                  <Text style={s.oracleHeroFoot}>
-                    {oracle.dataMode === "crowd-led"
-                      ? "From real reseller outcomes."
-                      : "Market estimate. Sharpens as the community logs real sales."}
-                  </Text>
-                </View>
-              )}
+              {/* PROFIT FLEX HERO - leads with the outcome, reacts to tier.
+                  Dont-pay-more-than is demoted to a secondary stat below
+                  the profit number instead of being the hero itself. */}
+              {oracle && oracle.prediction && (() => {
+                const maxBuy = oracleMaxBuy;
+                const daysTxt = oracleDaysTxt;
+                const dataTag = oracle.prediction.medianProfitIsReal
+                  ? "● REAL DATA"
+                  : (result.priceData?.isRealData && result.priceData?.count
+                      ? `Based on ${result.priceData.count} listings`
+                      : "ESTIMATE");
+                const dataTagColor = oracle.prediction.medianProfitIsReal ? "#9ef01a" : "#8a7aa8";
+                const footNote = oracle.dataMode === "crowd-led"
+                  ? "From real reseller outcomes."
+                  : "Market estimate. Sharpens as the community logs real sales.";
+                return (
+                  <ProfitFlexHero
+                    outcome={outcome}
+                    heroProfit={heroProfit}
+                    dataTag={dataTag}
+                    dataTagColor={dataTagColor}
+                    footNote={footNote}
+                    secondaryStats={[
+                      { label: "pay max", value: maxBuy != null ? "$" + Math.round(maxBuy) : "—" },
+                      { label: "sell price", value: result.sellPrice != null ? "$" + Math.round(result.sellPrice) : "—" },
+                      { label: "ROI", value: heroRoi ? heroRoi + "%" : "—" },
+                      { label: "to sell", value: daysTxt },
+                    ]}
+                  />
+                );
+              })()}
 
               {/* Share result as image - promoted out of the collapsed Share &
                   Content section since it's the highest-intent share action */}
@@ -591,7 +581,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               {/* Verification links */}
               {result.priceData?.allPlatformLinks && (
                 <View style={s.infoCard}>
-                  <Text style={[s.infoLabel,{marginBottom:10}]}> VERIFY PRICES</Text>
+                  <Text style={[s.infoLabel,{marginBottom:10}]}>VERIFY PRICES</Text>
                   <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
                     {[
                       {name:"eBay Sold", url:result.priceData.allPlatformLinks?.eBay},
@@ -609,19 +599,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 </View>
               )}
 
-              {/* Time to sell + payout */}
-              {result.timeToSell && (
-                <View style={{flexDirection:"row",gap:8,marginBottom:8}}>
-                  <View style={[s.infoCard,{flex:1,marginBottom:0}]}>
-                    <Text style={s.infoLabel}>- TIME TO SELL</Text>
-                    <Text style={{color:C.text1,fontSize:14,fontWeight:"700",marginTop:4}}>{result.timeToSell}</Text>
-                  </View>
-                  <View style={[s.infoCard,{flex:1,marginBottom:0}]}>
-                    <Text style={s.infoLabel}> PAYOUT</Text>
-                    <Text style={{color:C.text1,fontSize:14,fontWeight:"700",marginTop:4}}>{result.payoutSpeed||"3-5 days"}</Text>
-                  </View>
-                </View>
-              )}
+              {/* Payout speed. Time-to-sell used to duplicate here too, as
+                  lens's own AI-guessed "timeToSell" (e.g. "Est. 7-14 days")
+                  next to the Profit Oracle's REAL sold-comp velocity in the
+                  hero above ("~60d to sell") - two different numbers for one
+                  fact. The Oracle's real number is the only one shown now;
+                  the AI guess is not rendered anywhere on this screen. */}
+              <View style={[s.infoCard,{marginBottom:8}]}>
+                <Text style={s.infoLabel}>PAYOUT</Text>
+                <Text style={{color:C.text1,fontSize:14,fontWeight:"700",marginTop:4}}>{result.payoutSpeed||"3-5 days"}</Text>
+              </View>
 
               {/* FREE TIER PAYWALL - blur premium data */}
               {plan === "free" && (
@@ -680,7 +667,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   style={[s.infoCard,{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}]}
                   onPress={()=>setShowAnalysis(v=>!v)} activeOpacity={0.85}
                 >
-                  <Text style={s.infoLabel}> Analysis & Tips</Text>
+                  <Text style={s.infoLabel}>Analysis & Tips</Text>
                   <Text style={{color:C.text4,fontSize:18}}>{showAnalysis?"":""}</Text>
                 </TouchableOpacity>
               )}
@@ -688,7 +675,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 <View style={[s.infoCard,{marginTop:-8,borderTopLeftRadius:0,borderTopRightRadius:0}]}>
                   {result.hotTip ? (
                     <View style={{marginBottom:12}}>
-                      <Text style={[s.infoLabel,{color:C.red}]}> Hot Tip</Text>
+                      <Text style={[s.infoLabel,{color:C.red}]}>Hot Tip</Text>
                       <Text style={s.infoText}>{result.hotTip}</Text>
                     </View>
                   ) : null}
@@ -717,7 +704,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 style={[s.infoCard,{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginTop:8}]}
                 onPress={()=>setShowShare(v=>!v)} activeOpacity={0.85}
               >
-                <Text style={s.infoLabel}> Share & Content</Text>
+                <Text style={s.infoLabel}>Share & Content</Text>
                 <Text style={{color:C.text4,fontSize:18}}>{showShare?"":""}</Text>
               </TouchableOpacity>
               {showShare && (
@@ -1071,28 +1058,6 @@ const s = StyleSheet.create({
   askNoTxt:  { color: C.text3, fontSize: 14, fontWeight: "700" },
   askYes:    { flex: 1.4, backgroundColor: C.green, borderRadius: 10, paddingVertical: 12, alignItems: "center" },
   askYesTxt: { color: C.greenDark, fontSize: 14, fontWeight: "900" },
-  oracleHero: { backgroundColor: "#1c1330", borderColor: "#b066ff", borderWidth: 1.5, borderRadius: 18, padding: 18, marginBottom: 14, shadowColor: "#b066ff", shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 0 }, elevation: 8 },
-  oracleHeroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 },
-  oracleHeroBadge: { color: "#c98bff", fontSize: 13, fontWeight: "900", letterSpacing: 1 },
-  oracleHeroLive: { color: "#9ef01a", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
-  oracleHeroEst: { color: "#8a7aa8", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
-  oracleMaxBuy: { color: "#ffffff", fontSize: 46, fontWeight: "900", letterSpacing: -1.5, marginBottom: 14, marginTop: -2 },
-  oracleHeroTag: { color: "#e8dcff", fontSize: 15, fontWeight: "700", marginBottom: 14 },
-  oracleHeroStats: { flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
-  oracleHeroStat: { flex: 1, alignItems: "center" },
-  oracleHeroVal: { color: "#ffffff", fontSize: 26, fontWeight: "900", letterSpacing: -0.5 },
-  oracleHeroLbl: { color: "#a99cc4", fontSize: 11, fontWeight: "600", marginTop: 2, textAlign: "center" },
-  oracleHeroLine: { color: "#d8ccec", fontSize: 13, lineHeight: 19, fontWeight: "600" },
-  oracleHeroWarn: { color: C.yellow, fontSize: 13, fontWeight: "700", marginTop: 8 },
-  oracleHeroFoot: { color: "#8a7aa8", fontSize: 11, fontStyle: "italic", marginTop: 10 },
-  oracleCard: { backgroundColor: "#1a1424", borderColor: "#b066ff40", borderWidth: 1, borderRadius: 12, padding: 14, marginTop: 12 },
-  oracleLabel: { color: "#b066ff", fontSize: 11, fontWeight: "800", letterSpacing: 0.5, marginBottom: 6 },
-  oracleHead: { color: C.text1, fontSize: 14, fontWeight: "700", lineHeight: 20, marginBottom: 8 },
-  oracleStats: { flexDirection: "row", gap: 20, marginBottom: 6 },
-  oracleStat: {},
-  oracleVal: { color: C.text1, fontSize: 18, fontWeight: "800" },
-  oracleLbl: { color: C.text4, fontSize: 11, marginTop: 1 },
-  oracleWarn: { color: C.yellow, fontSize: 13, fontWeight: "600", marginTop: 4 },
 veloSub: { fontSize: 12, color: C.text3, marginTop: 3 },
   profitSub:      { color: C.text2, fontSize: 13, textAlign: "center" },
   noDataCard:     { backgroundColor: "rgba(0,0,0,0.3)", borderWidth: 1, borderColor: C.border, borderRadius: 20, padding: 20, marginBottom: 10 },
