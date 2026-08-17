@@ -25,6 +25,14 @@ const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
 const MAX_PHOTOS = 5;
 
+// TEMPORARY: formats a stage's ms into the debug timing readout (see the
+// DEBUG box on the result screen). "pending" for a stage that hasn't
+// finished yet (e.g. the Oracle call, which loads after the result screen
+// is already showing) rather than a misleading 0.0s.
+function fmtSec(ms: number | null | undefined): string {
+  return ms != null ? (ms / 1000).toFixed(1) + "s" : "pending";
+}
+
 type Step = "camera" | "barcode" | "review" | "loading" | "result" | "upgrade";
 
 interface Props {
@@ -480,7 +488,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               maxBuyCeiling: {maxBuy != null ? maxBuy : "—"}{"\n"}
               sellTime: {sellTimeLabel || "pending"}{"\n"}
               ROI: {heroRoi}%{"\n"}
-              chosenTier: {outcome.tier} · decision: {result.decision || "—"}
+              chosenTier: {outcome.tier} · decision: {result.decision || "—"}{"\n"}
+              timing: identify={fmtSec(result._debug?.timing?.identifyMs)} · price={fmtSec(result._debug?.timing?.pricingLlmMs)} ({result._debug?.timing?.pricingLlmProvider || "—"}) · comps={fmtSec(result._debug?.timing?.pricingCompsMs)} · oracle={fmtSec(oracle?._debug?.timing?.totalMs)} · total={fmtSec(result._debug?.timing?.totalMs)}
             </Text>
           </View>
 

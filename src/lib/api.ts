@@ -184,6 +184,9 @@ export async function scanImage(token: string, photos: string[], description?: s
     images: photos.map(b => `data:image/jpeg;base64,${b}`),
     textInput: description || "",
     buyPrice: buyPrice || 0,
+    // Surfaces _debug.timing (per-stage ms) on every scan - the on-screen
+    // DEBUG readout reads this. Cheap (a few extra JSON fields), always on.
+    debug: true,
   };
   try {
     const t = await ImageManipulator.manipulateAsync(
@@ -276,7 +279,7 @@ export async function getProfitOracle(token: string, item: { category?: string; 
     const r = await fetch(`${API_BASE}/api/profit-oracle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, ...item }),
+      body: JSON.stringify({ token, debug: true, ...item }),
     });
     return await r.json();
   } catch {
