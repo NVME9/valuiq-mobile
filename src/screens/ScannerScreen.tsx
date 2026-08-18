@@ -83,6 +83,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [description, setDescription] = useState("");
   const [buyPrice, setBuyPrice] = useState("");
   const [result, setResult] = useState<any>(null);
+  // TEMPORARY: client-measured wall-clock for the scanImage() round trip.
+  // Diffed against the server's own _debug.timing.totalMs in the debug
+  // readout to estimate upload+network overhead the server can't see (it
+  // only starts timing once the request body has already arrived).
+  const [clientRoundTripMs, setClientRoundTripMs] = useState<number | null>(null);
   const [oracle, setOracle] = useState<any>(null);
   // Soft notification ask (never fire Apple's cold prompt un-primed)
   const [pendingCheckIn, setPendingCheckIn] = useState<{scanId:string; itemName:string}|null>(null);
@@ -166,7 +171,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     if (!cameraRef.current) return;
     const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
     if (photo?.base64) {
-      const small = await compressPhoto(photo.base64);
+      const small = await compressPhoto(photo.base64, photo.width, photo.height);
       setPhotos(p => {
         const next = [...p, small].slice(0, MAX_PHOTOS);
         if (next.length >= MAX_PHOTOS) { setStep("review"); if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("review"); }
@@ -186,7 +191,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const picked = res.assets.slice(0, remaining);
     const compressed: string[] = [];
     for (const a of picked) {
-      if (a.base64) compressed.push(await compressPhoto(a.base64));
+      if (a.base64) compressed.push(await compressPhoto(a.base64, a.width, a.height));
     }
     if (compressed.length) {
       setPhotos(p => [...p, ...compressed].slice(0, MAX_PHOTOS));
@@ -202,6 +207,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   }
   async function analyze(customPhotos?: string[], barcode?: string) {
     setStep("loading");
+    setClientRoundTripMs(null);
+    const _tRequestStart = Date.now();
     try {
       let d: any;
       if (barcode) {
@@ -213,6 +220,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         }
         d = await scanImage(token, p, (brandInput ? "Brand: " + brandInput + ". " : "") + description, buyPrice ? parseFloat(buyPrice) : undefined);
       }
+      setClientRoundTripMs(Date.now() - _tRequestStart);
       if (d.error === "scan_limit_reached") {
         onNavigate("upgrade");
         return;
@@ -489,7 +497,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               sellTime: {sellTimeLabel || "pending"}{"\n"}
               ROI: {heroRoi}%{"\n"}
               chosenTier: {outcome.tier} · decision: {result.decision || "—"}{"\n"}
-              timing: identify={fmtSec(result._debug?.timing?.identifyMs)} · price={fmtSec(result._debug?.timing?.pricingLlmMs)} ({result._debug?.timing?.pricingLlmProvider || "—"}) · comps={fmtSec(result._debug?.timing?.pricingCompsMs)} · oracle={fmtSec(oracle?._debug?.timing?.totalMs)} · total={fmtSec(result._debug?.timing?.totalMs)}
+              priceSource: {result._debug?.priceSource || "—"}{"\n"}
+              {/* upload≈ is a PROXY (client round-trip minus server totalMs),
+                  not a true isolated upload measurement - it bundles network
+                  upload, response download, and connection overhead. Still
+                  the only way to see "the phone spent time somewhere the
+                  server can't see" without a console. */}
+              identify: upload≈{fmtSec(clientRoundTripMs != null && result._debug?.timing?.totalMs != null ? Math.max(0, clientRoundTripMs - result._debug.timing.totalMs) : null)} · model={fmtSec(result._debug?.timing?.identifyMs)}{"\n"}
+              comps={fmtSec(result._debug?.timing?.pricingCompsMs)} (ran concurrently with narrative){"\n"}
+              narrative={fmtSec(result._debug?.timing?.pricingNarrativeMs)} ({result._debug?.timing?.pricingLlmProvider || "—"}){"\n"}
+              pricing stage={fmtSec(result._debug?.timing?.pricingMs)} · oracle={fmtSec(oracle?._debug?.timing?.totalMs)}{"\n"}
+              total (server)={fmtSec(result._debug?.timing?.totalMs)} · total (device round-trip)={fmtSec(clientRoundTripMs)}
             </Text>
           </View>
 
