@@ -269,19 +269,24 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   );
 
   // - LOADING -
-  // Step durations calibrated to REAL measured lens/route.ts timing
-  // (_debug.timing from live production runs): identify ~1.3-2.5s (now
-  // sends ALL captured photos in one call, not just the first), comps
-  // ~0.7-1.6s, narrative ~3.8-5s (runs concurrently with comps server-side,
-  // but is the long tail either way). Old 3-step version (1800/2100/600 =
-  // 4.5s total) held the spinner on "Calculating profit" for most of a
-  // typical 6-13s real scan - technically not frozen (StagedProgress always
-  // spins the active step), but with no forward motion for that whole
-  // stretch it read as a hang. More granular steps whose durations actually
-  // sum close to real total scan time means the user sees genuine forward
-  // progress through most of the wait, with only occasional overrun on the
-  // last step. Forward-only, holds on the last step (still spinning) if the
-  // real call runs long - never loops, never claims done early. See
+  // MEASURED (device debug line, real multi-photo scan): identify alone
+  // ran 6.1s - the vision model processing real photos, not upload (upload
+  // proxy was ~1.8s) - pushing real total to ~13.5s. The previous retune
+  // (steps summing to 8.5s) undershot that badly, so the last step
+  // ("Crunching the numbers") still held for ~5s. Two things changed
+  // together: identify photos are now compressed to 768px longest edge
+  // (down from 1024px - see compressPhoto in lib/image.ts) specifically to
+  // cut the vision model's own processing time, since Haiku is already the
+  // fastest Claude vision tier available - there's no faster model to swap
+  // to, only less image data to feed it. Until that's confirmed on a real
+  // device, these step timings stay generous (summing to ~11s, closer to
+  // the measured 13.5s than the old 8.5s) rather than re-undershoot -
+  // StagedProgress cuts the animation short harmlessly if the real call
+  // finishes faster than the timed sum (the screen just unmounts on the
+  // real response), so overestimating here costs nothing; underestimating
+  // is what makes the last step feel frozen. Forward-only, holds on the
+  // last step (still spinning, never frozen) if the real call runs longer
+  // than even this - never loops, never claims done early. See
   // src/components/StagedProgress.tsx.
   if (step === "loading") return (
     <SafeAreaView style={s.safe}>
@@ -293,10 +298,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         <StagedProgress
           active
           steps={[
-            { label: "Reading your photos", ms: 700 },
-            { label: "Identifying brand & item", ms: 2500 },
-            { label: "Pulling real sold listings", ms: 1800 },
-            { label: "Crunching the numbers", ms: 3500 },
+            { label: "Reading your photos", ms: 600 },
+            { label: "Identifying brand & item", ms: 4000 },
+            { label: "Pulling real sold listings", ms: 2000 },
+            { label: "Crunching the numbers", ms: 4500 },
           ]}
         />
       </View>
@@ -508,9 +513,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               ROI: {heroRoi}%{"\n"}
               chosenTier: {outcome.tier} · decision: {result.decision || "—"}{"\n"}
               priceSource: {result._debug?.priceSource || "—"}{"\n"}
-              brand: {result.brand || "—"} · searchQuery: {result._debug?.searchQuery || "—"}{"\n"}
+              rawBrand: {result._debug?.rawBrand || "—"} · rawItemName: {result._debug?.rawItemName || "—"}{"\n"}
+              brandTextVisible: {String(result._debug?.brandTextVisible ?? "—")} · brandTagPrompt: {result._debug?.brandTagPrompt || "none"}{"\n"}
+              displayed title: {result.itemName || "—"}{"\n"}
+              searchQuery (used for comps): {result._debug?.mergedSearchQuery || result._debug?.searchQuery || "—"}{"\n"}
               cacheKey: {result._debug?.cacheKey || "—"}{"\n"}
-              identifyModel: {result._debug?.identifyModel || "—"} · {result._debug?.identifyCallShape || "—"}{"\n"}
+              photoCount: {result._debug?.photosSent ?? "—"} · identifyModel: {result._debug?.identifyModel || "—"} · {result._debug?.identifyCallShape || "—"}{"\n"}
               {/* upload≈ is a PROXY (client round-trip minus server totalMs),
                   not a true isolated upload measurement - it bundles network
                   upload, response download, and connection overhead. Still
