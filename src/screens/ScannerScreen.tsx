@@ -270,10 +270,19 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
   // - LOADING -
   // Step durations calibrated to REAL measured lens/route.ts timing
-  // (_debug.timing from live production runs, post-Haiku-swap):
-  // identify ~1.6-2s, comps+pricing LLM ~2-2.5s. Forward-only, holds on the
-  // last step if the real call runs long - never loops, never claims done
-  // early. See src/components/StagedProgress.tsx.
+  // (_debug.timing from live production runs): identify ~1.3-2.5s (now
+  // sends ALL captured photos in one call, not just the first), comps
+  // ~0.7-1.6s, narrative ~3.8-5s (runs concurrently with comps server-side,
+  // but is the long tail either way). Old 3-step version (1800/2100/600 =
+  // 4.5s total) held the spinner on "Calculating profit" for most of a
+  // typical 6-13s real scan - technically not frozen (StagedProgress always
+  // spins the active step), but with no forward motion for that whole
+  // stretch it read as a hang. More granular steps whose durations actually
+  // sum close to real total scan time means the user sees genuine forward
+  // progress through most of the wait, with only occasional overrun on the
+  // last step. Forward-only, holds on the last step (still spinning) if the
+  // real call runs long - never loops, never claims done early. See
+  // src/components/StagedProgress.tsx.
   if (step === "loading") return (
     <SafeAreaView style={s.safe}>
       <View style={s.center}>
@@ -284,9 +293,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         <StagedProgress
           active
           steps={[
-            { label: "Identifying item", ms: 1800 },
-            { label: "Checking real sold data", ms: 2100 },
-            { label: "Calculating profit", ms: 600 },
+            { label: "Reading your photos", ms: 700 },
+            { label: "Identifying brand & item", ms: 2500 },
+            { label: "Pulling real sold listings", ms: 1800 },
+            { label: "Crunching the numbers", ms: 3500 },
           ]}
         />
       </View>
@@ -500,7 +510,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               priceSource: {result._debug?.priceSource || "—"}{"\n"}
               brand: {result.brand || "—"} · searchQuery: {result._debug?.searchQuery || "—"}{"\n"}
               cacheKey: {result._debug?.cacheKey || "—"}{"\n"}
-              identifyModel: {result._debug?.identifyModel || "—"}{"\n"}
+              identifyModel: {result._debug?.identifyModel || "—"} · {result._debug?.identifyCallShape || "—"}{"\n"}
               {/* upload≈ is a PROXY (client round-trip minus server totalMs),
                   not a true isolated upload measurement - it bundles network
                   upload, response download, and connection overhead. Still
