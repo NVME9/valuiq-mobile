@@ -171,7 +171,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     if (!cameraRef.current) return;
     const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
     if (photo?.base64) {
-      const small = await compressPhoto(photo.base64, photo.width, photo.height);
+      // Only the FIRST photo overall gets full-res "primary" treatment -
+      // it's the one most likely to be the main/only shot, and every
+      // later photo (usually a supplementary angle or close-up) is
+      // compressed harder to cut upload payload without losing the
+      // legibility fix on whichever shot matters most.
+      const isPrimary = photos.length === 0;
+      const small = await compressPhoto(photo.base64, photo.width, photo.height, isPrimary ? "primary" : "secondary");
       setPhotos(p => {
         const next = [...p, small].slice(0, MAX_PHOTOS);
         if (next.length >= MAX_PHOTOS) { setStep("review"); if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("review"); }
@@ -189,10 +195,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     });
     if (res.canceled || !res.assets?.length) return;
     const picked = res.assets.slice(0, remaining);
-    const compressed: string[] = [];
-    for (const a of picked) {
-      if (a.base64) compressed.push(await compressPhoto(a.base64, a.width, a.height));
-    }
+    // startIndex: where these land in the FINAL photos array - only the
+    // one that ends up at overall index 0 is "primary". Compressed in
+    // PARALLEL (was a sequential for-await loop) - no reason to make the
+    // user wait for each image to compress one at a time.
+    const startIndex = photos.length;
+    const compressed = (await Promise.all(
+      picked.map((a, i) => a.base64 ? compressPhoto(a.base64, a.width, a.height, startIndex + i === 0 ? "primary" : "secondary") : Promise.resolve(null))
+    )).filter((c): c is string => !!c);
     if (compressed.length) {
       setPhotos(p => [...p, ...compressed].slice(0, MAX_PHOTOS));
       setStep("review");
