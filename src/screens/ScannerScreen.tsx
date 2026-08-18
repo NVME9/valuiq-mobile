@@ -498,6 +498,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               ROI: {heroRoi}%{"\n"}
               chosenTier: {outcome.tier} · decision: {result.decision || "—"}{"\n"}
               priceSource: {result._debug?.priceSource || "—"}{"\n"}
+              brand: {result.brand || "—"} · searchQuery: {result._debug?.searchQuery || "—"}{"\n"}
+              cacheKey: {result._debug?.cacheKey || "—"}{"\n"}
+              identifyModel: {result._debug?.identifyModel || "—"}{"\n"}
               {/* upload≈ is a PROXY (client round-trip minus server totalMs),
                   not a true isolated upload measurement - it bundles network
                   upload, response download, and connection overhead. Still
