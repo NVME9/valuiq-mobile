@@ -25,14 +25,6 @@ const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
 const MAX_PHOTOS = 5;
 
-// TEMPORARY: formats a stage's ms into the debug timing readout (see the
-// DEBUG box on the result screen). "pending" for a stage that hasn't
-// finished yet (e.g. the Oracle call, which loads after the result screen
-// is already showing) rather than a misleading 0.0s.
-function fmtSec(ms: number | null | undefined): string {
-  return ms != null ? (ms / 1000).toFixed(1) + "s" : "pending";
-}
-
 type Step = "camera" | "barcode" | "review" | "loading" | "result" | "upgrade";
 
 interface Props {
@@ -83,11 +75,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [description, setDescription] = useState("");
   const [buyPrice, setBuyPrice] = useState("");
   const [result, setResult] = useState<any>(null);
-  // TEMPORARY: client-measured wall-clock for the scanImage() round trip.
-  // Diffed against the server's own _debug.timing.totalMs in the debug
-  // readout to estimate upload+network overhead the server can't see (it
-  // only starts timing once the request body has already arrived).
-  const [clientRoundTripMs, setClientRoundTripMs] = useState<number | null>(null);
   const [oracle, setOracle] = useState<any>(null);
   // Soft notification ask (never fire Apple's cold prompt un-primed)
   const [pendingCheckIn, setPendingCheckIn] = useState<{scanId:string; itemName:string}|null>(null);
@@ -217,8 +204,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   }
   async function analyze(customPhotos?: string[], barcode?: string) {
     setStep("loading");
-    setClientRoundTripMs(null);
-    const _tRequestStart = Date.now();
     try {
       let d: any;
       if (barcode) {
@@ -230,7 +215,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         }
         d = await scanImage(token, p, (brandInput ? "Brand: " + brandInput + ". " : "") + description, buyPrice ? parseFloat(buyPrice) : undefined);
       }
-      setClientRoundTripMs(Date.now() - _tRequestStart);
       if (d.error === "scan_limit_reached") {
         onNavigate("upgrade");
         return;
@@ -279,25 +263,22 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   );
 
   // - LOADING -
-  // MEASURED (device debug line, real multi-photo scan): identify alone
-  // ran 6.1s - the vision model processing real photos, not upload (upload
-  // proxy was ~1.8s) - pushing real total to ~13.5s. The previous retune
-  // (steps summing to 8.5s) undershot that badly, so the last step
-  // ("Crunching the numbers") still held for ~5s. Two things changed
-  // together: identify photos are now compressed to 768px longest edge
-  // (down from 1024px - see compressPhoto in lib/image.ts) specifically to
-  // cut the vision model's own processing time, since Haiku is already the
-  // fastest Claude vision tier available - there's no faster model to swap
-  // to, only less image data to feed it. Until that's confirmed on a real
-  // device, these step timings stay generous (summing to ~11s, closer to
-  // the measured 13.5s than the old 8.5s) rather than re-undershoot -
-  // StagedProgress cuts the animation short harmlessly if the real call
-  // finishes faster than the timed sum (the screen just unmounts on the
-  // real response), so overestimating here costs nothing; underestimating
-  // is what makes the last step feel frozen. Forward-only, holds on the
-  // last step (still spinning, never frozen) if the real call runs longer
-  // than even this - never loops, never claims done early. See
-  // src/components/StagedProgress.tsx.
+  // MEASURED (device debug card, real multi-photo scans, since removed):
+  // real device round-trip runs ~14s - photos uploading ~5s, identify
+  // ~3s, comps+pricing ~4s combined, plus request/response overhead. Prior
+  // retunes (4.5s, then 8.5s, then 11s) each undershot the real number by
+  // a shrinking but still real margin, leaving the last step ("Crunching
+  // the numbers") visibly stalled for the gap every time. This one sums to
+  // ~14s to match the measured real total directly instead of guessing
+  // low again. Overestimating here costs nothing - StagedProgress cuts the
+  // animation short harmlessly the instant the real response lands (the
+  // screen unmounts immediately, jumping straight to results); only
+  // underestimating creates the frozen-last-step feeling, since a step
+  // that's reached its timer but has nothing left to advance to just
+  // holds - spinner ONLY, never a checkmark, by construction (stepIndex
+  // has no further scheduled advance past the last step - see
+  // src/components/StagedProgress.tsx). Forward-only, never loops, never
+  // claims done before the real response arrives.
   if (step === "loading") return (
     <SafeAreaView style={s.safe}>
       <View style={s.center}>
@@ -308,10 +289,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         <StagedProgress
           active
           steps={[
-            { label: "Reading your photos", ms: 600 },
-            { label: "Identifying brand & item", ms: 4000 },
-            { label: "Pulling real sold listings", ms: 2000 },
-            { label: "Crunching the numbers", ms: 4500 },
+            { label: "Uploading your photos", ms: 5000 },
+            { label: "Identifying brand & item", ms: 3000 },
+            { label: "Pulling real sold listings", ms: 2500 },
+            { label: "Crunching the numbers", ms: 3500 },
           ]}
         />
       </View>
@@ -506,41 +487,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         </View>
 
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,paddingBottom:60}} showsVerticalScrollIndicator={false}>
-
-          {/* TEMPORARY DEBUG READOUT — raw values feeding every headline
-              number on this screen, so a wrong number can be traced to its
-              source on-device. Remove once the profit-math bugs are
-              confirmed fixed (see chat history for context). */}
-          <View style={{backgroundColor:"#1a1200",borderWidth:1,borderColor:C.yellow+"50",borderRadius:10,padding:10,marginBottom:12}}>
-            <Text style={{color:C.yellow,fontSize:10,fontWeight:"900",letterSpacing:0.5,marginBottom:4}}>DEBUG (temporary)</Text>
-            <Text style={{color:C.text3,fontSize:11,lineHeight:16}}>
-              enteredBuyPrice: {enteredBp}{"\n"}
-              salePrice: {result.sellPrice != null ? result.sellPrice : "—"}{"\n"}
-              feeRate: {result.platformBreakdown?.[0]?.feeRate || "—"} ({result.bestPlatform || "—"}){"\n"}
-              computedProfit: {heroProfit} · costUsed: {actualCostBasis} ({enteredBp > 0 ? "entered price" : "max-buy ceiling"}){"\n"}
-              maxBuyCeiling: {maxBuy != null ? maxBuy : "—"}{"\n"}
-              sellTime: {sellTimeLabel || "pending"}{"\n"}
-              ROI: {heroRoi}%{"\n"}
-              chosenTier: {outcome.tier} · decision: {result.decision || "—"}{"\n"}
-              priceSource: {result._debug?.priceSource || "—"}{"\n"}
-              rawBrand: {result._debug?.rawBrand || "—"} · rawItemName: {result._debug?.rawItemName || "—"}{"\n"}
-              brandTextVisible: {String(result._debug?.brandTextVisible ?? "—")} · brandTagPrompt: {result._debug?.brandTagPrompt || "none"}{"\n"}
-              displayed title: {result.itemName || "—"}{"\n"}
-              searchQuery (used for comps): {result._debug?.mergedSearchQuery || result._debug?.searchQuery || "—"}{"\n"}
-              cacheKey: {result._debug?.cacheKey || "—"}{"\n"}
-              photoCount: {result._debug?.photosSent ?? "—"} · identifyModel: {result._debug?.identifyModel || "—"} · {result._debug?.identifyCallShape || "—"}{"\n"}
-              {/* upload≈ is a PROXY (client round-trip minus server totalMs),
-                  not a true isolated upload measurement - it bundles network
-                  upload, response download, and connection overhead. Still
-                  the only way to see "the phone spent time somewhere the
-                  server can't see" without a console. */}
-              identify: upload≈{fmtSec(clientRoundTripMs != null && result._debug?.timing?.totalMs != null ? Math.max(0, clientRoundTripMs - result._debug.timing.totalMs) : null)} · model={fmtSec(result._debug?.timing?.identifyMs)}{"\n"}
-              comps={fmtSec(result._debug?.timing?.pricingCompsMs)} (ran concurrently with narrative){"\n"}
-              narrative={fmtSec(result._debug?.timing?.pricingNarrativeMs)} ({result._debug?.timing?.pricingLlmProvider || "—"}){"\n"}
-              pricing stage={fmtSec(result._debug?.timing?.pricingMs)} · oracle={fmtSec(oracle?._debug?.timing?.totalMs)}{"\n"}
-              total (server)={fmtSec(result._debug?.timing?.totalMs)} · total (device round-trip)={fmtSec(clientRoundTripMs)}
-            </Text>
-          </View>
 
           {/* - UNKNOWN: need more info - */}
           {hasNoData && (
