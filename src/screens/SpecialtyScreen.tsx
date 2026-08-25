@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Image, Linking } from "react-native";
+import React, { useState, useEffect, useRef } from "react";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Image, Linking, Keyboard } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { compressPhoto } from "../lib/image";
@@ -7,6 +7,30 @@ import { C } from "../lib/theme";
 import { analyzeSpecialty } from "../lib/api";
 import ShareButton from "../components/ShareButton";
 import StagedProgress from "../components/StagedProgress";
+import ProfitFlexHero from "../components/ProfitFlexHero";
+import { classifyOutcome } from "../lib/outcomeTier";
+
+// Reusable collapsed-by-default section - local to this screen (not shared
+// with ScannerScreen.tsx's identical-looking one) since it's presentational
+// only, not a source of the kind of drift the pricing/verdict logic risks.
+function CollapsibleSection({ title, expanded, onToggle, children }: { title: string; expanded: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return (
+    <>
+      <TouchableOpacity
+        style={[s.infoCard,{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}]}
+        onPress={onToggle} activeOpacity={0.85}
+      >
+        <Text style={s.infoLabel}>{title}</Text>
+        <Text style={{color:C.text4,fontSize:12,fontWeight:"700"}}>{expanded ? "▲" : "▼"}</Text>
+      </TouchableOpacity>
+      {expanded && (
+        <View style={[s.infoCard,{marginTop:-8,borderTopLeftRadius:0,borderTopRightRadius:0}]}>
+          {children}
+        </View>
+      )}
+    </>
+  );
+}
 
 export const CATS = [
   { id:"sneakers", icon:"👟", label:"Sneaker Intelligence", desc:"Jordan, Dunk, Yeezy, New Balance, ASICS, Samba, On Running",
@@ -94,9 +118,26 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
   );
   const [fields, setFields] = useState<Record<string,string>>({});
   const [photos, setPhotos] = useState<string[]>([]);
+  const [buyPriceInput, setBuyPriceInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
+  const [showPlatforms, setShowPlatforms] = useState(false);
+  const [showAnalysis, setShowAnalysis] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [showVerify, setShowVerify] = useState(false);
   const [error, setError] = useState("");
+  const resultScrollRef = useRef<ScrollView>(null);
+
+  // The result view is buried below the fold if the keyboard is still open
+  // from the last-focused field on the form (buy price / a category field)
+  // - it stays open through the loading wait and covers the top of the new
+  // result screen (nav + hero) until manually dismissed or scrolled past.
+  // Force it closed the instant analysis starts, well before the result
+  // ever renders.
+  useEffect(() => {
+    if (result) resultScrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [result]);
 
   useEffect(() => {
     if (navData?.category) {
@@ -135,18 +176,24 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
   async function analyze() {
     if (!selectedCat) return;
     if (!Object.values(fields).some(v => v.trim()) && photos.length === 0) { setError("Fill in at least one field or add a photo."); return; }
+    Keyboard.dismiss();
     setLoading(true); setError("");
     try {
-      const d = await analyzeSpecialty(token, selectedCat.id, fields, photos);
+      const bp = Number(buyPriceInput) || 0;
+      // debug:true (temporary) - surfaces _debug so the parity fix can be
+      // verified on-device: brand extraction, deterministic pricing,
+      // computed profit/ROI, and comp-cache behavior on rescan.
+      const d = await analyzeSpecialty(token, selectedCat.id, fields, photos, bp, true);
       if (!d.success) throw new Error(d.error || "Analysis failed");
       setResult(d.result || d);
+      setDebugInfo(d._debug || null);
     } catch (e: any) { setError(e.message || "Analysis failed. Try again."); }
     setLoading(false);
   }
 
-  function reset() { setSelectedCat(null); setFields({}); setPhotos([]); setResult(null); setError(""); }
-  function editAndRerun() { setResult(null); setError(""); }
-  function scanAnother() { setFields({}); setPhotos([]); setResult(null); setError(""); }
+  function reset() { setSelectedCat(null); setFields({}); setPhotos([]); setBuyPriceInput(""); setResult(null); setDebugInfo(null); setError(""); }
+  function editAndRerun() { setResult(null); setDebugInfo(null); setError(""); }
+  function scanAnother() { setFields({}); setPhotos([]); setBuyPriceInput(""); setResult(null); setDebugInfo(null); setError(""); }
 
   // ── CATEGORY GRID ──────────────────────────────────────
   if (!selectedCat) return (
@@ -172,114 +219,264 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
     </SafeAreaView>
   );
 
-  // ── RESULT ─────────────────────────────────────────────
-  if (result) return (
+  // ── RESULT ─────────────────────────────────
+  if (result) {
+    const enteredBp = Number(buyPriceInput) || 0;
+    const heroProfit = Number(result.netProfit) || 0;
+    const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
+    const maxBuy = result.buyTarget != null ? Number(result.buyTarget) : null;
+
+    // Outcome tier - THE single source of truth for the verdict, the exact
+    // same classifyOutcome() ScannerScreen.tsx calls. Weighs ROI, dollar
+    // profit, AND velocity together - see outcomeTier.ts. Nothing on this
+    // screen independently computes or displays a conflicting verdict.
+    //
+    // NO FABRICATED VERDICT (2026-08-25): same fix as ScannerScreen.tsx -
+    // classifyOutcome must never run against a cost basis nobody entered.
+    // lens/route.ts's sibling (specialty/route.ts) now zeroes netProfit/roi
+    // server-side when unpriced, so feeding them here would produce a
+    // dishonest "You'd lose $0. Skip it." instead of the old dishonest
+    // "SKIP - only $X profit" off the max-buy ceiling. Reuses the skip
+    // TIER'S LAYOUT (no big profit hero; Max Buy always ships) without
+    // claiming a verdict this screen can't back up.
+    const outcome = enteredBp > 0
+      ? classifyOutcome({
+          decision: result.decision,
+          netProfit: heroProfit,
+          roi: Number(result.roi) || 0,
+          daysToSell: result.velocity?.estDaysToSale ?? null,
+          velocityTier: result.velocity?.tier,
+          sellThrough: result.velocity?.sellThrough,
+          dataQuality: result.dataQuality,
+          sellPrice: Number(result.sellPrice) || null,
+          sellTimeLabel: result.timeToSell || null,
+        })
+      : {
+          tier: "skip" as const,
+          emoji: "💵",
+          label: "REAL DATA",
+          copy: Number(result.sellPrice) > 0
+            ? `Sells for about $${Math.round(Number(result.sellPrice))}. Enter what you'd pay to see your real profit and verdict.`
+            : "Enter what you'd pay to see your real profit and verdict.",
+          accent: C.yellow,
+          adjustedROI: 0,
+          daysUsed: 0,
+        };
+    const isSkip = outcome.tier === "skip";
+
+    const categoryLine = `${selectedCat.label}${result.confidence ? " - " + result.confidence + " confidence" : ""}`;
+
+    // CALIBRATED TO ONE HONEST TIER (2026-08-24): same fix as
+    // ScannerScreen.tsx - badge/reasoning/banner all derive from ONE tier,
+    // itself derived from the SAME two backend signals dataQuality was
+    // calibrated from (crowdConfidence + isLowConfidenceId), so they can't
+    // disagree the way a badge keyed off "any real data" and a banner keyed
+    // off "solid data only" used to.
+    const dataTier: "solid" | "early" | "estimate" | "none" =
+      result.dataQuality === "strong" ? "solid"
+      : result.dataQuality === "limited" && result.crowdConfidence === "early" ? "early"
+      : result.dataQuality === "limited" ? "estimate"
+      : "none";
+    const compCount = result.priceData?.count || 0;
+    const dataPhrase =
+      dataTier === "solid" && compCount ? `Based on ${compCount} real sale${compCount === 1 ? "" : "s"}`
+      : dataTier === "early" && compCount ? `Based on ${compCount} real sale${compCount === 1 ? "" : "s"} — small sample, verify`
+      : dataTier === "estimate" && compCount ? `Based on ${compCount} active listing${compCount === 1 ? "" : "s"} — estimate, not a sold price`
+      : "Based on market estimate";
+    // The claim must match the number: maxBuy is now the price where this
+    // clears a genuine ~$10 profit floor (lib/profitMath.ts's computeMaxBuy)
+    // - same fix as ScannerScreen.tsx.
+    const maxBuyReasoning = maxBuy == null ? "" : (
+      enteredBp > 0
+        ? (enteredBp <= maxBuy
+            ? `${dataPhrase}. You paid $${enteredBp} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
+            : `${dataPhrase}. You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
+        : `${dataPhrase}. Pay $${maxBuy} or less to make this a real flip (≥$10 profit after fees).`
+    );
+    const dataTag =
+      dataTier === "solid" ? "● REAL DATA"
+      : dataTier === "early" ? "● REAL DATA · SMALL SAMPLE"
+      : "● ESTIMATE";
+    const dataTagColor =
+      dataTier === "solid" ? C.green
+      : dataTier === "early" ? C.yellow
+      : C.text4;
+    const secondaryStats = [
+      { label: "sell price", value: result.sellPrice != null ? "$" + Math.round(result.sellPrice) : "—" },
+      { label: "ROI", value: result.roi ? result.roi + "%" : "—" },
+      { label: "to sell", value: result.timeToSell || "pending" },
+    ];
+    const skipDetail = isSkip ? (result.honestNote || result.brandTagPrompt || null) : null;
+
+    return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
         <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
         <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Text style={s.logoText}>ValuIQ</Text></View>
         <TouchableOpacity onPress={reset} style={[s.navBtn, { marginLeft: "auto" as any }]}><Text style={s.navBtnText}>New Scan</Text></TouchableOpacity>
       </View>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 80 }}>
+      <ScrollView ref={resultScrollRef} contentContainerStyle={{ padding: 20, paddingBottom: 80 }}>
         <View style={s.catBadge}>
           <Text style={{ fontSize: 22 }}>{selectedCat.icon}</Text>
           <Text style={s.catBadgeText}>{selectedCat.label}</Text>
         </View>
 
-        {/* Value + real comps */}
-        <View style={s.valCard}>
-          <Text style={s.valLabel}>{result.identification || selectedCat.label}</Text>
-          <Text style={s.valAmount}>{result.value || "See analysis"}</Text>
-          <View style={{flexDirection:"row", gap:14, marginTop:6, flexWrap:"wrap"}}>
-            {result.payUpTo ? <Text style={s.valSub}>Pay up to <Text style={{color:C.green, fontWeight:"800"}}>{result.payUpTo}</Text></Text> : null}
-            {result.confidence ? <Text style={s.valSub}>Confidence: {result.confidence}</Text> : null}
-          </View>
-          {result._ebay && result._ebay.count > 0 ? (
-            <Text style={[s.valSub, {marginTop:6, color:C.green}]}>{result._ebay.count} real eBay sold comps {"\u00B7"} ${result._ebay.min}-${result._ebay.max} (median ${result._ebay.median})</Text>
-          ) : (
-            <Text style={[s.valSub, {marginTop:6, color:C.text4}]}>Estimate {"\u2014"} no live eBay comps found, verify below</Text>
-          )}
-        </View>
-
-        {/* Decision */}
-        {result.decision ? (
-          <View style={[s.decCard, { borderColor: (result.decision === "BUY" ? C.green : result.decision === "WATCH" ? C.yellow : C.red) + "40" }]}>
-            <Text style={[s.decText, { color: result.decision === "BUY" ? C.green : result.decision === "WATCH" ? C.yellow : C.red }]}>
-              {result.decision === "BUY" ? "BUY IT" : result.decision === "WATCH" ? "WATCH IT" : "PASS"}
-            </Text>
-          </View>
-        ) : null}
-
-        {/* Variant check */}
-        {result.variantCheck ? (
-          <View style={[s.infoCard, {borderColor:C.green+"30"}]}>
-            <Text style={[s.infoLabel,{color:C.green}]}>Variant check {"\u2014"} this matters</Text>
-            <Text style={s.infoText}>{result.variantCheck}</Text>
-          </View>
-        ) : null}
-
-        {/* Condition / grade curve */}
-        {result.conditionCurve ? (
-          <View style={s.infoCard}><Text style={s.infoLabel}>Condition &amp; grade value</Text><Text style={s.infoText}>{result.conditionCurve}</Text></View>
-        ) : null}
-
-        {/* Authenticity flags */}
-        {result.authFlags && result.authFlags.length > 0 ? (
-          <View style={[s.infoCard, { borderColor: C.red + "30", backgroundColor: "#1a0505" }]}>
-            <Text style={[s.infoLabel, { color: C.red }]}>Authenticity / provenance flags</Text>
-            {result.authFlags.map((flag: string, i: number) => (
-              <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
-                <Text style={{ color: C.red, fontSize: 13 }}>{"\u2022"}</Text>
-                <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, flex: 1 }}>{flag}</Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {/* Value-add moves */}
-        {result.valueAddMoves ? (
-          <View style={[s.infoCard, {borderColor:C.green+"30"}]}><Text style={[s.infoLabel,{color:C.green}]}>Value-add moves</Text><Text style={s.infoText}>{result.valueAddMoves}</Text></View>
-        ) : null}
-
-        {/* Timing / where to sell */}
-        {result.timing ? (
-          <View style={s.infoCard}><Text style={s.infoLabel}>Where &amp; when to sell</Text><Text style={s.infoText}>{result.timing}</Text></View>
-        ) : null}
-
-        {/* Red flags */}
-        {result.redFlags && result.redFlags.length > 0 ? (
-          <View style={[s.infoCard, { borderColor: C.yellow + "30", backgroundColor: "#1a1508" }]}>
-            <Text style={[s.infoLabel, { color: C.yellow }]}>Watch out for</Text>
-            {result.redFlags.map((flag: string, i: number) => (
-              <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
-                <Text style={{ color: C.yellow, fontSize: 13 }}>{"\u2022"}</Text>
-                <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, flex: 1 }}>{flag}</Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {/* Verify links */}
-        {result.verifyLinks && Object.keys(result.verifyLinks).length > 0 ? (
-          <View style={s.infoCard}>
-            <Text style={s.infoLabel}>Verify on the real market</Text>
-            <View style={{flexDirection:"row", flexWrap:"wrap", gap:8, marginTop:4}}>
-              {Object.entries(result.verifyLinks).map(([name, url]: any, i: number) => (
-                <TouchableOpacity key={i} style={{backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:8, paddingHorizontal:12, paddingVertical:8}} onPress={() => Linking.openURL(url as string)}>
-                  <Text style={{color:C.text1, fontSize:12, fontWeight:"700"}}>{name} {"\u2197"}</Text>
-                </TouchableOpacity>
-              ))}
+        {/* Data confidence - same prominent banner ScannerScreen.tsx shows,
+            driven by the SAME dataTier the badge/reasoning above use, so
+            this can never contradict them. */}
+        {dataTier === "solid" && result.priceData && result.priceData.isRealData ? (
+          <TouchableOpacity style={s.goodBanner} onPress={() => result.priceData.ebaySearchUrl && Linking.openURL(result.priceData.ebaySearchUrl)}>
+            <View style={{flex:1}}>
+              <Text style={s.goodBannerTitle}>{result.priceData.count} real sales</Text>
+              <Text style={s.goodBannerSub}>avg ${Math.round(result.priceData.avgPrice)} · range ${result.priceData.minPrice}–${result.priceData.maxPrice}</Text>
             </View>
+            <Text style={{color:C.green}}>{'>'}</Text>
+          </TouchableOpacity>
+        ) : dataTier === "early" ? (
+          <View style={s.limitedBanner}>
+            <Text style={s.limitedText}>Real data — {result.priceData?.count || 0} sales, small sample. Numbers may vary, verify before buying.</Text>
+          </View>
+        ) : dataTier === "estimate" ? (
+          <View style={s.limitedBanner}>
+            <Text style={s.limitedText}>Estimated — limited data, numbers may vary. Verify before buying.</Text>
           </View>
         ) : null}
 
-        {result.listingTitle ? (
-          <View style={s.infoCard}><Text style={s.infoLabel}>Suggested listing title</Text><Text style={s.infoText}>{result.listingTitle}</Text></View>
+        {/* THE hero: verdict + profit + max-buy (with reasoning) + key
+            stats - the same ProfitFlexHero component and outcome (single
+            source of truth) ScannerScreen.tsx uses. */}
+        <ProfitFlexHero
+          outcome={outcome}
+          itemName={result.identification || selectedCat.label}
+          categoryLine={categoryLine}
+          photoBase64={photos[0]}
+          onEdit={editAndRerun}
+          isSkip={isSkip}
+          heroProfit={heroProfit}
+          profitLabel={profitLabel}
+          maxBuy={maxBuy}
+          maxBuyReasoning={maxBuyReasoning}
+          dataTag={dataTag}
+          dataTagColor={dataTagColor}
+          secondaryStats={secondaryStats}
+          skipDetail={skipDetail}
+        />
+
+        {result.brandTagPrompt ? (
+          <View style={[s.infoCard, { borderColor: C.yellow + "30", backgroundColor: "#1a1508" }]}>
+            <Text style={[s.infoLabel, { color: C.yellow }]}>Add a brand/maker photo</Text>
+            <Text style={s.infoText}>{result.brandTagPrompt}</Text>
+          </View>
         ) : null}
 
-        <ShareButton compact
-          message={selectedCat.label + " appraisal via ValuIQ\n\n" + (result.identification || selectedCat.label) + "\nValue: " + (result.value || "See app") + "\n\ngetvaluiq.com"}
-        />
+        {/* Everything below is buy-oriented - hidden entirely on a skip
+            verdict, already justified by its one reason in the hero above. */}
+        {!isSkip && (
+          <>
+            <ShareButton compact
+              message={selectedCat.label + " appraisal via ValuIQ\n\n" + (result.identification || selectedCat.label) + "\nSell price: $" + (result.sellPrice || "See app") + "\n\ngetvaluiq.com"}
+            />
+
+            {result.platformBreakdown && result.platformBreakdown.length > 0 && (
+              <CollapsibleSection title="BEST PLACE TO SELL" expanded={showPlatforms} onToggle={() => setShowPlatforms(v => !v)}>
+                {result.platformBreakdown.map((pb: any, i: number) => (
+                  <View key={pb.platform} style={{ marginBottom: 10 }}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <View style={{ width: 3, height: 16, borderRadius: 2, backgroundColor: i === 0 ? C.green : C.border }} />
+                        <Text style={{ color: i === 0 ? C.text1 : C.text3, fontSize: 14, fontWeight: i === 0 ? "800" : "500" }}>{pb.platform}</Text>
+                        {i === 0 && <Text style={{ color: C.green, fontSize: 9, fontWeight: "900" }}>BEST</Text>}
+                      </View>
+                      <Text style={{ color: pb.netProfit < 0 ? C.red : (i === 0 ? C.green : C.text2), fontSize: 15, fontWeight: "800" }}>
+                        {pb.netProfit < 0 ? "-$" + Math.abs(pb.netProfit) : "+$" + pb.netProfit} profit
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 4, marginLeft: 9 }}>
+                      <Text style={{ color: C.text4, fontSize: 11 }}>Sells ${pb.sellPrice}</Text>
+                      <Text style={{ color: C.text4, fontSize: 11 }}>Fees {pb.feeRate}</Text>
+                      <Text style={{ color: C.text4, fontSize: 11 }}>{pb.roi}% ROI</Text>
+                      <Text style={{ color: C.text4, fontSize: 11 }}>Paid out {pb.payoutSpeed}</Text>
+                    </View>
+                  </View>
+                ))}
+              </CollapsibleSection>
+            )}
+
+            {(result.authFlags?.length > 0 || result.redFlags?.length > 0) && (
+              <CollapsibleSection title="AUTHENTICITY & RISK" expanded={showAuth} onToggle={() => setShowAuth(v => !v)}>
+                {result.authFlags && result.authFlags.length > 0 && (
+                  <View style={{ marginBottom: result.redFlags?.length ? 12 : 0 }}>
+                    <Text style={[s.infoLabel, { color: C.red, marginBottom: 6 }]}>Authenticity / provenance flags</Text>
+                    {result.authFlags.map((flag: string, i: number) => (
+                      <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
+                        <Text style={{ color: C.red, fontSize: 13 }}>{"•"}</Text>
+                        <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, flex: 1 }}>{flag}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {result.redFlags && result.redFlags.length > 0 && (
+                  <View>
+                    <Text style={[s.infoLabel, { color: C.yellow, marginBottom: 6 }]}>Watch out for</Text>
+                    {result.redFlags.map((flag: string, i: number) => (
+                      <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
+                        <Text style={{ color: C.yellow, fontSize: 13 }}>{"•"}</Text>
+                        <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, flex: 1 }}>{flag}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </CollapsibleSection>
+            )}
+
+            {result.verifyLinks && Object.keys(result.verifyLinks).length > 0 && (
+              <CollapsibleSection title="VERIFY PRICES" expanded={showVerify} onToggle={() => setShowVerify(v => !v)}>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {Object.entries(result.verifyLinks).map(([name, url]: any, i: number) => (
+                    <TouchableOpacity key={i} style={{ backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 }} onPress={() => Linking.openURL(url as string)}>
+                      <Text style={{ color: C.text1, fontSize: 12, fontWeight: "700" }}>{name} {"↗"}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </CollapsibleSection>
+            )}
+
+            {(result.variantCheck || result.conditionCurve || result.valueAddMoves || result.timing || result.listingTitle) && (
+              <CollapsibleSection title="EXPERT ANALYSIS" expanded={showAnalysis} onToggle={() => setShowAnalysis(v => !v)}>
+                {result.variantCheck ? (
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={[s.infoLabel, { color: C.green }]}>Variant check {"—"} this matters</Text>
+                    <Text style={s.infoText}>{result.variantCheck}</Text>
+                  </View>
+                ) : null}
+                {result.conditionCurve ? (
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={s.infoLabel}>Condition &amp; grade value</Text>
+                    <Text style={s.infoText}>{result.conditionCurve}</Text>
+                  </View>
+                ) : null}
+                {result.valueAddMoves ? (
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={[s.infoLabel, { color: C.green }]}>Value-add moves</Text>
+                    <Text style={s.infoText}>{result.valueAddMoves}</Text>
+                  </View>
+                ) : null}
+                {result.timing ? (
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={s.infoLabel}>Where &amp; when to sell</Text>
+                    <Text style={s.infoText}>{result.timing}</Text>
+                  </View>
+                ) : null}
+                {result.listingTitle ? (
+                  <View>
+                    <Text style={s.infoLabel}>Suggested listing title</Text>
+                    <Text style={s.infoText}>{result.listingTitle}</Text>
+                  </View>
+                ) : null}
+              </CollapsibleSection>
+            )}
+          </>
+        )}
 
         <TouchableOpacity
           style={{backgroundColor:C.surface,borderRadius:12,padding:14,marginTop:10,borderWidth:1,borderColor:C.border,flexDirection:"row",alignItems:"center",gap:8}}
@@ -300,8 +497,8 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
-  );
-
+    );
+  }
   // ── INPUT FORM ─────────────────────────────────────────
   return (
     <SafeAreaView style={s.safe}>
@@ -353,6 +550,21 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
           </View>
         )}
 
+        {/* Optional buy price - drives real profit/ROI/max-buy math once
+            comps resolve, same cost-basis resolution lens uses (entered
+            price if given, else the computed max-buy ceiling). */}
+        <View style={{ marginBottom: 14 }}>
+          <Text style={s.label}>Your cost (optional)</Text>
+          <TextInput
+            style={s.input}
+            value={buyPriceInput}
+            onChangeText={v => setBuyPriceInput(v.replace(/[^0-9.]/g, ""))}
+            placeholder="What you paid or are considering paying"
+            placeholderTextColor={C.text4}
+            keyboardType="decimal-pad"
+          />
+        </View>
+
         {/* Fields */}
         {selectedCat.fields.map(f => (
           <View key={f.key} style={{ marginBottom: 14 }}>
@@ -373,16 +585,26 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
             : <Text style={s.greenBtnText}>Get Expert Analysis →</Text>
           }
         </TouchableOpacity>
-        {/* Calibrated to REAL measured specialty/route.ts timing
-            (_debug.timing from live production runs): identify ~3.1-3.5s,
-            eBay comps near-instant, appraise ~1.6-2.3s. Total ~5-6.8s. */}
+        {/* RETUNED (2026-08-19): the old 3300/900/2000ms budget (~6s total)
+            was calibrated before appraise's max_tokens went back to 1400
+            (see specialty/route.ts) to fix truncated-JSON failures on
+            content-rich categories - a bigger token budget takes genuinely
+            longer to generate, and real device testing now measures total
+            time around ~25s, dominated by that appraise step. A 4th step
+            splits the long tail so there's a visible transition partway
+            through instead of one silent ~19s stall on a single label.
+            Like lens's StagedProgress, the LAST step can only ever show an
+            active spinner, never a false "done" checkmark, so a real total
+            longer than this budget just means it keeps spinning honestly
+            until the actual response arrives - it doesn't freeze or lie. */}
         {loading && (
           <StagedProgress
             active
             steps={[
-              { label: "Identifying your item", ms: 3300 },
-              { label: "Checking real eBay comps", ms: 900 },
-              { label: "Applying category expertise", ms: 2000 },
+              { label: "Identifying your item", ms: 4000 },
+              { label: "Checking real eBay comps", ms: 1500 },
+              { label: "Applying category expertise", ms: 12000 },
+              { label: "Finalizing your appraisal", ms: 7500 },
             ]}
           />
         )}
@@ -431,4 +653,10 @@ const s = StyleSheet.create({
   infoCard:      { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 14, padding: 16, marginBottom: 10 },
   infoLabel:     { color: C.text4, fontSize: 10, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 },
   infoText:      { color: C.text2, fontSize: 13, lineHeight: 21 },
+  debugLine:     { color: C.text4, fontSize: 11, lineHeight: 17, fontFamily: "monospace" as any },
+  goodBanner:    { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: C.greenBg, borderWidth: 1.5, borderColor: C.greenBorder, borderRadius: 12, padding: 12, marginBottom: 12 },
+  goodBannerTitle:{ color: C.green, fontSize: 13, fontWeight: "800", marginBottom: 2 },
+  goodBannerSub: { color: C.text3, fontSize: 12 },
+  limitedBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#1a1508", borderWidth: 1, borderColor: C.yellow + "40", borderRadius: 12, padding: 12, marginBottom: 12 },
+  limitedText:   { color: C.yellow, fontSize: 12, fontWeight: "700", flex: 1 },
 });

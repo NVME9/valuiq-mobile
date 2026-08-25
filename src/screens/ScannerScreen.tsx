@@ -361,24 +361,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const hasNoData      = !hasGoodData && !hasLimitedData;
     const specialtyMatch  = matchSpecialtyCategory(result.category, result.itemName || result.item_name);
 
-    // Profit: whichever number is actually shown as the hero (Oracle
-    // real/est profit when present, else the lens's own netProfit). Both are
-    // computed against the SAME cost basis - the user's entered buy price
-    // when they gave one, else the max-buy ceiling - so this is genuinely
-    // "actual profit" whenever a price was entered, not a projection.
-    const oraclePred    = oracle?.prediction;
-    const oracleProfit  = oraclePred
-      ? Number(oracle.dataMode === "crowd-led" ? oraclePred.medianProfit : oraclePred.estProfit)
-      : NaN;
-    const heroProfit     = !isNaN(oracleProfit) ? oracleProfit : (Number(result.netProfit) || 0);
-
+    // ONE ORACLE SOURCE (2026-08-24): the scan result card now reads every
+    // Oracle-derived number from `result` itself - lens/route.ts already
+    // queries the SAME community moat internally (Wave 1) and embeds its
+    // output into result.netProfit/buyTarget/roi/velocity/dataQuality/
+    // priceData. The separately-fetched `oracle`/`oraclePred` state below
+    // (getProfitOracle, a DIFFERENT, independently price-banded query) used
+    // to override these numbers whenever it returned crowd-led data,
+    // which is exactly what let the hero disagree with itself (e.g. "sells
+    // in ~540 days" from one query next to "not enough data yet" from the
+    // other). `oracle` is kept only for ShareCard's share-image rendering
+    // below - it must NOT feed anything the on-screen card shows.
+    const heroProfit = Number(result.netProfit) || 0;
     const enteredBp = Number(buyPrice) || 0;
-    // Hoisted so the hero and the debug readout read the exact same value.
-    const oracleMaxBuy = oraclePred
-      ? (oracle.dataMode === "crowd-led" ? oraclePred.safeMaxBuy : oraclePred.estMaxBuy)
-      : null;
-    const maxBuy = oracleMaxBuy != null ? Number(oracleMaxBuy) : (Number(result.buyTarget) || null);
-    const profitLabel = enteredBp > 0 ? "actual profit" : "projected profit";
+    const maxBuy = Number(result.buyTarget) || null;
+    const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
 
     // ROI MUST be computed against the SAME cost basis as heroProfit - the
     // entered price when one exists, else the max-buy ceiling. This used to
@@ -392,66 +389,127 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       ? Math.round((heroProfit / actualCostBasis) * 100)
       : (Number(result.roi) || 0);
 
-    const oracleDaysTxt = oraclePred
-      ? (oraclePred.medianDays != null ? `~${oraclePred.medianDays}d` : (oraclePred.medianDaysLabel || null))
-      : null;
-    const sellTimeLabel = oraclePred
-      ? (oraclePred.medianDays != null
-          ? `~${oraclePred.medianDays} days`
-          : (oraclePred.medianDaysLabel && oraclePred.medianDaysLabel !== "not enough data yet" ? oraclePred.medianDaysLabel : null))
-      : null;
+    // ONE ORACLE SOURCE: both the stat-block text and the verdict's raw
+    // number now read result.velocity.estDaysToSale exclusively (lens's own
+    // embedded moat query, banded + outlier-guarded as of this fix - see
+    // lens/route.ts and lib/profitOracle.ts). It's either a real, sane
+    // measurement or null - "not enough data yet" is shown honestly instead
+    // of a second, differently-sourced number ever being able to disagree
+    // with it.
+    const estDaysToSale = result.velocity?.estDaysToSale ?? null;
+    const oracleDaysTxt = estDaysToSale != null ? `~${estDaysToSale}d` : "not enough data yet";
+    const sellTimeLabel = estDaysToSale != null ? `~${estDaysToSale} days` : null;
+    // Real NUMBER of days for the velocity-adjusted score - classifyOutcome
+    // falls back to a conservative 45-day assumption if this is null - never
+    // call something HOT it can't back up.
+    const daysToSell = estDaysToSale;
 
-    // Outcome tier — THE single source of truth for the verdict. Dominated
-    // by ROI/margin (not raw profit dollars), so a $13 profit on a $1 buy
-    // (1300% ROI) and a $13 profit on a $100 buy (13% ROI) read as opposite
-    // verdicts even though the dollar amount is identical. Nothing else on
-    // this screen independently computes or displays a conflicting verdict.
-    const outcome = classifyOutcome({
-      decision: result.decision,
-      netProfit: heroProfit,
-      roi: heroRoi,
-      velocityTier: result.velocity?.tier,
-      sellThrough: result.velocity?.sellThrough,
-      dataQuality: result.dataQuality,
-      sellPrice: Number(result.sellPrice) || null,
-      sellTimeLabel,
-    });
+    // Outcome tier — THE single source of truth for the verdict. Weighs
+    // ROI, dollar profit, AND velocity together (a fast mover clears the
+    // bar at a lower ROI, a slow mover needs a higher one; trivial dollars
+    // never read as a win regardless of ROI%) - see outcomeTier.ts for the
+    // full model. Nothing else on this screen independently computes or
+    // displays a conflicting verdict.
+    //
+    // NO FABRICATED VERDICT (2026-08-25): classifyOutcome must never run
+    // against a cost basis nobody actually entered. It used to be fed
+    // heroProfit/heroRoi computed off the max-buy CEILING as if it were a
+    // real purchase price - confirmed live: a genuinely great $19-median
+    // item with no price entered came back "SKIP - only $4 profit," a
+    // number nobody paid or would pay. lens/route.ts now zeroes netProfit/
+    // roi server-side when unpriced, which would otherwise feed
+    // classifyOutcome a $0-profit "You'd lose $0. Skip it." - equally
+    // dishonest, just a different wrong number. Reuses the skip TIER'S
+    // LAYOUT (no big profit hero; Max Buy always ships, see ProfitFlexHero)
+    // without claiming a verdict this screen can't back up - real sell
+    // data (the banner above) plus a correctly-computed Max Buy (below)
+    // are the only honest things to lead with until a price is entered.
+    const outcome = enteredBp > 0
+      ? classifyOutcome({
+          decision: result.decision,
+          netProfit: heroProfit,
+          roi: heroRoi,
+          daysToSell,
+          velocityTier: result.velocity?.tier,
+          sellThrough: result.velocity?.sellThrough,
+          dataQuality: result.dataQuality,
+          sellPrice: Number(result.sellPrice) || null,
+          sellTimeLabel,
+        })
+      : {
+          tier: "skip" as const,
+          emoji: "💵",
+          label: "REAL DATA",
+          copy: Number(result.sellPrice) > 0
+            ? `Sells for about $${Math.round(Number(result.sellPrice))}. Enter what you'd pay to see your real profit and verdict.`
+            : "Enter what you'd pay to see your real profit and verdict.",
+          accent: C.yellow,
+          adjustedROI: 0,
+          daysUsed: 0,
+        };
     const isSkip = outcome.tier === "skip";
 
     const categoryLine = result.category
       ? `${result.category}${result.condition ? " - " + result.condition : ""}`
       : null;
 
+    // CALIBRATED TO ONE HONEST TIER (2026-08-24): every "how real is this
+    // data" signal on this screen - badge, footnote, reasoning text, AND the
+    // banner below - now derives from this ONE tier, itself derived from the
+    // SAME two backend-computed signals dataQuality was calibrated from
+    // (crowdConfidence + isLowConfidenceId, see lens/route.ts). Previously
+    // three separate fields (oraclePred.medianProfitIsReal, oracle.dataMode,
+    // priceData.isRealData) each read their own threshold - none of them the
+    // one dataQuality actually used - which is what let the badge say
+    // "REAL DATA" while the banner said "Estimated" for the same 22-row
+    // sample. Deriving from dataQuality itself makes disagreement structurally
+    // impossible: the badge's bucket can only get MORE specific than the
+    // banner's, never contradict it.
+    const dataTier: "solid" | "early" | "estimate" | "none" =
+      result.dataQuality === "strong" ? "solid"
+      : result.dataQuality === "limited" && result.crowdConfidence === "early" ? "early"
+      : result.dataQuality === "limited" ? "estimate"
+      : "none";
+
     // Max-buy ALWAYS ships with the reasoning that makes it trustworthy -
     // cites the real comp count when we have one, and judges the actual
     // purchase when a price was entered, instead of appearing as a bare
     // number asking for trust.
     const compCount = result.priceData?.count || 0;
-    const isRealComps = !!result.priceData?.isRealData;
-    const dataPhrase = isRealComps && compCount
-      ? `Based on ${compCount} real sold listing${compCount === 1 ? "" : "s"}`
+    const dataPhrase =
+      dataTier === "solid" && compCount ? `Based on ${compCount} real sale${compCount === 1 ? "" : "s"}`
+      : dataTier === "early" && compCount ? `Based on ${compCount} real sale${compCount === 1 ? "" : "s"} — small sample, verify`
+      : dataTier === "estimate" && compCount ? `Based on ${compCount} active listing${compCount === 1 ? "" : "s"} — estimate, not a sold price`
       : "Based on market estimate";
+    // The claim must match the number: maxBuy is now the price where this
+    // clears a genuine ~$10 profit floor (lib/profitMath.ts's computeMaxBuy,
+    // fixed to solve for the verdict's own worth-it floor, not just an ROI%
+    // that could still net trivial dollars) - so it's honest to say what
+    // paying it actually gets you, not just "keep a healthy margin."
     const maxBuyReasoning = maxBuy == null ? "" : (
       enteredBp > 0
         ? (enteredBp <= maxBuy
             ? `${dataPhrase}. You paid $${enteredBp} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
             : `${dataPhrase}. You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
-        : `${dataPhrase}. Pay this or less to keep a healthy margin.`
+        : `${dataPhrase}. Pay $${maxBuy} or less to make this a real flip (≥$10 profit after fees).`
     );
 
-    const dataTag = oraclePred
-      ? (oraclePred.medianProfitIsReal
-          ? "● REAL DATA"
-          : (result.priceData?.isRealData && result.priceData?.count ? `Based on ${result.priceData.count} listings` : "ESTIMATE"))
-      : undefined;
-    const dataTagColor = oraclePred ? (oraclePred.medianProfitIsReal ? "#9ef01a" : "#8a7aa8") : undefined;
-    const footNote = oraclePred
-      ? (oracle.dataMode === "crowd-led" ? "From real reseller outcomes." : "Market estimate. Sharpens as the community logs real sales.")
-      : undefined;
+    const dataTag =
+      dataTier === "solid" ? "● REAL DATA"
+      : dataTier === "early" ? "● REAL DATA · SMALL SAMPLE"
+      : "● ESTIMATE";
+    const dataTagColor =
+      dataTier === "solid" ? C.green
+      : dataTier === "early" ? C.yellow
+      : C.text4;
+    const footNote =
+      dataTier === "solid" ? "From real reseller outcomes."
+      : dataTier === "early" ? "From real reseller outcomes — small sample, treat as a rough signal."
+      : "Market estimate. Sharpens as the community logs real sales.";
     const secondaryStats = [
       { label: "sell price", value: result.sellPrice != null ? "$" + Math.round(result.sellPrice) : "—" },
       { label: "ROI", value: heroRoi ? heroRoi + "%" : "—" },
-      { label: "to sell", value: oracleDaysTxt || "pending" },
+      { label: "to sell", value: oracleDaysTxt },
     ];
     const skipDetail = isSkip ? (result.reasoning || null) : null;
 
@@ -505,20 +563,27 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           {!hasNoData && (
             <>
               {/* Data confidence - shown in both BUY and SKIP layouts; backs
-                  the max-buy reasoning (and the skip reason) either way. */}
-              {hasGoodData && result.priceData && result.priceData.isRealData ? (
+                  the max-buy reasoning (and the skip reason) either way.
+                  Driven by the SAME dataTier the badge/footnote/reasoning
+                  above use, so this can never contradict them. */}
+              {dataTier === "solid" && result.priceData && result.priceData.isRealData ? (
                 <TouchableOpacity style={s.goodBanner} onPress={()=>Linking.openURL(result.priceData.ebaySearchUrl)}>
                   <Text></Text>
                   <View style={{flex:1}}>
-                    <Text style={s.goodBannerTitle}>{result.priceData.count} real sold listings</Text>
+                    <Text style={s.goodBannerTitle}>{result.priceData.count} real sales</Text>
                     <Text style={s.goodBannerSub}>avg ${result.priceData.avgPrice} · range ${result.priceData.minPrice}–${result.priceData.maxPrice}</Text>
                   </View>
                   <Text style={{color:C.green}}>{'>'}</Text>
                 </TouchableOpacity>
-              ) : hasLimitedData ? (
+              ) : dataTier === "early" ? (
                 <View style={s.limitedBanner}>
                   <Text></Text>
-                  <Text style={s.limitedText}>Estimated - limited data. Verify before buying.</Text>
+                  <Text style={s.limitedText}>Real data — {result.priceData?.count || 0} sales, small sample. Numbers may vary, verify before buying.</Text>
+                </View>
+              ) : dataTier === "estimate" ? (
+                <View style={s.limitedBanner}>
+                  <Text></Text>
+                  <Text style={s.limitedText}>Estimated — limited data, numbers may vary. Verify before buying.</Text>
                 </View>
               ) : null}
 
@@ -1078,6 +1143,7 @@ veloSub: { fontSize: 12, color: C.text3, marginTop: 3 },
   infoCard:       { backgroundColor: "rgba(0,0,0,0.3)", borderWidth: 1, borderColor: C.border, borderRadius: 13, padding: 14, marginBottom: 10 },
   infoLabel:      { color: C.text4, fontSize: 10, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
   infoText:       { color: C.text2, fontSize: 14, lineHeight: 22 },
+  debugLine:      { color: C.text4, fontSize: 11, lineHeight: 17, fontFamily: "monospace" as any },
 
   // Upgrade,
   dealBox:        { backgroundColor: "#0d0d00", borderWidth: 1, borderColor: "#2a2000", borderRadius: 18, padding: 18, marginBottom: 12 },

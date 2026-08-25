@@ -236,7 +236,7 @@ export async function priceBattle(token: string, itemName: string, brand: string
   const r = await fetch(`${API_BASE}/api/price-battle`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, itemName, brand, category, condition, buyPrice}) });
   return r.json();
 }
-export async function analyzeSpecialty(token: string, category: string, fields: Record<string,string>, photos?: string[]): Promise<any> {
+export async function analyzeSpecialty(token: string, category: string, fields: Record<string,string>, photos?: string[], buyPrice?: number, debug?: boolean): Promise<any> {
   // Resize each photo to keep the request small + fast (avoids vision timeout)
   const images: string[] = [];
   for (const p of (photos || [])) {
@@ -258,7 +258,7 @@ export async function analyzeSpecialty(token: string, category: string, fields: 
   }
   let r: Response;
   try {
-    r = await fetch(`${API_BASE}/api/specialty`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, category, fields, photos: images, thumb}) });
+    r = await fetch(`${API_BASE}/api/specialty`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, category, fields, photos: images, thumb, buyPrice: buyPrice || 0, debug: !!debug}) });
   } catch {
     return { success: false, error: "Network error. Check your connection and try again." };
   }

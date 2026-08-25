@@ -1,10 +1,10 @@
-// ProfitFlexHero.tsx — the lens result's ONE hero: verdict + profit + max-buy
+// ProfitFlexHero.tsx — the scan result's ONE hero: verdict + profit + max-buy
 // + key stats, reconciled into a single card instead of a separate verdict
 // card stacked on top of a separate Profit Oracle card. Reacts to the
-// outcome tier (killer/rare/solid/skip), which is the single source of
+// outcome tier (hot/solid/skip), which is the single source of
 // truth for the verdict - this component never independently decides
 // buy-vs-skip, it only renders what classifyOutcome() already decided.
-// The killer tier reuses FlexRevealCard's glow + count-up building blocks
+// The hot tier reuses FlexRevealCard's glow + count-up building blocks
 // rather than reinventing motion for a second "big number" moment.
 import React, { useEffect, useRef } from "react";
 import { View, Text, StyleSheet, Animated, Easing, Image, TouchableOpacity } from "react-native";
@@ -52,15 +52,15 @@ export default function ProfitFlexHero({
   heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, dataTag, dataTagColor, secondaryStats = [], footNote,
   skipDetail,
 }: ProfitFlexHeroProps) {
-  const isKiller = outcome.tier === "killer";
-  const count = useCountUp(Math.round(heroProfit), isKiller, 900);
-  const heroText = isKiller ? money(count) : money(heroProfit);
+  const isHot = outcome.tier === "hot";
+  const count = useCountUp(Math.round(heroProfit), isHot, 900);
+  const heroText = isHot ? money(count) : money(heroProfit);
 
   // Subtle pulse on the tier badge — the only continuous motion, and only
   // for the tier that's supposed to feel like a banger.
   const pulse = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    if (!isKiller) return;
+    if (!isHot) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
@@ -69,21 +69,21 @@ export default function ProfitFlexHero({
     );
     loop.start();
     return () => loop.stop();
-  }, [isKiller]);
+  }, [isHot]);
   const pulseStyle: any = { opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) };
 
   return (
     <View style={[st.card, { borderColor: outcome.accent + "55", backgroundColor: outcome.accent + "0f" }]}>
-      {isKiller && (
+      {isHot && (
         <View style={st.glowWrap} pointerEvents="none">
           <Svg width={GLOW_W} height={GLOW_H}>
             <Defs>
-              <RadialGradient id="killerGlow" cx="50%" cy="30%" r="65%">
+              <RadialGradient id="hotGlow" cx="50%" cy="30%" r="65%">
                 <Stop offset="0%" stopColor={C.green} stopOpacity={0.3} />
                 <Stop offset="100%" stopColor={C.green} stopOpacity={0} />
               </RadialGradient>
             </Defs>
-            <Rect x={0} y={0} width={GLOW_W} height={GLOW_H} fill="url(#killerGlow)" />
+            <Rect x={0} y={0} width={GLOW_W} height={GLOW_H} fill="url(#hotGlow)" />
           </Svg>
         </View>
       )}
@@ -97,7 +97,7 @@ export default function ProfitFlexHero({
       ) : null}
 
       <View style={st.top}>
-        {isKiller ? (
+        {isHot ? (
           <Animated.Text style={[st.badge, { color: outcome.accent }, pulseStyle]} numberOfLines={1}>
             {outcome.emoji} {outcome.label}
           </Animated.Text>

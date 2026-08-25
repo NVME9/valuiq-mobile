@@ -34,6 +34,24 @@ function verdictColor(v: string) {
   return C.red;
 }
 
+// Recomputed from the saved blob at DISPLAY time - NOT from a possibly-
+// stale saved `dataQuality` string, so this works correctly on BOTH old
+// pre-recalibration history (saved under looser "any real comps = strong"
+// criteria) and new scans alike. Mirrors the current backend rule
+// (lens/route.ts, specialty/route.ts): "strong" requires >=10 real SOLD
+// comps - active-only, thin sold counts, and LLM-estimates all count as
+// thin. Returns null (not true/false) when there's genuinely no saved
+// priceData to judge from (very old rows) - silence is honest there,
+// asserting either confidence level would be a guess.
+function isThinData(full: any): boolean | null {
+  const pd = full?.priceData;
+  if (!pd) return null;
+  if (!pd.isRealData) return true;
+  if ((pd.count || 0) < 10) return true;
+  if ((full?.velocity?.soldCount || 0) === 0) return true; // active-only, never real sold data
+  return false;
+}
+
 export default function HistoryScreen({ token, plan, onNavigate, onBack, tourStep, advanceTour, skipTour }: Props) {
   const [tab, setTab]               = useState<HistoryTab>("scans");
   const [scans, setScans]           = useState<any[]>([]);
@@ -111,6 +129,14 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
         newPhotosBase64: editPhotos.length > 0 ? editPhotos : undefined,
       });
       if (data && (data.success || data.sellPrice != null)) {
+        // MEASURED BUG: this updated the stat columns (sell_price/net_profit/
+        // roi) but never re-saved specialty_data - the JSON blob the card's
+        // "Analysis" prose and platform breakdown are read from. That left
+        // the prose describing the OLD scan's numbers while the stat row
+        // showed the re-run's new ones, an internal contradiction on the
+        // same card. `data` here IS the full fresh scanResult (same shape
+        // lens/route.ts saves at scan time) - re-saving it keeps the prose
+        // in sync with the stats it's describing.
         const updates = {
           item_name: editName.trim(),
           brand: editBrand.trim() || "Unknown",
@@ -122,6 +148,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
           decision: data.decision ?? scan.decision,
           best_platform: data.bestPlatform ?? scan.best_platform,
           roi: data.roi ?? scan.roi,
+          specialty_data: JSON.stringify(data),
         };
         // Persist to DB (PATCH preserves image_url / thumbnail)
         try { await updateScan(token, scan.id, updates); } catch {}
@@ -158,11 +185,31 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
       );
       if (data && data.success && data.result) {
         const r = data.result;
-        const valueNum = Number(String(r.value || "").replace(/[^0-9.]/g, "").split(".")[0]) || 0;
+        // MEASURED BUG: this read r.value, a field that no longer exists on
+        // specialty's result since the parity rewrite replaced free-text
+        // value/payUpTo with a computed r.sellPrice - valueNum was always
+        // 0, so sell_price silently NEVER updated on a specialty re-run
+        // (masked by the `|| item.sell_price` fallback quietly keeping the
+        // stale number, no error, no visible failure). Also this never sent
+        // net_profit/roi/buy_target at all (unlike doRerun() above for the
+        // Scans tab), so those went stale in the DB on every specialty
+        // re-run even though not currently shown on this collapsed card -
+        // r is the fresh appraisal (variantCheck, conditionCurve, authFlags,
+        // etc. all read from this on the specialty tab, plus priceData for
+        // the real-comps banner) - without re-saving it, the card's rich
+        // content stays frozen at the pre-rerun appraisal while the stat
+        // row shows new numbers. best_platform is deliberately NOT touched
+        // here - on specialty rows that column stores the CATEGORY (see
+        // comment above), not a resale platform, and doesn't change on a
+        // re-run of the same item.
         const updates = {
           item_name: r.identification || editName.trim(),
           decision: r.decision || item.decision,
-          sell_price: valueNum || item.sell_price,
+          sell_price: Number(r.sellPrice) || item.sell_price,
+          buy_target: Number(r.buyTarget) || item.buy_target,
+          net_profit: Number(r.netProfit) || item.net_profit,
+          roi: Number(r.roi) || item.roi,
+          specialty_data: JSON.stringify(r),
         };
         try { await updateScan(token, item.id, updates); } catch {}
         setSpecialtyScans(prev => prev.map(s => s.id === item.id ? { ...s, ...updates } : s));
@@ -465,6 +512,11 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
 
                     {!selectMode && expanded === scan.id && (
                       <View style={s.expanded}>
+                        {isThinData(full) === true && (
+                          <View style={s.limitedBanner}>
+                            <Text style={s.limitedText}>Estimated — limited data, numbers may vary. Verify before buying.</Text>
+                          </View>
+                        )}
                         <View style={s.expandedRow}>
                           {[
                             ["Max Pay", "$" + (Math.round((scan.buy_target || (scan.sell_price ? scan.sell_price * 0.4 : 0)) * 100) / 100), C.yellow],
@@ -722,7 +774,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                         <View style={{flex:1}}>
                           <Text style={s.cardName} numberOfLines={1}>{item.item_name || "Appraisal"}</Text>
                           <Text style={s.cardMeta}>{new Date(item.created_at).toLocaleDateString()}</Text>
-                          <Text style={s.cardPlatform}>{appr.value || ("$" + (item.sell_price||0))}</Text>
+                          <Text style={s.cardPlatform}>{"$" + (item.sell_price||0)}</Text>
                         </View>
                         <View style={[s.verdictBadge, {backgroundColor: decColor + "20"}]}>
                           <Text style={[s.verdictBadgeTxt, {color: decColor}]}>{item.decision || "WATCH"}</Text>
@@ -769,8 +821,19 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                           </View>
                           ) : (
                           <>
-                          {appr._ebay && appr._ebay.count > 0 ? (
-                            <Text style={{color:C.green, fontSize:12, marginBottom:10}}>{appr._ebay.count} live eBay listings {"\u00B7"} ${appr._ebay.min}-${appr._ebay.max} (median ${appr._ebay.median})</Text>
+                          {isThinData(appr) === true && (
+                            <View style={s.limitedBanner}>
+                              <Text style={s.limitedText}>Estimated — limited data, numbers may vary. Verify before buying.</Text>
+                            </View>
+                          )}
+                          {/* MEASURED BUG: this read appr._ebay, a field
+                              specialty's result no longer sets since the
+                              parity rewrite renamed it to priceData - this
+                              banner has been silently hidden on every
+                              specialty item since then regardless of real
+                              comp data. */}
+                          {appr.priceData && appr.priceData.isRealData && appr.priceData.count > 0 ? (
+                            <Text style={{color:C.green, fontSize:12, marginBottom:10}}>{appr.priceData.count} real eBay listings {"\u00B7"} ${appr.priceData.minPrice}-${appr.priceData.maxPrice} (avg ${Math.round(appr.priceData.avgPrice)})</Text>
                           ) : null}
                           {appr.variantCheck ? (
                             <View style={s.apprSection}><Text style={[s.apprLabel,{color:C.green}]}>Variant check</Text><Text style={s.apprText}>{appr.variantCheck}</Text></View>
@@ -892,6 +955,8 @@ const s = StyleSheet.create({
   apprSection:   { marginBottom:12 },
   apprLabel:     { color:C.text2, fontSize:12, fontWeight:"800", textTransform:"uppercase", marginBottom:4 },
   apprText:      { color:C.text2, fontSize:13, lineHeight:20 },
+  limitedBanner: { flexDirection:"row", alignItems:"center", gap:8, backgroundColor:"#1a1508", borderWidth:1, borderColor:C.yellow+"40", borderRadius:12, padding:12, marginBottom:12 },
+  limitedText:   { color:C.yellow, fontSize:12, fontWeight:"700", flex:1 },
   apprBullet:    { color:C.text2, fontSize:13, lineHeight:20, marginBottom:2 },
   verdictBadge:  { paddingHorizontal:10, paddingVertical:5, borderRadius:8 },
   verdictBadgeTxt: { fontSize:12, fontWeight:"800" },
