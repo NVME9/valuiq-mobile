@@ -134,8 +134,8 @@ export default function ManifestBeast({ token, onBack }: Props) {
       <ScrollView contentContainerStyle={s.scroll}>
         {/* Hero */}
         <View style={s.hero}>
-          <Text style={s.heroTitle}>Any manifest. Real eBay prices. Your max bid.</Text>
-          <Text style={s.heroSub}>Upload any manifest - photo or CSV/Excel. We price each item against real eBay sold data and give you a risk-adjusted lot value plus your maximum profitable bid.</Text>
+          <Text style={s.heroTitle}>Any manifest. AI-estimated value. Your max bid.</Text>
+          <Text style={s.heroSub}>Upload any manifest - photo or CSV/Excel. AI-estimated lot value — verify before bidding — plus a risk-adjusted maximum profitable bid.</Text>
           <View style={s.costBox}>
             <Text style={s.costLbl}>What you'll pay for the whole lot (optional)</Text>
             <View style={s.costInputRow}>

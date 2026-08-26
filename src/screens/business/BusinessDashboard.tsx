@@ -84,23 +84,6 @@ export default function BusinessDashboard({ token, userEmail, onNavigate, onLogo
           ))}
         </View>
 
-        {/* Recent, Deals */}
-        {(stats?.recentDeals||[]).length > 0 && (
-          <>
-            <Text style={s.secTit}>LATEST INTELLIGENCE</Text>
-            {stats.recentDeals.slice(0,3).map((d:any,i:number)=>(
-              <TouchableOpacity key={i} style={s.dealCard} onPress={()=>onNavigate("deal-hunter")}>
-                <View style={[s.score,{backgroundColor:d.score>=85?B.profit+"20":B.warning+"15"}]}>
-                  <Text style={[s.scoreNum,{color:d.score>=85?B.profit:B.warning}]}>{d.score}</Text>
-                </View>
-                <View style={{flex:1}}>
-                  <Text style={s.dealTit} numberOfLines={1}>{d.title||"Deal"}</Text>
-                  <Text style={s.dealMeta}>{d.source} · +${Math.round(d.profit||0)} est.</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </>
-        )}
       </ScrollView>
     </SafeAreaView>
   );

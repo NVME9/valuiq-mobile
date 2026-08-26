@@ -264,6 +264,13 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
         };
     const isSkip = outcome.tier === "skip";
 
+    // WHICH PLATFORM (2026-08-25): same fix as ScannerScreen.tsx - bestPlatform
+    // drives the actual netProfit/roi shown above but never reached this card.
+    // Only prepended when a real price was entered.
+    const heroOutcome = (enteredBp > 0 && result.bestPlatform)
+      ? { ...outcome, copy: `On ${result.bestPlatform} — ${outcome.copy}` }
+      : outcome;
+
     const categoryLine = `${selectedCat.label}${result.confidence ? " - " + result.confidence + " confidence" : ""}`;
 
     // CALIBRATED TO ONE HONEST TIER (2026-08-24): same fix as
@@ -346,7 +353,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
             stats - the same ProfitFlexHero component and outcome (single
             source of truth) ScannerScreen.tsx uses. */}
         <ProfitFlexHero
-          outcome={outcome}
+          outcome={heroOutcome}
           itemName={result.identification || selectedCat.label}
           categoryLine={categoryLine}
           photoBase64={photos[0]}
@@ -602,7 +609,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
             active
             steps={[
               { label: "Identifying your item", ms: 4000 },
-              { label: "Checking real eBay comps", ms: 1500 },
+              { label: "Checking real reseller sales", ms: 1500 },
               { label: "Applying category expertise", ms: 12000 },
               { label: "Finalizing your appraisal", ms: 7500 },
             ]}

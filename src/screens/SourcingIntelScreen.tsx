@@ -67,16 +67,30 @@ export default function SourcingIntelScreen({ token, onBack }: Props) {
             {m && (
               <View style={s.card}>
                 <Text style={s.cardTitle}>Market Data</Text>
-                <View style={s.statGrid}>
-                  <View style={s.statBox}><Text style={s.statVal}>${m.medianSold}</Text><Text style={s.statLbl}>median sold</Text></View>
-                  <View style={s.statBox}><Text style={s.statVal}>{m.sellThrough}%</Text><Text style={s.statLbl}>sell-through</Text></View>
-                  <View style={s.statBox}><Text style={[s.statVal,{textTransform:"capitalize"}]}>{m.velocity}</Text><Text style={s.statLbl}>velocity</Text></View>
-                </View>
-                <View style={s.statGrid}>
-                  <View style={s.statBox}><Text style={s.statVal}>${m.lowestActive}</Text><Text style={s.statLbl}>lowest active</Text></View>
-                  <View style={s.statBox}><Text style={s.statVal}>{m.soldCount}</Text><Text style={s.statLbl}>recent sold</Text></View>
-                  <View style={s.statBox}><Text style={[s.statVal,{textTransform:"capitalize"}]}>{m.trend}</Text><Text style={s.statLbl}>price trend</Text></View>
-                </View>
+                {m.hasCrowd ? (
+                  <>
+                    <View style={s.statGrid}>
+                      <View style={s.statBox}><Text style={s.statVal}>${m.medianSold}</Text><Text style={s.statLbl}>median sold</Text></View>
+                      <View style={s.statBox}><Text style={s.statVal}>{m.sellThrough != null ? `${m.sellThrough}%` : "—"}</Text><Text style={s.statLbl}>sell-through</Text></View>
+                      <View style={s.statBox}><Text style={[s.statVal,{textTransform:"capitalize"}]}>{m.velocity || "—"}</Text><Text style={s.statLbl}>velocity</Text></View>
+                    </View>
+                    <View style={s.statGrid}>
+                      <View style={s.statBox}><Text style={s.statVal}>{m.priceLow != null ? `$${m.priceLow}-$${m.priceHigh}` : "—"}</Text><Text style={s.statLbl}>price range</Text></View>
+                      <View style={s.statBox}><Text style={s.statVal}>{m.soldCount}</Text><Text style={s.statLbl}>real sales</Text></View>
+                      <View style={s.statBox}><Text style={s.statVal}>{m.medianDaysLabel}</Text><Text style={s.statLbl}>days to sell</Text></View>
+                    </View>
+                    <Text style={s.dataSrc}>📊 From real ValuIQ reseller sales ({m.matchBasis})</Text>
+                  </>
+                ) : m.medianSold != null ? (
+                  <>
+                    <View style={s.statGrid}>
+                      <View style={s.statBox}><Text style={s.statVal}>~${m.medianSold}</Text><Text style={s.statLbl}>AI estimate</Text></View>
+                    </View>
+                    <Text style={s.dataSrc}>🤖 AI estimate — limited real sales data yet for this item</Text>
+                  </>
+                ) : (
+                  <Text style={s.line}>Not enough data yet to estimate this item's market. The analysis below still applies.</Text>
+                )}
               </View>
             )}
 
@@ -139,6 +153,7 @@ const s = StyleSheet.create({
   statBox: { flex: 1, backgroundColor: C.bg, borderRadius: 8, padding: 10, alignItems: "center" },
   statVal: { color: C.text1, fontSize: 15, fontWeight: "800" },
   statLbl: { color: C.text4, fontSize: 10, marginTop: 2, textAlign: "center" },
+  dataSrc: { color: C.text4, fontSize: 11, marginTop: 4, fontStyle: "italic" },
   insight: { color: C.text2, fontSize: 13, lineHeight: 19, marginBottom: 8 },
   line: { color: C.text2, fontSize: 13, lineHeight: 20, marginTop: 2 },
   tip: { color: C.yellow, fontSize: 13, lineHeight: 19, marginTop: 8, fontWeight: "600" },

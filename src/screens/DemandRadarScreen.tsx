@@ -45,8 +45,8 @@ export default function DemandRadarScreen({ token, onNavigate, onBack }: Props) 
 
   const modeBadge =
     dataMode === "crowd-led" ? { txt: "● COMMUNITY SIGNAL", color: C.green } :
-    dataMode === "blended" ? { txt: "● EARLY SIGNAL + eBay", color: C.yellow } :
-    { txt: "● LIVE eBAY HEAT", color: C.orange };
+    dataMode === "early-signal" ? { txt: "● EARLY SIGNAL", color: C.yellow } :
+    { txt: "● BUILDING DATA", color: C.text4 };
 
   if (loading) {
     return (
@@ -84,56 +84,41 @@ export default function DemandRadarScreen({ token, onNavigate, onBack }: Props) 
           Items heating up before prices spike. Get in early.
         </Text>
 
-        {rising.map((r, i) => {
-          const isCrowd = r.source === "crowd";
-          return (
-            <View key={i} style={[s.card, isCrowd && { borderColor: C.greenBorder }]}>
-              <View style={s.cardTop}>
-                <Text style={s.rank}>#{i + 1}</Text>
-                <Text style={s.label} numberOfLines={1}>{r.label}</Text>
-                {isCrowd && r.momentum ? (
-                  <View style={s.momBadge}>
-                    <Text style={s.momText}>{r.momentum}x</Text>
-                  </View>
-                ) : r.heatRatio ? (
-                  <View style={[s.momBadge, { backgroundColor: C.orange }]}>
-                    <Text style={[s.momText, { color: "#1a1208" }]}>🔥 {r.heatRatio}</Text>
-                  </View>
-                ) : null}
-              </View>
-
-              {isCrowd ? (
-                <>
-                  <Text style={s.cardNote}>
-                    Scanned {r.thisWeek}x this week{r.lastWeek ? ` (up from ${r.lastWeek})` : ""} · {r.buysThisWeek} flagged BUY
-                  </Text>
-                  <View style={s.statRow}>
-                    {r.avgProfit ? (
-                      <View style={s.stat}>
-                        <Text style={[s.statVal, { color: C.green }]}>${r.avgProfit}</Text>
-                        <Text style={s.statLbl}>avg profit</Text>
-                      </View>
-                    ) : null}
-                    {r.medianActualSold ? (
-                      <View style={s.stat}>
-                        <Text style={s.statVal}>${r.medianActualSold}</Text>
-                        <Text style={s.statLbl}>real sold</Text>
-                      </View>
-                    ) : null}
-                  </View>
-                </>
-              ) : (
-                <Text style={s.cardNote}>
-                  {r.note} {r.soldCount ? `(${r.soldCount} recent sales` : ""}{r.activeCount ? ` vs ${r.activeCount} listed)` : r.soldCount ? ")" : ""}
-                </Text>
-              )}
-
-              <TouchableOpacity style={s.verifyBtn} onPress={() => ebaySearch(r.example || r.label)}>
-                <Text style={s.verifyText}>Check sold comps ›</Text>
-              </TouchableOpacity>
+        {rising.map((r, i) => (
+          <View key={i} style={[s.card, { borderColor: C.greenBorder }]}>
+            <View style={s.cardTop}>
+              <Text style={s.rank}>#{i + 1}</Text>
+              <Text style={s.label} numberOfLines={1}>{r.label}</Text>
+              {r.momentum ? (
+                <View style={s.momBadge}>
+                  <Text style={s.momText}>{r.momentum}x</Text>
+                </View>
+              ) : null}
             </View>
-          );
-        })}
+
+            <Text style={s.cardNote}>
+              Scanned {r.thisWeek}x this week{r.lastWeek ? ` (up from ${r.lastWeek})` : ""} · {r.buysThisWeek} flagged BUY
+            </Text>
+            <View style={s.statRow}>
+              {r.avgProfit ? (
+                <View style={s.stat}>
+                  <Text style={[s.statVal, { color: C.green }]}>${r.avgProfit}</Text>
+                  <Text style={s.statLbl}>avg profit</Text>
+                </View>
+              ) : null}
+              {r.medianActualSold ? (
+                <View style={s.stat}>
+                  <Text style={s.statVal}>${r.medianActualSold}</Text>
+                  <Text style={s.statLbl}>real sold</Text>
+                </View>
+              ) : null}
+            </View>
+
+            <TouchableOpacity style={s.verifyBtn} onPress={() => ebaySearch(r.example || r.label)}>
+              <Text style={s.verifyText}>Check sold comps ›</Text>
+            </TouchableOpacity>
+          </View>
+        ))}
 
         {rising.length === 0 && (
           <View style={s.empty}>

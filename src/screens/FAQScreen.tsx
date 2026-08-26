@@ -19,7 +19,7 @@ const FAQS = [
       },
       {
         q: "How accurate are the profit estimates?",
-        a: "ValuIQ pulls real eBay sold data (actual recent sales) and combines it with AI market analysis. Estimates are based on median sold prices from the last 30-90 days. Results are for informational purposes — actual prices vary based on condition, listing quality, timing, and demand."
+        a: "ValuIQ pulls real reseller sales data and combines it with AI market analysis. Estimates are based on median sold prices from the last 30-90 days. Results are for informational purposes — actual prices vary based on condition, listing quality, timing, and demand."
       },
       {
         q: "What does BUY, WATCH, and PASS mean?",

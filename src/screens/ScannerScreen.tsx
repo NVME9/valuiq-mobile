@@ -449,6 +449,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         };
     const isSkip = outcome.tier === "skip";
 
+    // WHICH PLATFORM (2026-08-25): bestPlatform drives the actual netProfit/
+    // roi shown above (lens/route.ts picks the platform with the lowest fee,
+    // e.g. Facebook's 5% vs eBay's 13.27%) but never reached this card - a
+    // user could see "$4 profit, 29% ROI" with no way to tell it assumes a
+    // platform they might not even be selling on. Only prepended when a
+    // real price was entered (enteredBp > 0) - the neutral no-price state
+    // above has its own copy and no real bestPlatform-driven verdict to
+    // attribute.
+    const heroOutcome = (enteredBp > 0 && result.bestPlatform)
+      ? { ...outcome, copy: `On ${result.bestPlatform} — ${outcome.copy}` }
+      : outcome;
+
     const categoryLine = result.category
       ? `${result.category}${result.condition ? " - " + result.condition : ""}`
       : null;
@@ -520,7 +532,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           visible={tourStep === "result"}
           step={4} totalSteps={5}
           title="Your real numbers"
-          body="True profit after fees, plus a clear BUY or PASS - based on real eBay sold data, not guesses. This is what makes ValuIQ different. Your scan also saved automatically."
+          body="True profit after fees, plus a clear BUY or PASS - based on real reseller sales, not guesses. This is what makes ValuIQ different. Your scan also saved automatically."
           ctaLabel="See where it saved"
           anchor="center"
           onNext={() => { advanceTour && advanceTour("history"); onNavigate("history"); }}
@@ -594,7 +606,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   buy-vs-skip - nothing else on this screen computes or shows
                   a different verdict. */}
               <ProfitFlexHero
-                outcome={outcome}
+                outcome={heroOutcome}
                 itemName={result.itemName || result.item_name || "Unknown Item"}
                 categoryLine={categoryLine}
                 photoBase64={photos[0]}

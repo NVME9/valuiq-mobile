@@ -10,7 +10,7 @@ interface Props { onComplete: () => void; }
 const SLIDES = [
   { emoji:"📷", title:"Point. Shoot. Profit.", body:"Scan any item — AI identifies it instantly and tells you exactly what it sells for, where to list it, and how much you keep.", accent:C.green, bg:"#060806", cta:"Let's go →" },
   { emoji:"⚡", title:"Every Platform. Every Fee.", body:"eBay, Poshmark, Mercari, Whatnot, Etsy — see net profit after every fee on every platform in seconds.", accent:C.yellow, bg:"#080700", cta:"Keep going →" },
-  { emoji:"🤖", title:"Like a Pro Appraiser.", body:"Appraises sneakers, watches, handbags, cards and more \u2014 with real eBay data and authenticity checks.", accent:"#ff8c42", bg:"#080500", cta:"Start for free →", isLast:true },
+  { emoji:"🤖", title:"Like a Pro Appraiser.", body:"Appraises sneakers, watches, handbags, cards and more \u2014 with real reseller sales data and authenticity checks.", accent:"#ff8c42", bg:"#080500", cta:"Start for free →", isLast:true },
 ];
 
 function ValuIQLogo({ accent, size = 48 }: { accent: string; size?: number }) {
@@ -113,7 +113,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
         {/* Stats bar on last slide */}
         {false && (
           <View style={s.statsRow}>
-            {[["Real","eBay Data"],["12+","Tools"],["$0","To Start"]].map(([val,lbl]) => (
+            {[["Real","Sales Data"],["12+","Tools"],["$0","To Start"]].map(([val,lbl]) => (
               <View key={lbl} style={s.stat}>
                 <Text style={[s.statVal, { color: slide.accent }]}>{val}</Text>
                 <Text style={s.statLbl}>{lbl}</Text>

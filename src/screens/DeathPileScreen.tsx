@@ -88,7 +88,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
             <Text style={{ fontSize:48, marginBottom:16 }}>💀→💰</Text>
             <Text style={s.lockedTitle}>Inventory Rescue Engine</Text>
             <Text style={s.lockedBody}>
-              Turn your dead inventory into cash. Enter any stuck item and get a complete rescue plan: real eBay market data, the exact price that will sell, a new AI-written listing, cascade pricing strategy, and bundle opportunities.
+              Turn your dead inventory into cash. Enter any stuck item and get a complete rescue plan: real reseller sales data, the exact price that will sell, a new AI-written listing, cascade pricing strategy, and bundle opportunities.
             </Text>
             <TouchableOpacity style={s.upgradeBtn} onPress={()=>onNavigate("upgrade")}>
               <Text style={s.upgradeBtnTxt}>Unlock with Seller Plan →</Text>
@@ -223,11 +223,15 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
                     </View>
                   )}
                 </View>
-                {result.marketData?.soldCount > 0 && (
+                {result.marketData?.hasCrowd ? (
                   <View style={s.marketRow}>
-                    <Text style={s.marketLbl}>📊 Real market data: {result.marketData.soldCount} recent sales · Median ${result.marketData.medianSold} · {result.marketData.activeSellers} active sellers</Text>
+                    <Text style={s.marketLbl}>📊 ValuIQ community data: {result.marketData.soldCount} real sales · Median ${result.marketData.medianSold}{result.marketData.maxSold > 0 ? ` · Range $${result.marketData.minSold}-$${result.marketData.maxSold}` : ""}</Text>
                   </View>
-                )}
+                ) : result.marketData?.medianSold > 0 ? (
+                  <View style={s.marketRow}>
+                    <Text style={s.marketLbl}>🤖 AI estimate: ~${result.marketData.medianSold} (limited real sales data yet for this item)</Text>
+                  </View>
+                ) : null}
               </View>
             );
           })()}

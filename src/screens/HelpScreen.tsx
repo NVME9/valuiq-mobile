@@ -9,7 +9,7 @@ interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft
 const FAQS = [
   {
     q: "How accurate are the profit estimates?",
-    a: "ValuIQ pulls real sold data from eBay (last 90 days) and uses AI to estimate sell prices on each platform. Estimates are typically within 15-25% of actual selling prices. Results vary based on item condition, current demand, and how well you list. We always recommend verifying with a manual eBay sold search before purchasing.",
+    a: "ValuIQ pulls real reseller sales data and uses AI to estimate sell prices on each platform. Estimates are typically within 15-25% of actual selling prices. Results vary based on item condition, current demand, and how well you list. We always recommend verifying with a manual eBay sold search before purchasing.",
   },
   {
     q: "What's the difference between Seller and Pro?",
@@ -30,7 +30,7 @@ const FAQS = [
   },
   {
     q: "Can I use ValuIQ for liquidation buying?",
-    a: "Yes - Manifest Beast (Pro) lets you upload a liquidation lot manifest (photo or spreadsheet) and scores items against real eBay sold data, then projects the lot and suggests a max bid. Many Pro users evaluate $1,000-$10,000+ lots with it before buying.",
+    a: "Yes - Manifest Beast (Pro) lets you upload a liquidation lot manifest (photo or spreadsheet) and scores items with an AI-estimated value, then projects the lot and suggests a max bid. Many Pro users evaluate $1,000-$10,000+ lots with it before buying — always verify estimates before bidding.",
   },
   {
     q: "How does the referral program work?",
