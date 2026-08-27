@@ -35,6 +35,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
   const [loading, setLoading]         = useState(false);
   const [result, setResult]           = useState<any>(null);
   const [error, setError]             = useState("");
+  const [needsUpgrade, setNeedsUpgrade] = useState(false);
   const [activeTab, setActiveTab]     = useState<"rescue"|"listing"|"cascade"|"bundle">("rescue");
 
   const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
@@ -63,6 +64,8 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
       if (d.success) {
         setResult(d);
         setActiveTab("rescue");
+      } else if (d.error === "upgrade_required") {
+        setNeedsUpgrade(true);
       } else {
         setError(d.error || "Analysis failed. Please try again.");
       }
@@ -74,7 +77,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
 
   function reset() { setResult(null); setItemName(""); setCurrentPrice(""); setPaidPrice(""); setDaysListed(""); setListingTitle(""); }
 
-  if (!isPaid) {
+  if (!isPaid || needsUpgrade) {
     return (
       <SafeAreaView style={s.safe}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
@@ -203,23 +206,26 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
                 </View>
                 <View style={s.verdictScoreRow}>
                   <View style={s.scoreBox}>
-                    <Text style={[s.scoreNum, { color: score >= 70 ? C.green : score >= 40 ? C.yellow : C.red }]}>
-                      {score}
+                    <Text style={[s.scoreNum, { color: score >= 70 ? C.green : score >= 40 ? C.yellow : C.red }]}
+                      numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                      {score}/100
                     </Text>
-                    <Text style={s.scoreLabel}>RESCUEABLE</Text>
+                    <Text style={s.scoreLabel}>RESCUE SCORE</Text>
                   </View>
                   <View style={s.scoreBox}>
-                    <Text style={[s.scoreNum, { color: C.orange }]}>
+                    <Text style={[s.scoreNum, { color: C.orange }]}
+                      numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                       {result.analysis?.urgencyScore || 0}/10
                     </Text>
                     <Text style={s.scoreLabel}>URGENCY</Text>
                   </View>
                   {result.analysis?.rescuePrice > 0 && (
                     <View style={s.scoreBox}>
-                      <Text style={[s.scoreNum, { color: C.green }]}>
+                      <Text style={[s.scoreNum, { color: C.green }]}
+                        numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                         ${Math.round(result.analysis.rescuePrice)}
                       </Text>
-                      <Text style={s.scoreLabel}>RESCUE, PRICE</Text>
+                      <Text style={s.scoreLabel}>RELIST AT</Text>
                     </View>
                   )}
                 </View>

@@ -13,6 +13,13 @@ interface Props {
   onNavigate: (s: string) => void; onBack?: () => void; onLogout: () => void;
 }
 
+// Same canonical taxonomy the backend's moat query validates category
+// against (lens/route.ts's validCats, sourcing-intel/route.ts's
+// VALID_CATEGORIES) - a picker only ever emits one of these, so there's no
+// more "clothes" vs "Clothing" typo/casing gap, and no free-text category
+// can ever silently zero out the query the way an empty string did.
+const CATEGORIES = ["Clothing","Shoes","Electronics","Tools","Collectibles","Handbags","Antiques","Jewelry","Toys","Home","Sports","Other"];
+
 export default function SourcingIntelScreen({ token, onBack }: Props) {
   const [itemName, setItemName] = useState("");
   const [category, setCategory] = useState("");
@@ -21,6 +28,11 @@ export default function SourcingIntelScreen({ token, onBack }: Props) {
 
   async function run() {
     if (!itemName.trim()) { Alert.alert("Add an item", "Enter the item to analyze."); return; }
+    // Belt-and-suspenders: the button is already disabled without a category
+    // selected, but a query run with no category returns misleadingly thin
+    // data ("not enough data") rather than an honest error, so this is
+    // blocked outright rather than allowed to run and mislead.
+    if (!category) { Alert.alert("Pick a category", "Select a category so we can find real market data for this item."); return; }
     setLoading(true); setData(null);
     try {
       const r = await fetch(`${API_BASE}/api/sourcing-intel`, {
@@ -53,11 +65,26 @@ export default function SourcingIntelScreen({ token, onBack }: Props) {
         <Text style={s.sub}>Deep market brief on any item: demand, seasonality, authenticity risk, and where it's worth selling.</Text>
 
         <Text style={s.label}>Item *</Text>
-        <TextInput style={s.input} value={itemName} onChangeText={setItemName} placeholder="Levi's 501 vintage" placeholderTextColor={C.text4} />
-        <Text style={s.label}>Category</Text>
-        <TextInput style={s.input} value={category} onChangeText={setCategory} placeholder="Clothing" placeholderTextColor={C.text4} />
+        <TextInput style={s.input} value={itemName} onChangeText={setItemName} placeholder="Levi's 501 vintage" placeholderTextColor={C.text4} autoCorrect={false} />
 
-        <TouchableOpacity style={s.genBtn} onPress={run} disabled={loading}>
+        <Text style={s.label}>Category *</Text>
+        {!category && <Text style={s.categoryPrompt}>Select a category below</Text>}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+          <View style={{ flexDirection: "row", gap: 6 }}>
+            {CATEGORIES.map(cat => (
+              <TouchableOpacity key={cat} onPress={() => setCategory(cat)}
+                style={[s.chip, category === cat && s.chipActive]}>
+                <Text style={[s.chipTxt, category === cat && s.chipTxtActive]}>{cat}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+
+        <TouchableOpacity
+          style={[s.genBtn, (!itemName.trim() || !category) && s.genBtnDisabled]}
+          onPress={run}
+          disabled={loading || !itemName.trim() || !category}
+        >
           {loading ? <ActivityIndicator color={C.greenDark} /> : <Text style={s.genTxt}>Analyze Item</Text>}
         </TouchableOpacity>
 
@@ -143,7 +170,13 @@ const s = StyleSheet.create({
   sub: { color: C.text3, fontSize: 13, marginBottom: 16, lineHeight: 19 },
   label: { color: C.text3, fontSize: 12, fontWeight: "700", marginBottom: 6, marginTop: 12 },
   input: { backgroundColor: C.surface, borderColor: C.border, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, color: C.text1, fontSize: 15 },
+  categoryPrompt: { color: C.text4, fontSize: 12, fontStyle: "italic", marginBottom: 8 },
+  chip: { paddingHorizontal: 12, paddingTop: 16, paddingBottom: 10, borderRadius: 100, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface },
+  chipActive: { backgroundColor: C.green, borderColor: C.green },
+  chipTxt: { color: C.text3, fontSize: 12, fontWeight: "600" },
+  chipTxtActive: { color: C.greenDark, fontWeight: "800" },
   genBtn: { backgroundColor: C.green, borderRadius: 12, paddingVertical: 15, alignItems: "center", marginTop: 20 },
+  genBtnDisabled: { backgroundColor: C.border, opacity: 0.6 },
   genTxt: { color: C.greenDark, fontSize: 16, fontWeight: "800" },
   card: { backgroundColor: C.surface, borderColor: C.border, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10 },
   cardTitle: { color: C.text1, fontSize: 15, fontWeight: "800", marginBottom: 10 },
