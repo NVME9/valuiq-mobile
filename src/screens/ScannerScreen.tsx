@@ -20,6 +20,8 @@ import * as Notifications from "expo-notifications";
 import { matchSpecialtyCategory } from "./SpecialtyScreen";
 import ProfitFlexHero from "../components/ProfitFlexHero";
 import { classifyOutcome } from "../lib/outcomeTier";
+import LogSaleModal from "../components/LogSaleModal";
+import { toPendingScan } from "../lib/saleCapture";
 
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
@@ -70,6 +72,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [sharingWin, setSharingWin] = useState(false);
   const [sharingImage, setSharingImage] = useState(false);
   const shareCardRef = useRef<ViewShot>(null);
+  // The immediate "log it now" path off a fresh scan result - the SOFT
+  // NOTIFICATION ASK below this is the deferred (~2 week reminder) path;
+  // both coexist. Reuses the exact same LogSaleModal/SaleCaptureCard/
+  // FlexRevealBody flow History uses, so a sale logged here gets the same
+  // honest, cached reveal - no separate code path to keep in sync.
+  const [showLogSale, setShowLogSale] = useState(false);
   const [brandInput, setBrandInput] = useState("");
   const [goDeeper, setGoDeeper] = useState(false);
   const [description, setDescription] = useState("");
@@ -544,6 +552,15 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             <ShareCard result={result} oracle={oracle} photoBase64={photos[0]} />
           </ViewShot>
         </View>
+        {/* Same log-sale flow History uses (form -> honest Flex Reveal, one
+            Modal throughout) - opened by the "Already sold it?" nudge above,
+            right on this result screen instead of a detour through History. */}
+        <LogSaleModal
+          visible={showLogSale}
+          token={token}
+          scan={result.id ? toPendingScan(result) : null}
+          onClose={() => setShowLogSale(false)}
+        />
         {/* Nav */}
         <View style={s.nav}>
           <TouchableOpacity onPress={() => setStep("review")} style={s.navBack}>
@@ -639,7 +656,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                       Share & Content section since it's the highest-intent
                       share action */}
                   <TouchableOpacity
-                    style={{backgroundColor:C.green,borderRadius:14,paddingVertical:15,marginBottom:12,alignItems:"center",justifyContent:"center",flexDirection:"row",gap:8,minHeight:52,opacity:sharingImage?0.6:1}}
+                    style={{backgroundColor:C.green,borderRadius:14,paddingVertical:15,paddingHorizontal:12,marginBottom:12,alignItems:"center",justifyContent:"center",flexDirection:"row",gap:8,minHeight:52,opacity:sharingImage?0.6:1}}
                     disabled={sharingImage}
                     activeOpacity={0.85}
                     onPress={shareResultImage}
@@ -649,10 +666,51 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     ) : (
                       <>
                         <Text style={{fontSize:16}}>{"📷"}</Text>
-                        <Text style={{color:C.greenDark,fontSize:15,fontWeight:"900"}}>Share result as image</Text>
+                        {/* "Share result as image" -> "Share as image" - shorter
+                            copy first (fits on its own on an SE-width screen);
+                            numberOfLines+adjustsFontSizeToFit+flexShrink is a
+                            backstop, not the primary fix, so it never clips. */}
+                        <Text
+                          style={{color:C.greenDark,fontSize:15,fontWeight:"900",flexShrink:1}}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.85}
+                        >
+                          Share as image
+                        </Text>
                       </>
                     )}
                   </TouchableOpacity>
+
+                  {/* Already sold it? Log it now - the IMMEDIATE path, right
+                      on the result screen. result.id only exists when this
+                      scan was actually saved (lens/route.ts skips saving on
+                      a re-run/thrift-run scan) - gate on it so this never
+                      opens the log flow for a scan with nothing to log
+                      against. */}
+                  {result.id && (
+                    <TouchableOpacity
+                      style={{flexDirection:"row",alignItems:"center",justifyContent:"center",gap:6,backgroundColor:C.surface,borderWidth:1,borderColor:C.green+"40",borderRadius:14,paddingVertical:14,paddingHorizontal:12,marginBottom:12}}
+                      activeOpacity={0.85}
+                      onPress={() => setShowLogSale(true)}
+                    >
+                      <Text style={{fontSize:16}}>{"🏆"}</Text>
+                      {/* MEASURED BUG: "Already sold it? Log your flip →" spilled
+                          off the button edge (arrow clipped) on narrow screens -
+                          no flexShrink/numberOfLines on a Text sized to its own
+                          content inside a row with no width cap. Shortened copy
+                          first, plus the same fit guard as the button above so
+                          it can't spill regardless of device width. */}
+                      <Text
+                        style={{color:C.green,fontSize:14,fontWeight:"800",flexShrink:1}}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.85}
+                      >
+                        Sold it? Log your flip →
+                      </Text>
+                    </TouchableOpacity>
+                  )}
 
                   {/* SOFT NOTIFICATION ASK - only on a real buy verdict, never on a skip */}
                   {pendingCheckIn && !checkInAsked && (

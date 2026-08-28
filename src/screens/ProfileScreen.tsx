@@ -424,6 +424,52 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
         {/* STATS */}
         {tab==="stats" && stats && (
           <View style={{gap:8}}>
+            {/* WINS - a REAL money-made figure, separate from "Profit Found"
+                in the grid below (that one's a projected-scan sum). Reads
+                stats.soldCount/soldTotal, computed server-side in
+                /api/profile/route.ts from an UNBOUNDED query - the SAME
+                source Dashboard and History read via getWinsSummary(), so
+                all three always agree, Specialty sales included. */}
+            <TouchableOpacity style={s.winsCard} onPress={()=>onNavigate("history")} activeOpacity={0.85}>
+              <Text style={{fontSize:22}}>🏆</Text>
+              <View style={{flex:1,paddingHorizontal:12}}>
+                {stats.soldCount > 0 ? (
+                  <>
+                    <Text style={s.winsCardTitle} numberOfLines={1}>${Math.round(stats.soldTotal||0)} made · {stats.soldCount} flip{stats.soldCount===1?"":"s"}</Text>
+                    <Text style={s.winsCardSub} numberOfLines={1}>See your flips →</Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={s.winsCardTitle} numberOfLines={1}>No flips logged yet</Text>
+                    <Text style={s.winsCardSub} numberOfLines={1}>Log your first sale →</Text>
+                  </>
+                )}
+              </View>
+              <Text style={{color:C.green,fontSize:18}}>{"→"}</Text>
+            </TouchableOpacity>
+
+            {/* UPGRADE - "Upgrade" was removed from the bottom tab bar; this
+                is one of its replacement surfaces (see also Dashboard's
+                nudge and the Plan tab's existing full upgrade button). Only
+                hidden for the actual top tier - a Seller must still see a
+                path to Pro, a Pro must still see a path to Lifetime. */}
+            {!["lifetime","titan","vip"].includes(plan) && (
+              <TouchableOpacity style={s.upgradeCard} onPress={()=>onNavigate("upgrade")} activeOpacity={0.85}>
+                <Text style={{fontSize:22}}>🚀</Text>
+                <View style={{flex:1,paddingHorizontal:12}}>
+                  <Text style={s.upgradeCardTitle} numberOfLines={1}>
+                    {plan==="free" ? "Upgrade to Seller" : plan==="seller" ? "Upgrade to Pro" : "Go Lifetime"}
+                  </Text>
+                  <Text style={s.upgradeCardSub} numberOfLines={1}>
+                    {plan==="free" ? "$14.99/mo · unlock Thrift Run, Death Pile & more"
+                      : plan==="seller" ? "$34.99/mo · AI Coach, Profit Tracker & more"
+                      : "$149 one-time · everything in Pro, no monthly fees"}
+                  </Text>
+                </View>
+                <Text style={{color:C.yellow,fontSize:18}}>{"→"}</Text>
+              </TouchableOpacity>
+            )}
+
             <View style={s.statsGrid}>
               {[
                 [String(stats.totalScans||0),"Total Scans","📷",C.text1],
@@ -738,6 +784,12 @@ const s = StyleSheet.create({
   tabTextActive:     { color:C.text1, fontWeight:"700" },
 
   // Stats,
+  winsCard:          { flexDirection:"row", alignItems:"center", backgroundColor:C.greenBg, borderWidth:1.5, borderColor:C.green+"50", borderRadius:14, padding:16, marginBottom:8 },
+  winsCardTitle:     { color:C.text1, fontSize:15, fontWeight:"800" },
+  winsCardSub:       { color:C.green, fontSize:12, fontWeight:"700", marginTop:2 },
+  upgradeCard:       { flexDirection:"row", alignItems:"center", backgroundColor:"#1a1500", borderWidth:1.5, borderColor:C.yellow+"50", borderRadius:14, padding:16, marginBottom:8 },
+  upgradeCardTitle:  { color:C.text1, fontSize:15, fontWeight:"800" },
+  upgradeCardSub:    { color:C.yellow, fontSize:12, fontWeight:"700", marginTop:2 },
   statsGrid:         { flexDirection:"row", flexWrap:"wrap", gap:8, marginBottom:8 },
   statCard:          { width:"47.5%", backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:14, padding:14, alignItems:"center" },
   statVal:           { fontSize:22, fontWeight:"900", marginBottom:2 },

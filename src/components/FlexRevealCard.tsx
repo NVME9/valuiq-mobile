@@ -20,8 +20,10 @@
 // Haptics, no new native module - this ships over-the-air.
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Modal, View, Text, StyleSheet, TouchableOpacity, Animated, Easing, Dimensions, Alert,
+  Modal, View, Text, StyleSheet, TouchableOpacity, Animated, Easing, Dimensions, Alert, Share,
 } from "react-native";
+import ViewShot from "react-native-view-shot";
+import * as Sharing from "expo-sharing";
 import Svg, { Defs, RadialGradient, Stop, Rect } from "react-native-svg";
 import { C } from "../lib/theme";
 import { FlexStat } from "../lib/flexReveal";
@@ -42,10 +44,25 @@ function parseHeadlineNumber(headline: string): { prefix: string; target: number
 }
 
 export function useCountUp(target: number, active: boolean, duration = 1000): number {
-  const [display, setDisplay] = useState(0);
+  // Lazy initializer: an inactive caller (ViewShot's off-screen, animate=
+  // false capture twin; ProfitFlexHero on a non-hot tier) should never even
+  // flash a 0 on its first render - start already at the final value.
+  const [display, setDisplay] = useState(() => (active ? 0 : target));
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      // MEASURED BUG: this used to just `return` here, which meant
+      // setDisplay was NEVER called for an inactive caller - display stayed
+      // frozen at its useState(0) initial value forever. That's invisible
+      // on-screen (ProfitFlexHero ignores `count` on its non-hot branch,
+      // rendering heroProfit directly instead), but it's exactly what made
+      // the off-screen ViewShot share-image capture (animate=false) render
+      // "0th flip"/"$0" for every numeric-headline tier instead of the real
+      // resolved number - the twin was never animating TO the target, it
+      // just wasn't animating, full stop, and rendered its start value.
+      setDisplay(target);
+      return;
+    }
     anim.setValue(0);
     const id = anim.addListener(({ value }) => setDisplay(Math.round(value)));
     Animated.timing(anim, {
@@ -67,19 +84,66 @@ const TIER_LABEL: Record<FlexStat["tier"], string> = {
   fallback: "LOGGED",
 };
 
+// Returns false until `active` has been continuously true for delayMs -
+// resets to false the instant `active` goes false, and clears its timer on
+// unmount/dep-change. Used to gate the loading shimmer: the common case
+// (fetchFlexStat resolves in a few hundred ms) should never show it at all -
+// only a genuinely slow fetch (still unresolved past the threshold) earns a
+// loading indicator.
+function useDelayedFlag(active: boolean, delayMs: number): boolean {
+  const [flag, setFlag] = useState(false);
+  useEffect(() => {
+    if (!active) { setFlag(false); return; }
+    const t = setTimeout(() => setFlag(true), delayMs);
+    return () => clearTimeout(t);
+  }, [active, delayMs]);
+  return flag;
+}
+
+// A subtle pulse where the hero number will land - never a blank gap, never
+// implies a specific number is coming, just "this is still loading."
+function HeroShimmer() {
+  const pulse = useRef(new Animated.Value(0.35)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 0.9, duration: 650, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.35, duration: 650, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+  return <Animated.View style={[s.heroShimmer, { opacity: pulse }]} />;
+}
+
 interface FlexRevealContentProps {
-  stat: FlexStat;
+  // null while the crowd-comparison stat is still in flight - the card
+  // renders instantly regardless (glow, brand, item name, and a real
+  // placeholder line already known from the row), never blocking on network
+  // before showing SOMETHING. See loadingSubStat.
+  stat: FlexStat | null;
   itemName?: string | null;
   brand?: string | null;
   animate?: boolean; // false when used for a future off-screen capture snapshot
+  // The row's own real profit/days line (flexReveal.ts's concreteLine()),
+  // shown under a shimmering hero placeholder while stat is null - never a
+  // fabricated number, just the true one shown before the crowd comparison
+  // that decides the WINNING stat has come back.
+  loadingSubStat?: string;
 }
 
-export function FlexRevealContent({ stat, itemName, brand, animate = true }: FlexRevealContentProps) {
-  const parsed = parseHeadlineNumber(stat.headline);
+export function FlexRevealContent({ stat, itemName, brand, animate = true, loadingSubStat }: FlexRevealContentProps) {
+  // Scoped to THIS mount - the key={stat ? "resolved" : "loading"} switch
+  // one level up (see FlexRevealBody) unmounts the "loading" instance the
+  // moment stat resolves, which tears this timer down via the effect's own
+  // cleanup before it could ever fire late or bleed into the next item.
+  const showShimmer = useDelayedFlag(!stat, 450);
+  const parsed = stat ? parseHeadlineNumber(stat.headline) : null;
   const count = useCountUp(parsed?.target ?? 0, animate && !!parsed, 1100);
   const headlineText = parsed
     ? `${parsed.prefix}${count.toLocaleString()}${parsed.suffix}`
-    : stat.headline;
+    : (stat?.headline ?? "");
 
   // Badge "stamp" drop: falls in from above with a slight overshoot rotate,
   // timed just after the count-up gets moving so it reads as a sequence,
@@ -139,20 +203,32 @@ export function FlexRevealContent({ stat, itemName, brand, animate = true }: Fle
       </View>
 
       <View style={s.body}>
-        <Text style={s.eyebrow}>{TIER_LABEL[stat.tier]}</Text>
+        <Text style={s.eyebrow}>{stat ? TIER_LABEL[stat.tier] : "LOGGED"}</Text>
         {title ? <Text style={s.itemName} numberOfLines={2}>{title}</Text> : null}
 
-        <Text style={s.hero} numberOfLines={1} adjustsFontSizeToFit>{headlineText}</Text>
+        {stat ? (
+          <Text style={s.hero} numberOfLines={1} adjustsFontSizeToFit>{headlineText}</Text>
+        ) : showShimmer ? (
+          <HeroShimmer />
+        ) : (
+          // First 450ms of a load: reserve the exact same box, fully
+          // transparent - no pulse, no visible loading element at all. The
+          // common case (fetch resolves before this ever shows) goes
+          // straight from nothing to the real number, no flash in between.
+          <View style={[s.heroShimmer, { opacity: 0 }]} />
+        )}
 
-        {stat.badge ? (
+        {stat?.badge ? (
           <Animated.View style={[s.badge, stampStyle]}>
             <Text style={s.badgeText}>{stat.badge}</Text>
           </Animated.View>
         ) : null}
 
-        <Text style={s.subStat}>{stat.subStat}</Text>
+        {(stat ? stat.subStat : loadingSubStat) ? (
+          <Text style={s.subStat}>{stat ? stat.subStat : loadingSubStat}</Text>
+        ) : null}
 
-        {stat.streakRibbon ? (
+        {stat?.streakRibbon ? (
           <Animated.View style={[s.ribbon, ribbonStyle]}>
             <Text style={s.ribbonText}>{stat.streakRibbon}</Text>
           </Animated.View>
@@ -167,9 +243,10 @@ export function FlexRevealContent({ stat, itemName, brand, animate = true }: Fle
 const CARD_W = Math.min(SCREEN_W, 480);
 
 interface FlexRevealBodyProps {
-  stat: FlexStat;
+  stat: FlexStat | null;
   itemName?: string | null;
   brand?: string | null;
+  loadingSubStat?: string;
   onClose: () => void;
   onShare?: () => void;
   onLeaderboard?: () => void;
@@ -180,8 +257,10 @@ interface FlexRevealBodyProps {
 // flow (LogSaleModal), never mounted alongside a second native Modal. The
 // entrance animation triggers on mount, since mounting IS becoming visible
 // here (no separate `visible` prop to watch).
-export function FlexRevealBody({ stat, itemName, brand, onClose, onShare, onLeaderboard }: FlexRevealBodyProps) {
+export function FlexRevealBody({ stat, itemName, brand, loadingSubStat, onClose, onShare, onLeaderboard }: FlexRevealBodyProps) {
   const entrance = useRef(new Animated.Value(0)).current;
+  const shareCardRef = useRef<ViewShot>(null);
+  const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
     Animated.spring(entrance, { toValue: 1, friction: 7, tension: 50, useNativeDriver: true }).start();
@@ -195,6 +274,43 @@ export function FlexRevealBody({ stat, itemName, brand, onClose, onShare, onLead
     ],
   };
 
+  const shareCaption = stat
+    ? `${stat.headline} · ${stat.subStat}\n\nFlipped it with ValuIQ 📲`
+    : "Flipped it with ValuIQ 📲";
+
+  // Self-contained by default (no onShare prop needed from any caller) -
+  // captures the off-screen, unanimated copy of the SAME card the user is
+  // looking at (see the hidden ViewShot below) into a PNG and opens the
+  // native share sheet, mirroring ScannerScreen.tsx's shareResultImage() for
+  // ShareCard exactly. Gives immediate feedback on tap (button label swaps
+  // to "Preparing…" via `sharing`) rather than sitting dead until the
+  // capture resolves.
+  async function shareFlexImage() {
+    if (sharing) return;
+    if (!stat) {
+      Alert.alert("Hang on", "Still loading your stats — try again in a moment.");
+      return;
+    }
+    setSharing(true);
+    try {
+      const available = await Sharing.isAvailableAsync();
+      if (!available || !shareCardRef.current?.capture) {
+        // No native share sheet on this device/platform - fall back to a
+        // plain-text share rather than a dead button.
+        await Share.share({ message: shareCaption });
+        return;
+      }
+      const uri = await shareCardRef.current.capture();
+      await Sharing.shareAsync(uri, { mimeType: "image/png", dialogTitle: "Share your ValuIQ win" });
+    } catch {
+      // Capture/share failed - never crash, fall back to plain text so the
+      // tap still DOES something.
+      try { await Share.share({ message: shareCaption }); } catch {}
+    } finally {
+      setSharing(false);
+    }
+  }
+
   return (
     <View style={s.screen}>
       <TouchableOpacity style={s.closeBtn} onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
@@ -203,22 +319,45 @@ export function FlexRevealBody({ stat, itemName, brand, onClose, onShare, onLead
 
       <View style={s.center}>
         <Animated.View style={entranceStyle}>
-          <FlexRevealContent stat={stat} itemName={itemName} brand={brand} />
+          {/* key forces a remount (not just a prop update) the moment stat
+              resolves from null - loading to real, so the count-up/badge-
+              stamp/ribbon entrance animations replay for the real numbers
+              instead of silently snapping in, since their own effects are
+              keyed to mount, not to `stat` changing. */}
+          <FlexRevealContent key={stat ? "resolved" : "loading"} stat={stat} itemName={itemName} brand={brand} loadingSubStat={loadingSubStat} />
         </Animated.View>
+      </View>
+
+      {/* Off-screen, unanimated twin of the card above - captured (never
+          displayed) for the share image, exactly the way ScannerScreen.tsx
+          captures ShareCard off-screen. Using a second static instance
+          (animate=false) rather than capturing the live/animated one avoids
+          ever snapshotting a mid-count-up frame, and keeps the Done/Share
+          buttons (siblings of the card, not part of it) out of the image. */}
+      <View style={{ position: "absolute", top: 0, left: -9999 }} pointerEvents="none">
+        <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1, result: "tmpfile" }}>
+          <FlexRevealContent stat={stat} itemName={itemName} brand={brand} animate={false} />
+        </ViewShot>
       </View>
 
       <View style={s.actions}>
         <TouchableOpacity
           style={s.primaryBtn}
-          onPress={onShare ?? (() => Alert.alert("Coming soon", "Sharing your flex is next up."))}
+          onPress={onShare ?? shareFlexImage}
+          disabled={sharing}
         >
-          <Text style={s.primaryBtnText}>Share your flex →</Text>
+          {/* numberOfLines+adjustsFontSizeToFit as a backstop against
+              wrapping/overflow on narrow screens - same guard applied across
+              this sweep, not a copy change (that's a separate, undecided fix). */}
+          <Text style={s.primaryBtnText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+            {sharing ? "Preparing…" : "Share your win →"}
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={s.secondaryBtn}
           onPress={onLeaderboard ?? (() => Alert.alert("Coming soon", "The leaderboard is next up."))}
         >
-          <Text style={s.secondaryBtnText}>See the leaderboard →</Text>
+          <Text style={s.secondaryBtnText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>See the leaderboard →</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -227,9 +366,12 @@ export function FlexRevealBody({ stat, itemName, brand, onClose, onShare, onLead
 
 interface FlexRevealCardProps {
   visible: boolean;
+  // null is a valid, expected state here now - "visible but still loading",
+  // not "nothing to show". Gate on `visible`, not on `stat`.
   stat: FlexStat | null;
   itemName?: string | null;
   brand?: string | null;
+  loadingSubStat?: string;
   onClose: () => void;
   onShare?: () => void;
   onLeaderboard?: () => void;
@@ -239,12 +381,12 @@ interface FlexRevealCardProps {
 // the reveal on its own (not mid-flow after LogSaleModal - that path renders
 // FlexRevealBody directly instead, see LogSaleModal.tsx).
 export default function FlexRevealCard({
-  visible, stat, itemName, brand, onClose, onShare, onLeaderboard,
+  visible, stat, itemName, brand, loadingSubStat, onClose, onShare, onLeaderboard,
 }: FlexRevealCardProps) {
-  if (!stat) return null;
+  if (!visible) return null;
   return (
     <Modal visible={visible} animationType="fade" transparent={false} onRequestClose={onClose}>
-      <FlexRevealBody stat={stat} itemName={itemName} brand={brand} onClose={onClose} onShare={onShare} onLeaderboard={onLeaderboard} />
+      <FlexRevealBody stat={stat} itemName={itemName} brand={brand} loadingSubStat={loadingSubStat} onClose={onClose} onShare={onShare} onLeaderboard={onLeaderboard} />
     </Modal>
   );
 }
@@ -277,6 +419,9 @@ const s = StyleSheet.create({
   hero: {
     color: C.text1, fontSize: 76, fontWeight: "900", letterSpacing: -2, textAlign: "center",
     textShadowColor: C.green + "55", textShadowRadius: 30, textShadowOffset: { width: 0, height: 0 },
+  },
+  heroShimmer: {
+    width: 190, height: 66, borderRadius: 16, backgroundColor: C.surfaceHigh,
   },
   badge: {
     marginTop: 18, backgroundColor: C.greenBg, borderColor: C.green, borderWidth: 1.5,

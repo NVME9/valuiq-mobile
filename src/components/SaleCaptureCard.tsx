@@ -11,18 +11,25 @@ import {
 } from "react-native";
 import { C } from "../lib/theme";
 import { recordSaleOutcome, defaultDaysToSale, buildDisplayTitle, PendingScan } from "../lib/saleCapture";
-import { fetchFlexStat, FlexStat } from "../lib/flexReveal";
+import { fetchFlexStat, concreteLine, cacheFlexStat, FlexStat } from "../lib/flexReveal";
 
 interface Props {
   token: string;
   scan: PendingScan;
   onDone: (scanId: string) => void;
   // The caller (LogSaleModal) owns presenting the reveal - this card only
-  // ever hands the stat up, it never renders a Modal of its own.
-  onReveal: (stat: FlexStat, itemName: string, brand: string | null) => void;
+  // ever hands state up, it never renders a Modal of its own.
+  //
+  // onReveal opens the reveal INSTANTLY on a successful save, before the
+  // crowd-comparison stat exists yet (stat starts null - the shell renders
+  // with the real profit/days already known from the save response).
+  // onRevealStat fills in the winning stat once fetchFlexStat resolves, so
+  // the FIRST reveal is never blocked on that network round-trip either.
+  onReveal: (itemName: string, brand: string | null, loadingSubStat: string) => void;
+  onRevealStat: (stat: FlexStat) => void;
 }
 
-export default function SaleCaptureCard({ token, scan, onDone, onReveal }: Props) {
+export default function SaleCaptureCard({ token, scan, onDone, onReveal, onRevealStat }: Props) {
   const [price, setPrice] = useState("");
   const [days, setDays] = useState(() => String(defaultDaysToSale(scan.created_at)));
   const [saving, setSaving] = useState(false);
@@ -38,8 +45,20 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal }: Props
     setSaving(false);
 
     if (result.success && result.scan?.id) {
-      const stat = await fetchFlexStat(token, result.scan.id);
-      if (stat) onReveal(stat, _name, _brand || null);
+      const scanId = result.scan.id;
+      // Open the reveal shell INSTANTLY - the real profit/days are already
+      // known from the save response, so there's no reason to block on the
+      // crowd-comparison round-trip before showing anything.
+      onReveal(_name, _brand || null, concreteLine({
+        netProfit: result.scan.net_profit ?? null,
+        daysToSale: result.scan.days_to_sale ?? null,
+      }));
+      fetchFlexStat(token, scanId).then((stat) => {
+        if (stat) {
+          onRevealStat(stat);
+          cacheFlexStat(token, scanId, result.scan?.specialty_data, stat);
+        }
+      });
     }
     onDone(scan.id);
   }

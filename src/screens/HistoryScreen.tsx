@@ -10,8 +10,10 @@ import Coachmark from "../components/Coachmark";
 import LogSaleModal from "../components/LogSaleModal";
 import PhotoLightbox from "../components/PhotoLightbox";
 import FlipActionsRow from "../components/FlipActionsRow";
+import FlexRevealCard from "../components/FlexRevealCard";
 import { toPendingScan } from "../lib/saleCapture";
-import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty } from "../lib/api";
+import { fetchFlexStat, cacheFlexStat, readCachedFlexStat, concreteLine, FlexStat } from "../lib/flexReveal";
+import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty, getWinsSummary } from "../lib/api";
 
 function shareMsg(name: string, profit?: number, platform?: string): string {
   const p = (platform || "").split("|||")[0];
@@ -57,6 +59,13 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
   const [scans, setScans]           = useState<any[]>([]);
   const [thriftRuns, setThriftRuns] = useState<any[]>([]);
   const [specialtyScans, setSpecialtyScans] = useState<any[]>([]);
+  // The ONE real wins total - from /api/profile's unbounded, Specialty-
+  // inclusive aggregate (getWinsSummary in lib/api.ts), the SAME source
+  // Dashboard and Profile read. Replaces a prior local computation that
+  // only summed this screen's own `scans` (type=scan, limit=50) state -
+  // which silently excluded any win logged from the Specialty tab, even
+  // though that tab's own cards already show a SOLD badge for it.
+  const [winsSummary, setWinsSummary] = useState<{ count: number; total: number }>({ count: 0, total: 0 });
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showAll, setShowAll]       = useState(false);
@@ -74,6 +83,48 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
   const [rerunning, setRerunning]   = useState(false);
   const [logSaleScan, setLogSaleScan] = useState<any|null>(null);
   const [viewingPhoto, setViewingPhoto] = useState<string|null>(null);
+  const [viewingReveal, setViewingReveal] = useState<{ stat: FlexStat | null; itemName: string; brand: string|null; loadingSubStat?: string } | null>(null);
+
+  // Lets a win be revisited from History instead of only ever seeing the
+  // Flex Reveal once, at log time - and does it WITHOUT the 1-2s dead-button
+  // lag a live re-fetch used to cause. If the stat that won at log time was
+  // cached onto the row (see cacheFlexStat in flexReveal.ts), this is a pure
+  // client-side read: zero network, identical stat/tier every time. Only a
+  // pre-cache row (sold before this cache existed, or a cache-write that
+  // failed) falls through to a live fetch - and even then, the modal opens
+  // INSTANTLY with the real profit/days already on the row, never blocking
+  // on network before showing something.
+  function openReveal(item: any) {
+    const brand = item.brand && item.brand !== "Unknown" ? item.brand : null;
+    const itemName = item.item_name || "Item";
+
+    const cached = readCachedFlexStat(item.specialty_data);
+    if (cached) {
+      setViewingReveal({ stat: cached, itemName, brand });
+      return;
+    }
+
+    const loadingSubStat = concreteLine({
+      netProfit: item.net_profit ?? item.profit ?? null,
+      daysToSale: item.days_to_sale ?? null,
+    });
+    setViewingReveal({ stat: null, itemName, brand, loadingSubStat });
+
+    fetchFlexStat(token, item.id).then(async (stat) => {
+      if (!stat) {
+        Alert.alert("Couldn't load", "Could not load this flip's stats right now.");
+        setViewingReveal(null);
+        return;
+      }
+      setViewingReveal((v) => (v ? { ...v, stat } : v));
+      const merged = await cacheFlexStat(token, item.id, item.specialty_data, stat);
+      if (merged) {
+        const patch = (list: any[]) => list.map((s) => (s.id === item.id ? { ...s, specialty_data: merged } : s));
+        setScans(patch);
+        setSpecialtyScans(patch);
+      }
+    });
+  }
 
   function openEditor(scan: any) {
     setEditingId(scan.id);
@@ -238,6 +289,9 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
       setThriftRuns(thriftJson && thriftJson.success && Array.isArray(thriftJson.runs) ? thriftJson.runs : []);
       setSpecialtyScans(Array.isArray(specData) ? specData : []);
     } catch {}
+    try {
+      setWinsSummary(await getWinsSummary(token));
+    } catch {}
     setLoading(false);
     setRefreshing(false);
   }, [token]);
@@ -367,7 +421,6 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
   const displayThrift = thriftRuns;
 
   const buyScans    = scans.filter(s => (s.verdict||s.decision||"").toUpperCase() === "BUY");
-  const totalProfit = buyScans.reduce((sum, s) => sum + (s.profit || s.net_profit || 0), 0);
   const selCount    = selectedIds().length;
 
   return (
@@ -400,7 +453,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
         {[
           [scans.length, "Scans"],
           [buyScans.length, "BUY Finds"],
-          [`$${Math.round(totalProfit)}`, "Profit"],
+          [`$${Math.round(winsSummary.total)}`, "Made"],
           [thriftRuns.length, "Runs"],
         ].map(([val, label]) => (
           <View key={label as string} style={s.statItem}>
@@ -486,13 +539,23 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                         ) : null}
                       </View>
                       <View style={s.cardRight}>
-                        <View style={[s.verdict, {backgroundColor:verdictColor(scan.verdict||scan.decision||"PASS")+"20"}]}>
-                          <Text style={[s.verdictTxt, {color:verdictColor(scan.verdict||scan.decision||"PASS")}]}>
-                            {(scan.verdict||scan.decision||"PASS").toUpperCase()}
-                          </Text>
-                        </View>
+                        {scan.sold_status === "sold" ? (
+                          <View style={s.soldBadge}>
+                            <Text style={s.soldBadgeTxt}>{"✅"} SOLD</Text>
+                          </View>
+                        ) : (
+                          <View style={[s.verdict, {backgroundColor:verdictColor(scan.verdict||scan.decision||"PASS")+"20"}]}>
+                            <Text style={[s.verdictTxt, {color:verdictColor(scan.verdict||scan.decision||"PASS")}]}>
+                              {(scan.verdict||scan.decision||"PASS").toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
                         {(scan.profit||scan.net_profit||0) > 0 && (
-                          <Text style={s.profit}>+${Math.round(scan.profit||scan.net_profit||0)}</Text>
+                          scan.sold_status === "sold" ? (
+                            <Text style={s.soldProfit}>${Math.round(scan.profit||scan.net_profit||0)} made</Text>
+                          ) : (
+                            <Text style={s.profit}>+${Math.round(scan.profit||scan.net_profit||0)} est.</Text>
+                          )
                         )}
                       </View>
                     </View>
@@ -502,7 +565,9 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                         <FlipActionsRow
                           hasPhoto={!!scan.image_url}
                           onView={() => setViewingPhoto(scan.image_url)}
+                          sold={scan.sold_status === "sold"}
                           onSold={() => setLogSaleScan(scan)}
+                          onViewReveal={() => openReveal(scan)}
                           onEdit={() => { openEditor(scan); setExpanded(scan.id); }}
                           shareMessage={shareMsg(scan.item_name || "Item", scan.profit || scan.net_profit, scan.best_platform)}
                           onDelete={() => deleteItem(scan.id, "scan", scan.item_name||"Item")}
@@ -774,11 +839,21 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                         <View style={{flex:1}}>
                           <Text style={s.cardName} numberOfLines={1}>{item.item_name || "Appraisal"}</Text>
                           <Text style={s.cardMeta}>{new Date(item.created_at).toLocaleDateString()}</Text>
-                          <Text style={s.cardPlatform}>{"$" + (item.sell_price||0)}</Text>
+                          <Text style={s.cardPlatform}>
+                            {item.sold_status === "sold"
+                              ? `Sold for $${Math.round(item.actual_sold_price || item.sell_price || 0)}`
+                              : `$${item.sell_price||0} est.`}
+                          </Text>
                         </View>
-                        <View style={[s.verdictBadge, {backgroundColor: decColor + "20"}]}>
-                          <Text style={[s.verdictBadgeTxt, {color: decColor}]}>{item.decision || "WATCH"}</Text>
-                        </View>
+                        {item.sold_status === "sold" ? (
+                          <View style={s.soldBadge}>
+                            <Text style={s.soldBadgeTxt}>{"✅"} SOLD</Text>
+                          </View>
+                        ) : (
+                          <View style={[s.verdictBadge, {backgroundColor: decColor + "20"}]}>
+                            <Text style={[s.verdictBadgeTxt, {color: decColor}]}>{item.decision || "WATCH"}</Text>
+                          </View>
+                        )}
                       </View>
 
                       {!selectMode && (
@@ -786,7 +861,9 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                           <FlipActionsRow
                             hasPhoto={!!item.image_url}
                             onView={() => setViewingPhoto(item.image_url)}
+                            sold={item.sold_status === "sold"}
                             onSold={() => setLogSaleScan(item)}
+                            onViewReveal={() => openReveal(item)}
                             onEdit={() => { openEditor(item); setExpanded(item.id); }}
                             shareMessage={shareMsg(item.item_name || "Appraisal", undefined, item.best_platform)}
                             onDelete={() => deleteItem(item.id, "scan", item.item_name||"Appraisal")}
@@ -884,6 +961,15 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
         onClose={() => { setLogSaleScan(null); loadData(); }}
       />
 
+      <FlexRevealCard
+        visible={!!viewingReveal}
+        stat={viewingReveal?.stat ?? null}
+        itemName={viewingReveal?.itemName}
+        brand={viewingReveal?.brand}
+        loadingSubStat={viewingReveal?.loadingSubStat}
+        onClose={() => setViewingReveal(null)}
+      />
+
       <PhotoLightbox uri={viewingPhoto} onClose={() => setViewingPhoto(null)} />
     </SafeAreaView>
   );
@@ -928,6 +1014,12 @@ const s = StyleSheet.create({
   verdict:       { borderRadius:8, paddingHorizontal:8, paddingVertical:4 },
   verdictTxt:    { fontSize:9, fontWeight:"900" },
   profit:        { color:C.green, fontSize:15, fontWeight:"800" },
+  // Distinct from the BUY/WATCH/PASS verdict pill on purpose - a logged win
+  // has to read as a different KIND of thing at a glance down the list, not
+  // just a green vs. yellow vs. red variant of the same pill.
+  soldBadge:     { borderRadius:8, paddingHorizontal:8, paddingVertical:4, backgroundColor:C.gold+"20", borderWidth:1, borderColor:C.gold+"50" },
+  soldBadgeTxt:  { fontSize:9, fontWeight:"900", color:C.gold, letterSpacing:0.3 },
+  soldProfit:    { color:C.gold, fontSize:15, fontWeight:"800" },
   expanded:      { borderTopWidth:1, borderTopColor:C.border, padding:14 },
   expandedRow:   { flexDirection:"row", justifyContent:"space-around", marginBottom:14 },
   expandedStat:  { alignItems:"center" },

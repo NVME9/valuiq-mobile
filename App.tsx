@@ -260,7 +260,6 @@ export default function App() {
   }
 
   const token = session?.access_token || "";
-  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
 
   async function skipTour() {
     try { await AsyncStorage.setItem("@valuiq_tour_done", "true"); } catch {}
@@ -283,7 +282,7 @@ export default function App() {
   function navigate(s: Screen, data?: any) {
     setNavData(data ?? null);
     // Tab bar screens reset history; tool screens push to stack,
-    const TAB_SCREENS: Screen[] = ["scanner","dashboard","community","profile","upgrade"];
+    const TAB_SCREENS: Screen[] = ["scanner","dashboard","history","community","profile","upgrade"];
     if (TAB_SCREENS.includes(s)) {
       setHistory([]);
     } else {
@@ -341,15 +340,20 @@ export default function App() {
     "titan":     hasProAccess(plan) ? <BusinessApp token={token} plan={plan} userEmail={session?.user?.email || ""} scansLeft={scansLeft} setScansLeft={setScansLeft} onLogout={handleLogout} /> : <UpgradeScreen {...props} />,
   };
 
-  const TAB_SCREENS: Screen[] = ["scanner","dashboard","community","profile"];
+  const TAB_SCREENS: Screen[] = ["scanner","dashboard","history","community","profile"];
   const activeTab = TAB_SCREENS.includes(screen) ? screen : null;
 
+  // "Upgrade" removed from the tab bar - it stays fully routable (Profile's
+  // upgrade card, Dashboard's upgrade nudge, and feature-gate paywall
+  // prompts all still call onNavigate("upgrade")), just no longer a
+  // permanent slot in a now-6-wide bar. "Dashboard" -> "Home" since it was
+  // the one label actually truncating at 6 tabs (now 5).
   const TABS = [
-    { id:"scanner"   as Screen, icon:"📷", label:"Scan"      },
-    { id:"dashboard" as Screen, icon:"⚡", label:"Dashboard" },
-    { id:"community" as Screen, icon:"🔥", label:"Feed"      },
-    { id:"profile"   as Screen, icon:"👤", label:"Profile"   },
-    { id:"upgrade"   as Screen, icon:"🚀", label:"Upgrade",  highlight:!isPaid },
+    { id:"scanner"   as Screen, icon:"📷", label:"Scan"    },
+    { id:"dashboard" as Screen, icon:"⚡", label:"Home"    },
+    { id:"history"   as Screen, icon:"🏆", label:"Wins"    },
+    { id:"community" as Screen, icon:"🔥", label:"Feed"    },
+    { id:"profile"   as Screen, icon:"👤", label:"Profile" },
   ];
 
   return (
@@ -381,8 +385,6 @@ export default function App() {
             <SafeAreaView style={{backgroundColor:C.surface}}>
               <View style={s.tabBar}>
                 {TABS.map(t => {
-                  // Hide upgrade tab for paid users,
-                  if (t.highlight === false && t.id !== "upgrade") return null;
                   const active = activeTab === t.id;
                   return (
                     <TouchableOpacity
@@ -397,16 +399,11 @@ export default function App() {
                       } : undefined}
                       activeOpacity={0.7}
                     >
-                      <Text style={[s.tabIcon, t.highlight && {opacity:1}]}>{t.icon}</Text>
-                      <Text style={[
-                        s.tabLabel,
-                        active && {color:C.green, fontWeight:"700"},
-                        t.highlight && {color:C.yellow, fontWeight:"700"},
-                      ]} numberOfLines={1}>
+                      <Text style={s.tabIcon}>{t.icon}</Text>
+                      <Text style={[s.tabLabel, active && {color:C.green, fontWeight:"700"}]} numberOfLines={1}>
                         {t.label}
                       </Text>
-                      {active && !t.highlight && <View style={s.tabDot}/>}
-                      {t.highlight && <View style={[s.tabDot, {backgroundColor:C.yellow}]}/>}
+                      {active && <View style={s.tabDot}/>}
                     </TouchableOpacity>
                   );
                 })}
@@ -422,8 +419,11 @@ export default function App() {
 
 const s = StyleSheet.create({
   root:    { flex:1, backgroundColor:C.bg },
-  tabBar:  { flexDirection:"row", borderTopWidth:1, borderTopColor:C.border, paddingTop:6, paddingBottom:Platform.OS==="ios"?0:6, paddingHorizontal:2 },
-  tabItem: { flex:1, alignItems:"center", paddingBottom:4, paddingHorizontal:1 },
+  // paddingHorizontal on both dropped to 0 (was 2/1) when this went from 5
+  // to 6 tabs - reclaims a few px per tab rather than shrinking icon/label
+  // font sizes, which were already near the floor for legibility.
+  tabBar:  { flexDirection:"row", borderTopWidth:1, borderTopColor:C.border, paddingTop:6, paddingBottom:Platform.OS==="ios"?0:6, paddingHorizontal:0 },
+  tabItem: { flex:1, alignItems:"center", paddingBottom:4, paddingHorizontal:0 },
   tabIcon: { fontSize:18, marginBottom:1 },
   tabLabel:{ color:C.text4, fontSize:8, fontWeight:"600" },
   tabDot:  { width:3, height:3, borderRadius:1.5, backgroundColor:C.green, marginTop:2 },

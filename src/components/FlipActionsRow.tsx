@@ -12,6 +12,13 @@ interface Props {
   hasPhoto: boolean;
   onView?: () => void;
   onSold: () => void;
+  // When true, this item is already sold - the "Sold" pill swaps to a
+  // "View reveal" pill so a win invites revisiting, not re-logging. Omit
+  // (or pass onViewReveal undefined) to keep the plain "Sold" pill - the
+  // caller may not have sold_status wired up yet (see thrift items, whose
+  // backend route doesn't currently surface sold_status per item).
+  sold?: boolean;
+  onViewReveal?: () => void;
   onEdit: () => void;
   shareMessage: string;
   // Omit to hide - only thrift items lack a safe per-item delete today (see
@@ -21,7 +28,7 @@ interface Props {
   onDelete?: () => void;
 }
 
-export default function FlipActionsRow({ hasPhoto, onView, onSold, onEdit, shareMessage, onDelete }: Props) {
+export default function FlipActionsRow({ hasPhoto, onView, onSold, sold, onViewReveal, onEdit, shareMessage, onDelete }: Props) {
   return (
     <View style={s.row}>
       {hasPhoto && onView ? (
@@ -29,13 +36,22 @@ export default function FlipActionsRow({ hasPhoto, onView, onSold, onEdit, share
           <Text style={s.pillTxt}>{"📷"} View</Text>
         </TouchableOpacity>
       ) : null}
-      <TouchableOpacity style={[s.pill, s.pillSold]} onPress={onSold}>
-        <Text style={[s.pillTxt, s.pillSoldTxt]}>{"✅"} Sold</Text>
-      </TouchableOpacity>
+      {sold ? (
+        <TouchableOpacity style={[s.pill, s.pillSold]} onPress={onViewReveal ?? onSold}>
+          <Text style={[s.pillTxt, s.pillSoldTxt]}>{"🏆"} View reveal</Text>
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity style={[s.pill, s.pillSold]} onPress={onSold}>
+          <Text style={[s.pillTxt, s.pillSoldTxt]}>{"✅"} Sold</Text>
+        </TouchableOpacity>
+      )}
       <TouchableOpacity style={s.pill} onPress={onEdit}>
         <Text style={s.pillTxt}>{"✏️"} Edit</Text>
       </TouchableOpacity>
-      <ShareButton compact message={shareMessage} />
+      {/* Sold items already have a superior share path - "View reveal" opens
+          the branded-image win share. A second, plain-text Share pill here
+          would be redundant (and worse) for the same card. */}
+      {!sold && <ShareButton compact message={shareMessage} />}
       {onDelete ? (
         <TouchableOpacity style={[s.pill, s.pillDelete]} onPress={onDelete}>
           <Text style={[s.pillTxt, s.pillDeleteTxt]}>{"🗑"} Delete</Text>

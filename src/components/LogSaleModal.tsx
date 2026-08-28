@@ -43,7 +43,10 @@ interface Props {
 }
 
 export default function LogSaleModal({ visible, token, scan, onClose }: Props) {
-  const [reveal, setReveal] = useState<{ stat: FlexStat; itemName: string; brand: string | null } | null>(null);
+  // stat starts null: SaleCaptureCard's onReveal opens this shell the
+  // instant the sale save succeeds, before the crowd-comparison fetch
+  // resolves - onRevealStat fills stat in afterward via the ref below.
+  const [reveal, setReveal] = useState<{ stat: FlexStat | null; itemName: string; brand: string | null; loadingSubStat?: string } | null>(null);
   // SaleCaptureCard calls onReveal then onDone back to back, synchronously,
   // on a successful "sold" save. This ref lets onDone tell the two cases
   // apart: a reveal just got queued (skip closing - the reveal owns closing
@@ -62,7 +65,7 @@ export default function LogSaleModal({ visible, token, scan, onClose }: Props) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
       {reveal ? (
-        <FlexRevealBody stat={reveal.stat} itemName={reveal.itemName} brand={reveal.brand} onClose={close} />
+        <FlexRevealBody stat={reveal.stat} itemName={reveal.itemName} brand={reveal.brand} loadingSubStat={reveal.loadingSubStat} onClose={close} />
       ) : (
         <KeyboardAvoidingView
           style={{ flex: 1 }}
@@ -84,9 +87,12 @@ export default function LogSaleModal({ visible, token, scan, onClose }: Props) {
                   if (justRevealedRef.current) { justRevealedRef.current = false; return; }
                   close();
                 }}
-                onReveal={(stat, itemName, brand) => {
+                onReveal={(itemName, brand, loadingSubStat) => {
                   justRevealedRef.current = true;
-                  setReveal({ stat, itemName, brand });
+                  setReveal({ stat: null, itemName, brand, loadingSubStat });
+                }}
+                onRevealStat={(stat) => {
+                  setReveal((prev) => (prev ? { ...prev, stat } : prev));
                 }}
               />
             </View>

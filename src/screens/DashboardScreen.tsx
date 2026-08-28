@@ -7,7 +7,7 @@ import {
 import { SafeAreaView as SAV } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import Coachmark from "../components/Coachmark";
-import { API_BASE, hasProAccess, getCommunityWins } from "../lib/api";
+import { API_BASE, hasProAccess, getCommunityWins, getWinsSummary } from "../lib/api";
 
 const { width } = Dimensions.get("window");
 
@@ -97,6 +97,12 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
   const [refreshing, setRefresh]  = useState(false);
   const [liveIdx, setLiveIdx]     = useState(0);
   const [wins, setWins]           = useState<any[]>([]);
+  // The ONE real wins total - from /api/profile's unbounded, Specialty-
+  // inclusive aggregate (see getWinsSummary in lib/api.ts), NOT computed
+  // from the `scans` list above (that's still a windowed limit=5 fetch,
+  // kept only for the RECENT SCANS list UI). Profile and History read the
+  // exact same source, so all three headline numbers always agree.
+  const [winsSummary, setWinsSummary] = useState<{ count: number; total: number }>({ count: 0, total: 0 });
   const [tipIdx, setTipIdx]       = useState(0);
   const [showTools, setShowTools] = useState(true);
   const [showScans, setShowScans] = useState(true);
@@ -143,6 +149,9 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
     try {
       const w = await getCommunityWins(20);
       if (Array.isArray(w) && w.length > 0) setWins(w);
+    } catch {}
+    try {
+      setWinsSummary(await getWinsSummary(token));
     } catch {}
     setRefresh(false);
   }
@@ -210,6 +219,33 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
           </TouchableOpacity>
         </Animated.View>
 
+        {/* WINS - real, logged sales; mirrors LIVE FEED's prominence right
+            below the hero button. winsSummary is the shared, unbounded
+            aggregate from /api/profile (see getWinsSummary in lib/api.ts) -
+            the SAME source Profile and History read, so this number always
+            agrees with theirs, Specialty sales included. */}
+        <TouchableOpacity style={s.winsBar} onPress={() => onNavigate("history")} activeOpacity={0.85}>
+          <Text style={s.winsBarIcon}>🏆</Text>
+          <View style={{flex:1}}>
+            {winsSummary.count > 0 ? (
+              <>
+                {/* flex:1 parent already bounds this column so a long line
+                    wraps rather than spills off the card - numberOfLines={1}
+                    (ellipsis-truncate instead) is still the cleaner look for
+                    a big $ figure on a narrow screen. */}
+                <Text style={s.winsBarTitle} numberOfLines={1}>${Math.round(winsSummary.total)} made · {winsSummary.count} flip{winsSummary.count === 1 ? "" : "s"}</Text>
+                <Text style={s.winsBarSub} numberOfLines={1}>See your wins →</Text>
+              </>
+            ) : (
+              <>
+                <Text style={s.winsBarTitle} numberOfLines={1}>Log your first flip</Text>
+                <Text style={s.winsBarSub} numberOfLines={1}>Turn a scan into a win →</Text>
+              </>
+            )}
+          </View>
+          <Text style={s.winsBarChevron}>{"›"}</Text>
+        </TouchableOpacity>
+
         {/* LIVE FEED - real community wins */}
         <TouchableOpacity style={s.liveBar} onPress={() => onNavigate("community")} activeOpacity={0.85}>
           <View style={s.liveDot}/>
@@ -224,13 +260,26 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
 
 
 
-        {/* FREE UPGRADE NUDGE */}
-        {isFree && (
+        {/* UPGRADE NUDGE - generalized beyond free-only now that "Upgrade"
+            is no longer a bottom tab: a Seller still needs a path to Pro,
+            a Pro still needs a path to Lifetime. Only the actual top tier
+            (level 4: lifetime/titan/vip) sees no upsell here. */}
+        {level < 4 && (
           <TouchableOpacity style={s.upgradeNudge} onPress={() => onNavigate("upgrade")} activeOpacity={0.88}>
             <View style={{flex:1}}>
-              <Text style={s.nudgeEye}>FREE PLAN</Text>
-              <Text style={s.nudgeTitle}>You have {scansLeft ?? 10} scans left this month</Text>
-              <Text style={s.nudgeSub}>Seller is $14.99/month. One flip pays for 3 months.</Text>
+              <Text style={s.nudgeEye} numberOfLines={1}>
+                {level === 0 ? "FREE PLAN" : level === 1 ? "SELLER PLAN" : "PRO PLAN"}
+              </Text>
+              <Text style={s.nudgeTitle} numberOfLines={1}>
+                {level === 0 ? `You have ${scansLeft ?? 10} scans left this month`
+                  : level === 1 ? "Unlock Pro"
+                  : "Go Lifetime"}
+              </Text>
+              <Text style={s.nudgeSub} numberOfLines={1}>
+                {level === 0 ? "Seller is $14.99/month. One flip pays for 3 months."
+                  : level === 1 ? "$34.99/month - AI Coach, Profit Tracker & more."
+                  : "$149 one-time - everything in Pro, no monthly fees."}
+              </Text>
             </View>
             <Text style={{color:C.green, fontSize:22}}>→</Text>
           </TouchableOpacity>
@@ -372,7 +421,9 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
                   </TouchableOpacity>
                 ))}
                 <TouchableOpacity style={s.viewAll} onPress={() => onNavigate("history")}>
-                  <Text style={s.viewAllTxt}>View My Flips →</Text>
+                  <Text style={s.viewAllTxt}>
+                    {winsSummary.count > 0 ? `See your wins → · $${Math.round(winsSummary.total)} made` : "View My Flips →"}
+                  </Text>
                 </TouchableOpacity>
               </>
             )}
@@ -402,6 +453,12 @@ const s = StyleSheet.create({
   heroEye:       { color:C.green, fontSize:8, fontWeight:"900", letterSpacing:2, marginBottom:6 },
   heroTitle:     { color:C.text1, fontSize:26, fontWeight:"900", letterSpacing:-0.8, marginBottom:4 },
   heroSub:       { color:C.text3, fontSize:13 },
+  // Wins
+  winsBar:       { flexDirection:"row", alignItems:"center", backgroundColor:C.greenBg, borderWidth:1.5, borderColor:C.green+"50", borderRadius:16, padding:16, marginBottom:16 },
+  winsBarIcon:   { fontSize:22, marginRight:12 },
+  winsBarTitle:  { color:C.text1, fontSize:15, fontWeight:"800" },
+  winsBarSub:    { color:C.green, fontSize:12, fontWeight:"700", marginTop:2 },
+  winsBarChevron:{ color:C.text4, fontSize:18, marginLeft:8 },
   // Live
   liveBar:       { backgroundColor:"#130a00", borderWidth:1.5, borderColor:"#ff6b6b50", borderRadius:16, padding:16, marginBottom:16 },
   liveTopRow:    { flexDirection:"row", alignItems:"center", gap:8, marginBottom:10 },

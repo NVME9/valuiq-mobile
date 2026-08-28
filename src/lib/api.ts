@@ -281,6 +281,24 @@ export async function getCommunityWins(): Promise<any[]> {
   try { const d = await fetch(`${API_BASE}/api/community-wins`).then(r=>r.json()); return Array.isArray(d) ? d : []; } catch { return []; }
 }
 
+// THE single source of truth for "money made" - /api/profile computes this
+// from an UNBOUNDED query (no .limit(), unlike the windowed scan-history
+// list fetches Dashboard/History use for their own item lists) over ALL the
+// user's non-thrift scans, Specialty included. Dashboard, Profile, and
+// History's headline wins figures all call this same function so they can
+// never disagree - only their own item LISTS still come from their own
+// separate, windowed fetches.
+export async function getWinsSummary(token: string): Promise<{ count: number; total: number }> {
+  try {
+    const r = await fetch(`${API_BASE}/api/profile?token=${token}`);
+    const d = await r.json();
+    if (d?.success && d.stats) {
+      return { count: Number(d.stats.soldCount) || 0, total: Number(d.stats.soldTotal) || 0 };
+    }
+  } catch {}
+  return { count: 0, total: 0 };
+}
+
 export async function getProfitOracle(token: string, item: { category?: string; brand?: string; itemName?: string; buyPrice?: number; estValue?: number; bestPlatform?: string; lensBuyTarget?: number; lensNetProfit?: number; lensSellPrice?: number }): Promise<any> {
   try {
     const r = await fetch(`${API_BASE}/api/profit-oracle`, {

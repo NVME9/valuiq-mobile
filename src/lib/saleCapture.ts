@@ -51,6 +51,11 @@ export interface SavedSale {
   net_profit?: number;
   days_to_sale?: number;
   sold_status?: string;
+  // recordSaleOutcome()'s PATCH body never sends this field, but the
+  // backend's `.select().single()` returns every column on the row
+  // regardless - flexReveal.ts's cacheFlexStat() needs it to merge the
+  // computed stat into the existing blob instead of clobbering it.
+  specialty_data?: string;
 }
 
 export interface RecordSaleResult {
