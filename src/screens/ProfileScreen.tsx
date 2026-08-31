@@ -19,7 +19,7 @@ import * as Updates from "expo-updates";
 // is the ground truth: if BUILD_TAG on-device doesn't match what you just
 // published, the update didn't land (see App.tsx's init() for the
 // check-and-reload-immediately fix that was missing).
-const BUILD_TAG = "2026-08-31.4";
+const BUILD_TAG = "2026-08-31.5";
 
 // The single owner/dev allowlist for anything real users must never see -
 // dev-only tools (Reset onboarding, Preview new-user flow) and the build
@@ -104,9 +104,17 @@ const ps = {
 };
 
 export default function ProfileScreen({ token, plan, onLogout, onNavigate, previewNewUser, onTogglePreviewNewUser }: Props) {
-  const [profile, setProfile]       = useState<any>(null);
-  const [stats, setStats]           = useState<any>(null);
-  const [earnedIds, setEarnedIds]   = useState<Set<string>>(new Set());
+  // Instant-paint from cache on mount, same pattern as Dashboard/History's
+  // peekProfileData init - the screen fully unmounts/remounts on every tab
+  // switch, so without this a real account flashed to its raw (empty)
+  // initial state for a beat even when a recent fetch was sitting right
+  // there in cache. Now that the cache is keyed on the stable user id (see
+  // stableIdFromToken in lib/api.ts), this still hits after a foreground
+  // token refresh too, not just a same-token remount.
+  const cachedAtMount = peekProfileData(token);
+  const [profile, setProfile]       = useState<any>(cachedAtMount?.profile ?? null);
+  const [stats, setStats]           = useState<any>(cachedAtMount?.stats ?? null);
+  const [earnedIds, setEarnedIds]   = useState<Set<string>>(new Set((cachedAtMount?.badges || []).map((b: any) => b.id)));
   const [deleting, setDeleting]     = useState(false);
 
   function confirmDeleteAccount() {
@@ -152,7 +160,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
       ]
     );
   }
-  const [loading, setLoading]       = useState(true);
+  const [loading, setLoading]       = useState(!cachedAtMount);
   const [editing, setEditing]       = useState(false);
   const [editName, setEditName]     = useState("");
   const [editBio, setEditBio]       = useState("");
@@ -282,8 +290,17 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
     }
     setLoading(true);
     const fresh = await getProfileData(token);
-    if (fresh) applyProfileData(fresh);
-    setLoading(false);
+    if (fresh) {
+      applyProfileData(fresh);
+      setLoading(false);
+    }
+    // fresh === null: no cache, no successful fetch - there is genuinely
+    // nothing REAL to show yet. Leave `loading` true (spinner) instead of
+    // flipping it false, which used to fall through to profile/stats'
+    // untouched null initial state and render as fake "Newbie/0 XP/Y
+    // avatar" defaults for an account that may well have real data the
+    // fetch just couldn't reach this time. A later successful fetch (retry,
+    // or another screen populating the shared cache) still resolves this.
   }
 
   async function pickPhoto() {

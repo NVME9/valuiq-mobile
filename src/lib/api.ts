@@ -387,7 +387,53 @@ function cacheGet<T>(key: string, ttlMs: number): T | undefined {
   return hit.data as T;
 }
 function cacheSet(key: string, data: any) { _cache.set(key, { data, ts: Date.now() }); }
-export function invalidateProfileCache(token: string) { _cache.delete(`profile:${token}`); }
+
+// Decodes a JWT's payload without verifying the signature - purely a LOCAL
+// read of claims already trusted because we just got the token from
+// Supabase (verification happens server-side on every authenticated
+// request). Used below to key caches on the stable `sub` claim and to check
+// `exp` before deciding whether a token refresh is actually needed.
+function decodeJwtPayload(token: string): any {
+  try {
+    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64 + "===".slice(0, (4 - b64.length % 4) % 4);
+    return JSON.parse(decodeURIComponent(escape(atob(pad))));
+  } catch {
+    return null;
+  }
+}
+
+// MEASURED BUG (2026-08-31): every cache below used to be keyed on the raw
+// access token, but that token is opaque and changes on EVERY
+// refreshToken() call - Supabase always mints a brand-new JWT on the
+// refresh grant, even when the old one still had most of its life left. The
+// AppState foreground-resume handler in App.tsx calls refreshToken() on
+// every single background->active transition, so a routine app-switch
+// silently orphaned the whole cache (profile/scan-history/thrift-runs) even
+// though the account hadn't changed - the next screen mount found a
+// genuinely cold cache under the new token, and a slow/failed re-fetch had
+// nothing real to fall back to, rendering empty "Newbie/0 XP" defaults for
+// an account that actually has real data sitting uselessly under the OLD
+// token's key. The JWT's `sub` claim is the stable Supabase user id
+// embedded in every token issued for that user - keying on it instead means
+// a token refresh no longer changes which cache entry a screen reads.
+// Falls back to the raw token if it can't be decoded (defensive only -
+// every real token here is a Supabase-issued JWT).
+function stableIdFromToken(token: string): string {
+  return decodeJwtPayload(token)?.sub || token;
+}
+
+// See the AppState foreground-resume handler in App.tsx: refreshing a token
+// that still has most of its life left is pointless network + latency on
+// every single foreground - this lets that handler skip the refresh
+// entirely unless the CURRENT token is actually close to expiring.
+export function isTokenNearExpiry(token: string, bufferSeconds = 300): boolean {
+  const exp = decodeJwtPayload(token)?.exp;
+  if (!exp) return true; // can't tell - safer to refresh than risk running on an expired token
+  return exp * 1000 - Date.now() < bufferSeconds * 1000;
+}
+
+export function invalidateProfileCache(token: string) { _cache.delete(`profile:${stableIdFromToken(token)}`); }
 
 // INCIDENT (2026-08-30): a plain fetch() has no default timeout in React
 // Native - when /api/profile briefly hung server-side (next/server's
@@ -436,7 +482,7 @@ const PROFILE_TTL = 30000;
 // headline wins figures can never disagree AND a revisit within 30s of any
 // of the three screens fetching it is instant, no network, no spinner.
 export async function getProfileData(token: string): Promise<ProfileData | null> {
-  const key = `profile:${token}`;
+  const key = `profile:${stableIdFromToken(token)}`;
   const cached = cacheGet<ProfileData>(key, PROFILE_TTL);
   if (cached) return cached;
   try {
@@ -461,13 +507,18 @@ export async function getProfileData(token: string): Promise<ProfileData | null>
 // very first render (no blank/spinner frame) before deciding whether it
 // even needs to call getProfileData at all.
 export function peekProfileData(token: string): ProfileData | undefined {
-  return cacheGet<ProfileData>(`profile:${token}`, PROFILE_TTL);
+  return cacheGet<ProfileData>(`profile:${stableIdFromToken(token)}`, PROFILE_TTL);
 }
 
-export async function getWinsSummary(token: string): Promise<{ count: number; total: number }> {
+// Returns null (not a fabricated {count:0,total:0}) when getProfileData has
+// genuinely nothing to report - a timed-out/failed fetch with a cold cache -
+// so callers can tell "we don't know" apart from "this account really has
+// zero wins" and keep whatever real number was already on screen instead of
+// stomping it with a fake zero.
+export async function getWinsSummary(token: string): Promise<{ count: number; total: number } | null> {
   const d = await getProfileData(token);
   if (d?.stats) return { count: Number(d.stats.soldCount) || 0, total: Number(d.stats.soldTotal) || 0 };
-  return { count: 0, total: 0 };
+  return null;
 }
 
 // Same shape as getProfileData's cache above: History re-fetches this
@@ -483,7 +534,7 @@ export async function getWinsSummary(token: string): Promise<{ count: number; to
 // MUST call invalidateScanHistoryCache(token) right after, before re-fetching.
 const SCAN_HISTORY_TTL = 30000;
 export async function getScanHistory(token: string, type: string, limit: number): Promise<any[]> {
-  const key = `scan-history:${token}:${type}:${limit}`;
+  const key = `scan-history:${stableIdFromToken(token)}:${type}:${limit}`;
   const cached = cacheGet<any[]>(key, SCAN_HISTORY_TTL);
   if (cached) return cached;
   try {
@@ -511,12 +562,13 @@ export async function getScanHistory(token: string, type: string, limit: number)
 // very first render, before deciding whether it even needs to call
 // getScanHistory at all. Mirrors peekProfileData.
 export function peekScanHistory(token: string, type: string, limit: number): any[] | undefined {
-  const hit = _cache.get(`scan-history:${token}:${type}:${limit}`);
+  const hit = _cache.get(`scan-history:${stableIdFromToken(token)}:${type}:${limit}`);
   return hit ? (hit.data as any[]) : undefined;
 }
 export function invalidateScanHistoryCache(token: string) {
+  const id = stableIdFromToken(token);
   for (const k of Array.from(_cache.keys())) {
-    if (k.startsWith(`scan-history:${token}:`)) _cache.delete(k);
+    if (k.startsWith(`scan-history:${id}:`)) _cache.delete(k);
   }
 }
 
@@ -530,7 +582,7 @@ export function invalidateScanHistoryCache(token: string) {
 // treatment as getScanHistory now closes that gap.
 const THRIFT_RUNS_TTL = 30000;
 export async function getThriftRuns(token: string): Promise<any[]> {
-  const key = `thrift-runs:${token}`;
+  const key = `thrift-runs:${stableIdFromToken(token)}`;
   const cached = cacheGet<any[]>(key, THRIFT_RUNS_TTL);
   if (cached) return cached;
   try {
@@ -545,10 +597,10 @@ export async function getThriftRuns(token: string): Promise<any[]> {
   }
 }
 export function peekThriftRuns(token: string): any[] | undefined {
-  const hit = _cache.get(`thrift-runs:${token}`);
+  const hit = _cache.get(`thrift-runs:${stableIdFromToken(token)}`);
   return hit ? (hit.data as any[]) : undefined;
 }
-export function invalidateThriftRunsCache(token: string) { _cache.delete(`thrift-runs:${token}`); }
+export function invalidateThriftRunsCache(token: string) { _cache.delete(`thrift-runs:${stableIdFromToken(token)}`); }
 
 export async function getProfitOracle(token: string, item: { category?: string; brand?: string; itemName?: string; buyPrice?: number; estValue?: number; bestPlatform?: string; lensBuyTarget?: number; lensNetProfit?: number; lensSellPrice?: number }): Promise<any> {
   try {

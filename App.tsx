@@ -4,7 +4,7 @@ import {
   ActivityIndicator, TouchableOpacity, Animated, Dimensions, AppState
 } from "react-native";
 import { C } from "./src/lib/theme";
-import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken , hasProAccess } from "./src/lib/api";
+import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess } from "./src/lib/api";
 import { supabase } from "./src/lib/supabase";
 import * as Updates from "expo-updates";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -246,12 +246,25 @@ export default function App() {
   // Re-verify identity when the app returns from the background.
   // Without this, the access token goes stale while backgrounded and the
   // app falls back to a generic profile (no name / no admin / free plan).
+  //
+  // MEASURED BUG (2026-08-31): this used to call refreshToken() on EVERY
+  // foreground resume, unconditionally - Supabase always mints a brand-new
+  // access_token JWT on that grant, even when the current one still had
+  // most of its life left. Every client-side cache in lib/api.ts (profile/
+  // scan-history/thrift-runs) is now keyed on the stable user id rather
+  // than the raw token (see stableIdFromToken), so a refresh no longer
+  // orphans it - but refreshing a token that's nowhere near expiry is still
+  // pointless network + latency on every single app-switch. Now only
+  // actually refreshes when the CURRENT token is within 5 minutes of
+  // expiring (isTokenNearExpiry, decoded locally from the JWT - no network
+  // call needed to check).
   useEffect(() => {
     const sub = AppState.addEventListener("change", async (state) => {
       if (state === "active") {
         try {
           const saved = await loadSession();
           if (saved && saved.refresh_token) {
+            if (!isTokenNearExpiry(saved.access_token)) return;
             const refreshed = await refreshToken(saved.refresh_token);
             await saveSession(refreshed);
             await syncBiometricToken(refreshed);

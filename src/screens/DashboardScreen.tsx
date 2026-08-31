@@ -166,7 +166,11 @@ export default function DashboardScreen({ token, plan, planLoaded = true, scansL
       });
     }
     if (flipsRes.status === "fulfilled" && flipsRes.value.length > 0) setWins(flipsRes.value);
-    if (summaryRes.status === "fulfilled") setWinsSummary(summaryRes.value);
+    // summaryRes.value is null when the fetch failed AND there was nothing
+    // cached to fall back to - keep whatever winsSummary already had (real
+    // cached data, or the {0,0} initial default) instead of stomping it
+    // with a fabricated zero (see getWinsSummary in lib/api.ts).
+    if (summaryRes.status === "fulfilled" && summaryRes.value) setWinsSummary(summaryRes.value);
     setRefresh(false);
   }
 
