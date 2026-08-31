@@ -19,7 +19,7 @@ import * as Updates from "expo-updates";
 // is the ground truth: if BUILD_TAG on-device doesn't match what you just
 // published, the update didn't land (see App.tsx's init() for the
 // check-and-reload-immediately fix that was missing).
-const BUILD_TAG = "2026-08-31.5";
+const BUILD_TAG = "2026-08-31.6";
 
 // The single owner/dev allowlist for anything real users must never see -
 // dev-only tools (Reset onboarding, Preview new-user flow) and the build
@@ -316,14 +316,16 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
   async function save() {
     setSaving(true);
     try {
-      await fetch(`${API_BASE}/api/profile`, {
-        method:"POST", headers:{"Content-Type":"application/json"},
+      const r = await fetch(`${API_BASE}/api/profile`, {
+        method:"PATCH", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
           token,
-          display_name: editName,
-          bio: editBio,
-          ...(editPhoto ? { avatar_photo: editPhoto } : {}),
-          ...(editEmoji ? { avatar_emoji: editEmoji } : {}) }) });
+          updates: {
+            display_name: editName,
+            bio: editBio,
+            ...(editEmoji ? { avatar_emoji: editEmoji } : {}) } }) });
+      const json = await r.json().catch(() => null);
+      if (!r.ok || !json?.success) throw new Error();
       invalidateProfileCache(token);
       setProfile((p:any) => ({
         ...p,
@@ -332,17 +334,12 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
         ...(editPhoto ? { avatar_photo: editPhoto, avatar_emoji: null } : {}),
         ...(editEmoji ? { avatar_emoji: editEmoji, avatar_photo: null } : {}) }));
       setEditing(false);
-    } catch {}
+    } catch {
+      Alert.alert("Couldn't save", "Try again.");
+    }
     setSaving(false);
   }
 
-  // NOTE: unlike save() above (which POSTs a flat body to a route that has
-  // no POST handler - app/api/profile/route.ts only exports GET and PATCH,
-  // so that call 404/405s and silently no-ops behind its catch{}), this
-  // uses the REAL contract: PATCH with { token, updates: {...} }, matching
-  // the backend's actual allowlist (display_name/avatar_emoji/bio/
-  // is_public). Flagging save()'s bug separately rather than fixing it here
-  // - out of scope for "add the toggle."
   async function toggleIsPublic() {
     const next = !isPublic;
     setIsPublic(next); // optimistic - matches save()'s pattern elsewhere on this screen
