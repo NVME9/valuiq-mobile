@@ -124,9 +124,23 @@ export default function SourcingIntelScreen({ token, onBack }: Props) {
             {/* Seasonality */}
             {data.currentSeasonRating && (
               <View style={s.card}>
-                <View style={s.rowBetween}>
-                  <Text style={s.cardTitle}>Seasonality</Text>
-                  <Text style={[s.pill, { color: ratingColor(data.currentSeasonRating), borderColor: ratingColor(data.currentSeasonRating) + "60" }]}>{data.currentSeasonRating} now</Text>
+                {/* MEASURED BUG: this row had no flex/shrink guard on either
+                    side - data.currentSeasonRating is AI-generated text, not
+                    a locally-validated short enum, so a longer-than-usual
+                    value had nothing to shrink into and could push past the
+                    card's right edge. Title stays fixed-width (it's always
+                    "Seasonality"); the AI value gets the flexible/shrinkable
+                    slot instead. */}
+                <View style={[s.rowBetween, { gap: 8 }]}>
+                  <Text style={[s.cardTitle, { flexShrink: 0, marginBottom: 0 }]}>Seasonality</Text>
+                  <Text
+                    style={[s.pill, { flexShrink: 1, textAlign: "right", color: ratingColor(data.currentSeasonRating), borderColor: ratingColor(data.currentSeasonRating) + "60" }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
+                  >
+                    {data.currentSeasonRating} now
+                  </Text>
                 </View>
                 {data.seasonalInsight ? <Text style={s.insight}>{data.seasonalInsight}</Text> : null}
                 {Array.isArray(data.bestMonthsToBuy) && <Text style={s.line}>📥 Buy: {data.bestMonthsToBuy.join(", ")}</Text>}
@@ -137,9 +151,19 @@ export default function SourcingIntelScreen({ token, onBack }: Props) {
             {/* Authenticity */}
             {data.authenticityRisk && (
               <View style={s.card}>
-                <View style={s.rowBetween}>
-                  <Text style={s.cardTitle}>Authenticity Risk</Text>
-                  <Text style={[s.pill, { color: riskColor(data.authenticityRisk), borderColor: riskColor(data.authenticityRisk) + "60" }]}>{data.authenticityRisk}</Text>
+                {/* Same unbounded-row fix as Seasonality above - riskColor()
+                    only special-cases "Low"/"Medium", so data.authenticityRisk
+                    isn't guaranteed to be a short fixed word either. */}
+                <View style={[s.rowBetween, { gap: 8 }]}>
+                  <Text style={[s.cardTitle, { flexShrink: 0, marginBottom: 0 }]}>Authenticity Risk</Text>
+                  <Text
+                    style={[s.pill, { flexShrink: 1, textAlign: "right", color: riskColor(data.authenticityRisk), borderColor: riskColor(data.authenticityRisk) + "60" }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
+                  >
+                    {data.authenticityRisk}
+                  </Text>
                 </View>
                 {Array.isArray(data.authChecks) && data.authChecks.map((c: string, i: number) => (
                   <Text key={i} style={s.line}>✓ {c}</Text>

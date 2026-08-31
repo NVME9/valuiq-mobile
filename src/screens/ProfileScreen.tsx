@@ -6,11 +6,39 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
 import { C } from "../lib/theme";
+import Wordmark from "../components/Wordmark";
 import { isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric, getBiometricLabel } from "../lib/biometrics";
-import { API_BASE, deleteAccount } from "../lib/api";
+import { API_BASE, deleteAccount, getProfileData, peekProfileData, invalidateProfileCache } from "../lib/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Updates from "expo-updates";
+
+// Bump this string on every OTA publish (right before running `eas update`).
+// MEASURED INCIDENT (2026-08-31): three separate OTA publishes looked
+// identical on-device with no way to tell whether a new bundle had actually
+// loaded - this stamp, plus Updates.updateId/channel/runtimeVersion below,
+// is the ground truth: if BUILD_TAG on-device doesn't match what you just
+// published, the update didn't land (see App.tsx's init() for the
+// check-and-reload-immediately fix that was missing).
+const BUILD_TAG = "2026-08-31.4";
+
+// The single owner/dev allowlist for anything real users must never see -
+// dev-only tools (Reset onboarding, Preview new-user flow) and the build
+// stamp below, AND the pre-existing Admin Panel gate (was its own separate
+// inline email list further down; now reads from this same one). __DEV__
+// deliberately NOT used here: it's false in a production OTA bundle, which
+// would hide these from the owner too, not just real users - an account
+// gate is the only way to keep them visible for us on the same production
+// channel everyone else is on.
+const OWNER_EMAILS = ["natev9@comcast.net", "nvisionsinc@gmail.com", "nathanrussell9@outlook.com"];
 
 const EMOJIS = ["🛍️","💰","🔥","⚡","🏆","👑","💎","🦁","🐉","🎯","🚀","💪","🌟","🦊","😎","🤑","🏅","🌊","🎪","🦅"];
+
+// Deferred feature: real photo-avatar upload has no backend yet (no
+// avatar_photo column, no Supabase Storage bucket, no upload endpoint -
+// pickPhoto() only ever set local component state, nothing persisted).
+// Flip this back to true once that's built; emoji avatars are the launch
+// avatar system in the meantime.
+const SHOW_PHOTO_UPLOAD = false;
 
 const PLAN_COLOR: Record<string,string> = { free:C.text4, seller:C.green, pro:C.orange, lifetime:C.yellow, business:"#ff8c42" };
 
@@ -49,10 +77,10 @@ function getRank(xp: number) {
   return { ...rank, next, progress };
 }
 
-interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void; }
+interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void; previewNewUser?:boolean; onTogglePreviewNewUser?:()=>void; }
 
 const ps = {
-  navRow:        { flexDirection:"row" as any, alignItems:"center", padding:16, borderBottomWidth:1, borderBottomColor:C.border, gap:12 },
+  navRow:        { flexDirection:"row" as any, alignItems:"center" as any, padding:16, borderBottomWidth:1, borderBottomColor:C.border, gap:12 },
   navIcon:       { fontSize:20, width:28, textAlign:"center" as any },
   navLabel:      { flex:1, color:C.text1, fontSize:14, fontWeight:"600" as any },
   navArrow:      { color:C.text4, fontSize:18 },
@@ -75,7 +103,7 @@ const ps = {
   refNote:       { color:C.text4, fontSize:11, marginTop:8, lineHeight:16 },
 };
 
-export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Props) {
+export default function ProfileScreen({ token, plan, onLogout, onNavigate, previewNewUser, onTogglePreviewNewUser }: Props) {
   const [profile, setProfile]       = useState<any>(null);
   const [stats, setStats]           = useState<any>(null);
   const [earnedIds, setEarnedIds]   = useState<Set<string>>(new Set());
@@ -101,6 +129,29 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
       ]
     );
   }
+
+  // Dev-only: replay first-launch (onboarding slides + land-on-scan nudge +
+  // first-result hint) without reinstalling. Clears the two flags that gate
+  // that flow, plus signs out - the slides only render pre-auth (App.tsx's
+  // !session check), so a real first-launch replay needs a logged-out cold
+  // start, not just clearing storage under an active session.
+  function resetOnboarding() {
+    Alert.alert(
+      "Reset onboarding? (dev)",
+      "Clears onboarding + signs you out. Fully close and reopen the app afterward to see the fresh first-launch flow.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Reset", style: "destructive", onPress: async () => {
+          try {
+            await AsyncStorage.removeItem("@valuiq_onboarded");
+            await AsyncStorage.removeItem("@valuiq_tour_done");
+          } catch {}
+          onLogout();
+          Alert.alert("Onboarding reset", "Fully close and reopen the app to see the fresh first-launch flow.");
+        }},
+      ]
+    );
+  }
   const [loading, setLoading]       = useState(true);
   const [editing, setEditing]       = useState(false);
   const [editName, setEditName]     = useState("");
@@ -116,6 +167,11 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
   const [referralLink, setReferralLink] = useState("");
   const [referrals, setReferrals] = useState({ total: 0, totalEarned: 0, pendingEarned: 0 });
   const [showDeletion, setShowDeletion] = useState(false);
+  // Backend column defaults to true (SUPABASE_PROFILE.sql) - undefined/null
+  // (not yet loaded, or a genuinely missing column on an old row) reads as
+  // "on" to match that default rather than flashing "off" before data loads.
+  const [isPublic, setIsPublic] = useState(true);
+  const [savingPublic, setSavingPublic] = useState(false);
 
   // Decode email from JWT token immediately on mount
   useEffect(() => {
@@ -182,37 +238,51 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
     }
   }
 
+  function applyProfileData(d: { profile: any; stats: any; badges: any[] }) {
+    setProfile(d.profile || {});
+    setStats(d.stats || {});
+    setIsPublic(d.profile?.is_public !== false);
+    if (d.profile?.user_id && !referralLink) buildReferralLink(d.profile.user_id);
+    setEarnedIds(new Set((d.badges || []).map((b:any) => b.id)));
+    // Get email from profile or decode from JWT token
+    const emailFromProfile = d.profile?.email || "";
+    if (emailFromProfile) {
+      setUserEmail(emailFromProfile);
+    } else {
+      // Decode from JWT token
+      try {
+        // Email already set from JWT in useEffect above
+      // This is just a fallback
+      try {
+        const b64 = token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");
+        const pad = b64 + "===".slice(0,(4-b64.length%4)%4);
+        const pl = JSON.parse(decodeURIComponent(escape(atob(pad))));
+        setUserEmail(pl.email || "");
+      } catch {}
+      } catch {}
+    }
+    setEditName(d.profile?.display_name || "");
+    setEditBio(d.profile?.bio || "");
+  }
+
+  // Screens in this app fully unmount/remount on every tab switch, so
+  // without a cache this fired a full network fetch (+ blocking spinner)
+  // every single time Profile was opened, even seconds after the last
+  // visit. peekProfileData is a synchronous cache read: if a recent
+  // (<30s) fetch is on hand - possibly one Dashboard or History already
+  // made, since they all share the same cache key - paint it immediately
+  // with zero network and zero spinner. Only a genuinely stale/missing
+  // cache falls through to a real fetch.
   async function load() {
+    const cached = peekProfileData(token);
+    if (cached) {
+      applyProfileData(cached);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
-    try {
-      const r = await fetch(`${API_BASE}/api/profile?token=${token}`);
-      const d = await r.json();
-      if (d.success) {
-        setProfile(d.profile || {});
-        setStats(d.stats || {});
-        if (d.profile?.user_id && !referralLink) buildReferralLink(d.profile.user_id);
-        setEarnedIds(new Set((d.badges || []).map((b:any) => b.id)));
-        // Get email from profile or decode from JWT token
-        const emailFromProfile = d.profile?.email || "";
-        if (emailFromProfile) {
-          setUserEmail(emailFromProfile);
-        } else {
-          // Decode from JWT token
-          try {
-            // Email already set from JWT in useEffect above
-          // This is just a fallback
-          try {
-            const b64 = token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");
-            const pad = b64 + "===".slice(0,(4-b64.length%4)%4);
-            const pl = JSON.parse(decodeURIComponent(escape(atob(pad))));
-            setUserEmail(pl.email || "");
-          } catch {}
-          } catch {}
-        }
-        setEditName(d.profile?.display_name || "");
-        setEditBio(d.profile?.bio || "");
-      }
-    } catch {}
+    const fresh = await getProfileData(token);
+    if (fresh) applyProfileData(fresh);
     setLoading(false);
   }
 
@@ -237,6 +307,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
           bio: editBio,
           ...(editPhoto ? { avatar_photo: editPhoto } : {}),
           ...(editEmoji ? { avatar_emoji: editEmoji } : {}) }) });
+      invalidateProfileCache(token);
       setProfile((p:any) => ({
         ...p,
         display_name: editName,
@@ -248,10 +319,35 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
     setSaving(false);
   }
 
+  // NOTE: unlike save() above (which POSTs a flat body to a route that has
+  // no POST handler - app/api/profile/route.ts only exports GET and PATCH,
+  // so that call 404/405s and silently no-ops behind its catch{}), this
+  // uses the REAL contract: PATCH with { token, updates: {...} }, matching
+  // the backend's actual allowlist (display_name/avatar_emoji/bio/
+  // is_public). Flagging save()'s bug separately rather than fixing it here
+  // - out of scope for "add the toggle."
+  async function toggleIsPublic() {
+    const next = !isPublic;
+    setIsPublic(next); // optimistic - matches save()'s pattern elsewhere on this screen
+    setSavingPublic(true);
+    try {
+      await fetch(`${API_BASE}/api/profile`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, updates: { is_public: next } }),
+      });
+      invalidateProfileCache(token);
+      setProfile((p: any) => ({ ...p, is_public: next }));
+    } catch {
+      setIsPublic(!next); // revert on failure - never claim a setting saved when it didn't
+    }
+    setSavingPublic(false);
+  }
+
   const xp = Array.from(earnedIds).reduce((sum, id) => sum + (BADGES.find(b=>b.id===id)?.xp||0), 0);
   const rank = getRank(xp);
   const planColor = PLAN_COLOR[plan] || C.text4;
   const displayName = profile?.display_name || profile?.full_name || "Your Profile";
+  const isOwner = OWNER_EMAILS.includes((userEmail || "").toLowerCase());
 
   // Current avatar: photo > emoji > initial
   const currentPhoto = profile?.avatar_photo;
@@ -298,7 +394,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
         <View style={s.nav}>
           <View style={s.logoRow}>
             <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
-            <Text style={s.logoText}>ValuIQ</Text>
+            <Wordmark style={s.logoText}/>
           </View>
           <View style={{flexDirection:"row",gap:12,alignItems:"center"}}>
             {!editing && (
@@ -357,10 +453,18 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
 
               {/* Options */}
               <View style={{gap:10,flex:1}}>
-                <TouchableOpacity style={s.avatarOptBtn} onPress={pickPhoto}>
-                  <Text style={s.avatarOptIcon}>📷</Text>
-                  <Text style={s.avatarOptText}>Upload Photo</Text>
-                </TouchableOpacity>
+                {/* Upload Photo - hidden until photo upload is implemented
+                    (deferred feature: needs a Supabase Storage bucket +
+                    avatar_photo column + upload endpoint, none of which
+                    exist yet - pickPhoto() above only sets local component
+                    state, nothing persists). Code kept in place, not
+                    deleted, so re-enabling later is a one-line flip. */}
+                {SHOW_PHOTO_UPLOAD && (
+                  <TouchableOpacity style={s.avatarOptBtn} onPress={pickPhoto}>
+                    <Text style={s.avatarOptIcon}>📷</Text>
+                    <Text style={s.avatarOptText}>Upload Photo</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity style={s.avatarOptBtn} onPress={()=>setEmojiModal(true)}>
                   <Text style={s.avatarOptIcon}>😎</Text>
                   <Text style={s.avatarOptText}>Choose Emoji</Text>
@@ -457,10 +561,10 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
               <TouchableOpacity style={s.upgradeCard} onPress={()=>onNavigate("upgrade")} activeOpacity={0.85}>
                 <Text style={{fontSize:22}}>🚀</Text>
                 <View style={{flex:1,paddingHorizontal:12}}>
-                  <Text style={s.upgradeCardTitle} numberOfLines={1}>
+                  <Text style={s.upgradeCardTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                     {plan==="free" ? "Upgrade to Seller" : plan==="seller" ? "Upgrade to Pro" : "Go Lifetime"}
                   </Text>
-                  <Text style={s.upgradeCardSub} numberOfLines={1}>
+                  <Text style={s.upgradeCardSub} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
                     {plan==="free" ? "$14.99/mo · unlock Thrift Run, Death Pile & more"
                       : plan==="seller" ? "$34.99/mo · AI Coach, Profit Tracker & more"
                       : "$149 one-time · everything in Pro, no monthly fees"}
@@ -533,7 +637,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
           <View style={{gap:10}}>
             <View style={[s.currentPlan,{borderColor:planColor+"50"}]}>
               <Text style={[s.currentPlanName,{color:planColor}]}>
-                {plan==="lifetime"?"♾️ Lifetime":plan==="titan"?"Titan":plan==="pro"?"🔥 Pro":plan==="seller"?"💪 Seller":"Free"} Plan,
+                {plan==="lifetime"?"♾️ Lifetime":plan==="titan"?"Titan":plan==="pro"?"🔥 Pro":plan==="seller"?"💪 Seller":"Free"} Plan
               </Text>
               <View style={[s.currentPlanBadge,{backgroundColor:planColor+"20",borderColor:planColor+"50"}]}>
                 <Text style={[{color:planColor,fontSize:10,fontWeight:"700"}]}>ACTIVE</Text>
@@ -545,7 +649,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
           onPress={()=>onNavigate("upgrade")}
           activeOpacity={0.85}
         >
-          <Text style={s.upgradeFullBtnText}>{plan==="free" ? "View all plans & upgrade" : "Manage plan & restore purchases"}</Text>
+          <Text style={s.upgradeFullBtnText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{plan==="free" ? "View all plans & upgrade" : "Manage plan & restore purchases"}</Text>
         </TouchableOpacity>
 
             {/* Account deletion - available to ALL users */}
@@ -644,6 +748,19 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
             </View>
           </TouchableOpacity>
         )}
+        {/* Display-side wiring (showing the real name/photo to other users
+            once opted in) isn't built yet - every community/leaderboard row
+            still shows "A reseller" regardless of this setting (see
+            community-flips/route.ts). This just makes the setting exist so
+            it's ready once that wiring lands, and is honest today that
+            toggling it doesn't change what other users see yet. */}
+        <TouchableOpacity style={ps.navRow} onPress={toggleIsPublic} disabled={savingPublic}>
+          <Text style={ps.navIcon}>🏷️</Text>
+          <Text style={ps.navLabel}>Show my name on community wins</Text>
+          <View style={[ps.toggle, isPublic && ps.toggleOn]}>
+            <View style={[ps.toggleThumb, isPublic && ps.toggleThumbOn]}/>
+          </View>
+        </TouchableOpacity>
         <TouchableOpacity style={ps.navRow} onPress={() => onNavigate("history")}>
           <Text style={ps.navIcon}>📋</Text>
           <Text style={ps.navLabel}>Scan History</Text>
@@ -654,9 +771,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
           <Text style={ps.navLabel}>FAQ & Help</Text>
           <Text style={ps.navArrow}>›</Text>
         </TouchableOpacity>
-        {(userEmail === "Natev9@comcast.net" || userEmail === "natev9@comcast.net" || 
-           userEmail === "NVisionsinc@gmail.com" || userEmail === "nvisionsinc@gmail.com" ||
-           userEmail === "NathanRussell9@outlook.com" || userEmail === "nathanrussell9@outlook.com") && (
+        {isOwner && (
           <TouchableOpacity style={[ps.navRow,{borderColor:C.orange+"40",backgroundColor:C.orange+"08"}]} onPress={() => onNavigate("admin")}>
             <Text style={ps.navIcon}>⚙️</Text>
             <Text style={[ps.navLabel,{color:C.orange}]}>Admin Panel</Text>
@@ -690,8 +805,13 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
               style={s.manageBtn}
             >
               <Text style={s.manageBtnTxt}>
-                {plan==="lifetime"?"♾️ Lifetime, Access — Manage, Account":"Manage, Billing & Plan →"}
+                {plan==="lifetime" ? "♾️ Lifetime Access" : "Manage Billing & Plan →"}
               </Text>
+              {/* Lifetime has no recurring subscription to "manage billing"
+                  for, but the button still opens Apple's account page (e.g.
+                  to update payment method on file) - a separate action line
+                  instead of jamming both ideas into one run-on string. */}
+              {plan==="lifetime" && <Text style={s.manageBtnSubTxt}>Manage Account →</Text>}
             </TouchableOpacity>
           )}
 
@@ -710,6 +830,47 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate }: Pro
           <TouchableOpacity onPress={onLogout} style={s.signOutBtn}>
             <Text style={s.signOutBtnTxt}>Sign Out</Text>
           </TouchableOpacity>
+
+          {/* Dev-only testing affordances + build stamp - gated on isOwner
+              (see OWNER_EMAILS above), NOT __DEV__: this app ships to real
+              users over OTA, where __DEV__ is always false - gating on it
+              would hide these from the owner too, everywhere except a local
+              dev-client build. Real users on the production channel must
+              never see any of this; the owner needs to see it on the SAME
+              production build everyone else is running. */}
+          {isOwner && (
+            <>
+              <TouchableOpacity onPress={resetOnboarding} style={s.devResetBtn}>
+                <Text style={s.devResetBtnTxt}>Reset onboarding (dev)</Text>
+              </TouchableOpacity>
+              {/* Preview new-user flow (dev) - unlike Reset onboarding above,
+                  this does NOT sign out or touch @valuiq_onboarded/@valuiq_tour_
+                  done: it's for an existing account with real scans/wins to walk
+                  the exact stranger-from-outreach experience (value screen ->
+                  guided first scan -> result callout -> empty-Wins demo) without
+                  losing or deleting anything real. Toggle again to exit - the
+                  instant it's off, every screen reverts to this account's real
+                  data with nothing re-fetched or lost. */}
+              <TouchableOpacity onPress={onTogglePreviewNewUser} style={s.devResetBtn}>
+                <Text style={s.devResetBtnTxt} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                  {previewNewUser ? "Exit preview new-user flow (dev)" : "Preview new-user flow (dev)"}
+                </Text>
+              </TouchableOpacity>
+              {previewNewUser && (
+                <Text style={[s.devResetBtnTxt, { color: C.green, fontWeight: "800" }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                  Preview mode is ON — your data is untouched.
+                </Text>
+              )}
+
+              {/* Build/version stamp - see BUILD_TAG comment above. updateId
+                  is null on the embedded (store) bundle, before any OTA has
+                  ever applied - shown as "embedded" so that state is
+                  unambiguous too. */}
+              <Text style={s.buildStamp} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                {BUILD_TAG} · {Updates.updateId ? Updates.updateId.slice(0, 8) : "embedded"} · {Updates.channel || "no channel"} · {Updates.runtimeVersion || "?"}
+              </Text>
+            </>
+          )}
         </View>
 
       </ScrollView>
@@ -826,11 +987,15 @@ const s = StyleSheet.create({
   cancelBtnTxt:      { color:C.red, fontSize:14, fontWeight:"700" },
   manageBtn:         { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:12, padding:14, alignItems:"center", marginBottom:10 },
   manageBtnTxt:      { color:C.green, fontSize:13, fontWeight:"700" },
+  manageBtnSubTxt:   { color:C.text3, fontSize:12, fontWeight:"600", marginTop:4 },
   deleteBtn:         { backgroundColor:"#0d0505", borderWidth:1, borderColor:C.red+"30", borderRadius:12, padding:14, alignItems:"center", marginBottom:8 },
   deleteBtnTxt:      { color:C.red+"cc", fontSize:13, fontWeight:"700" },
   accountNote:       { color:C.text4, fontSize:11, textAlign:"center" as any, lineHeight:16, marginBottom:16 },
   signOutBtn:        { borderWidth:1, borderColor:C.border, borderRadius:12, padding:14, alignItems:"center" },
   signOutBtnTxt:     { color:C.text3, fontSize:13, fontWeight:"600" },
+  devResetBtn:       { padding:10, alignItems:"center", marginTop:4 },
+  devResetBtnTxt:    { color:C.text4, fontSize:11, fontWeight:"500", textAlign:"center" as any },
+  buildStamp:        { color:C.text4, fontSize:9, fontWeight:"400", textAlign:"center" as any, marginTop:12, opacity:0.6 },
   deleteAccountCard: { backgroundColor:C.surface, borderWidth:1, borderColor:C.red+"20", borderRadius:14, padding:16 },
   upgradeFullBtn:    { backgroundColor:C.green, borderRadius:14, paddingTop:16, paddingBottom:10, alignItems:"center" },
   upgradeFullBtnText:{ color:C.greenDark, fontSize:15, fontWeight:"900" } });

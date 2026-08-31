@@ -26,7 +26,7 @@ import ViewShot from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
 import Svg, { Defs, RadialGradient, Stop, Rect } from "react-native-svg";
 import { C } from "../lib/theme";
-import { FlexStat } from "../lib/flexReveal";
+import { FlexStat, money } from "../lib/flexReveal";
 import { buildDisplayTitle } from "../lib/saleCapture";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
@@ -131,14 +131,41 @@ interface FlexRevealContentProps {
   // fabricated number, just the true one shown before the crowd comparison
   // that decides the WINNING stat has come back.
   loadingSubStat?: string;
+  // Overrides for the empty-Wins demo reveal (a REAL but not-this-user's
+  // flip) - default text ("LOGGED" / "Real data. Your flip.") implies this
+  // is the viewer's own sale, which a demo card must never claim. Every
+  // other caller (a real logged sale) omits these and gets the unchanged
+  // original copy.
+  eyebrowOverride?: string;
+  footerOverride?: string;
+  // MEASURED BUG: every isLoss-gated element below used to read
+  // `!!stat?.isLoss`, which is FALSE while `stat` is still null - i.e. for
+  // the entire window between the reveal opening and fetchFlexStat()
+  // resolving (a plain fetch with no timeout - see flexReveal.ts - so on a
+  // slow/cold backend this window could last indefinitely). A real loss
+  // rendered fully celebratory (green glow, "Share your win", "Real data.
+  // Your flip.") for that whole window because nothing ever told the card
+  // it was a loss until the network said so. knownNetProfit is the row's
+  // OWN net_profit, already on hand with zero network call the instant the
+  // reveal opens (SaleCaptureCard's save response / HistoryScreen's row) -
+  // used as the isLoss source of truth until/unless stat resolves and
+  // confirms it (the two can never disagree: stat.isLoss is computed from
+  // this exact same column server-side).
+  knownNetProfit?: number | null;
 }
 
-export function FlexRevealContent({ stat, itemName, brand, animate = true, loadingSubStat }: FlexRevealContentProps) {
+export function FlexRevealContent({ stat, itemName, brand, animate = true, loadingSubStat, eyebrowOverride, footerOverride, knownNetProfit }: FlexRevealContentProps) {
   // Scoped to THIS mount - the key={stat ? "resolved" : "loading"} switch
   // one level up (see FlexRevealBody) unmounts the "loading" instance the
   // moment stat resolves, which tears this timer down via the effect's own
   // cleanup before it could ever fire late or bleed into the next item.
   const showShimmer = useDelayedFlag(!stat, 450);
+  // Resellers take losses - a negative net profit isn't a "win" and must
+  // never get the same celebratory treatment (green glow, achievement
+  // badge, fire-emoji streak ribbon) as a real profit. Prefers the resolved
+  // stat once it lands, but never waits on it to know a LOSS - see
+  // knownNetProfit above.
+  const isLoss = stat ? !!stat.isLoss : (knownNetProfit != null && knownNetProfit < 0);
   const parsed = stat ? parseHeadlineNumber(stat.headline) : null;
   const count = useCountUp(parsed?.target ?? 0, animate && !!parsed, 1100);
   const headlineText = parsed
@@ -184,13 +211,16 @@ export function FlexRevealContent({ stat, itemName, brand, animate = true, loadi
 
   return (
     <View style={s.card}>
-      {/* Glow behind the hero stat - react-native-svg, already linked, no new dependency */}
+      {/* Glow behind the hero stat - react-native-svg, already linked, no new
+          dependency. Muted red instead of the celebratory green when this
+          stat is a loss - still a glow (this is still real data worth
+          logging), just not a triumphant one. */}
       <View style={s.glowWrap} pointerEvents="none">
         <Svg width={CARD_W} height={420}>
           <Defs>
             <RadialGradient id="glow" cx="50%" cy="45%" r="55%">
-              <Stop offset="0%" stopColor={C.green} stopOpacity={0.35} />
-              <Stop offset="100%" stopColor={C.green} stopOpacity={0} />
+              <Stop offset="0%" stopColor={isLoss ? C.red : C.green} stopOpacity={isLoss ? 0.16 : 0.35} />
+              <Stop offset="100%" stopColor={isLoss ? C.red : C.green} stopOpacity={0} />
             </RadialGradient>
           </Defs>
           <Rect x={0} y={0} width={CARD_W} height={420} fill="url(#glow)" />
@@ -203,11 +233,31 @@ export function FlexRevealContent({ stat, itemName, brand, animate = true, loadi
       </View>
 
       <View style={s.body}>
-        <Text style={s.eyebrow}>{stat ? TIER_LABEL[stat.tier] : "LOGGED"}</Text>
-        {title ? <Text style={s.itemName} numberOfLines={2}>{title}</Text> : null}
+        {/* A loss never earns tier bragging copy ("PERSONAL RECORD", "BEAT
+            78%") even on the rare edge case a badge condition unrelated to
+            money (fastest sale, streak count) technically qualified - falls
+            back to the same neutral "LOGGED" a no-stat/loading state shows.
+            An explicit eyebrowOverride (e.g. community-flip's "COMMUNITY
+            FLIP") always wins regardless of win/loss. */}
+        <Text style={[s.eyebrow, isLoss && s.eyebrowLoss]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{eyebrowOverride ?? (isLoss ? "LOGGED" : (stat ? TIER_LABEL[stat.tier] : "LOGGED"))}</Text>
+        {/* No numberOfLines cap here on purpose: this is the FULL-detail
+            reveal, opened from a short/truncated card - the one place the
+            complete item name has to show, however many lines that takes.
+            A cap + adjustsFontSizeToFit (the old approach) still truncates
+            once a name is long enough to blow past the shrink floor; wrapping
+            with no cap never does. */}
+        {title ? <Text style={s.itemName}>{title}</Text> : null}
 
         {stat ? (
-          <Text style={s.hero} numberOfLines={1} adjustsFontSizeToFit>{headlineText}</Text>
+          <Text style={[s.hero, isLoss && s.heroLoss]} numberOfLines={1} adjustsFontSizeToFit>{headlineText}</Text>
+        ) : isLoss ? (
+          // Known loss, stat not resolved yet: the real signed amount is
+          // already on hand (knownNetProfit) and a loss never earns tier
+          // bragging copy anyway (see the eyebrow/badge/ribbon suppression
+          // below), so there is nothing left to wait on the network for -
+          // show the honest number now instead of shimmering on a number
+          // we already know.
+          <Text style={[s.hero, s.heroLoss]} numberOfLines={1} adjustsFontSizeToFit>{money(knownNetProfit as number)}</Text>
         ) : showShimmer ? (
           <HeroShimmer />
         ) : (
@@ -218,7 +268,12 @@ export function FlexRevealContent({ stat, itemName, brand, animate = true, loadi
           <View style={[s.heroShimmer, { opacity: 0 }]} />
         )}
 
-        {stat?.badge ? (
+        {/* Badge and streak ribbon are achievement/celebration language
+            ("PERSONAL BEST", "🔥 5th flip this month") - suppressed outright
+            on a loss rather than shown in some muted color, since there's no
+            honest way to badge-stamp a card that lost money without it
+            reading as a mixed signal. */}
+        {stat?.badge && !isLoss ? (
           <Animated.View style={[s.badge, stampStyle]}>
             <Text style={s.badgeText}>{stat.badge}</Text>
           </Animated.View>
@@ -228,14 +283,14 @@ export function FlexRevealContent({ stat, itemName, brand, animate = true, loadi
           <Text style={s.subStat}>{stat ? stat.subStat : loadingSubStat}</Text>
         ) : null}
 
-        {stat?.streakRibbon ? (
+        {stat?.streakRibbon && !isLoss ? (
           <Animated.View style={[s.ribbon, ribbonStyle]}>
             <Text style={s.ribbonText}>{stat.streakRibbon}</Text>
           </Animated.View>
         ) : null}
       </View>
 
-      <Text style={s.footer}>Real data. Your flip.</Text>
+      <Text style={s.footer}>{footerOverride ?? (isLoss ? "Real numbers, logged." : "Real data. Your flip.")}</Text>
     </View>
   );
 }
@@ -247,9 +302,26 @@ interface FlexRevealBodyProps {
   itemName?: string | null;
   brand?: string | null;
   loadingSubStat?: string;
+  eyebrowOverride?: string;
+  footerOverride?: string;
   onClose: () => void;
   onShare?: () => void;
   onLeaderboard?: () => void;
+  // Demo reveal (empty-Wins teaser) has nothing of the viewer's own to
+  // share - overriding just the primary button's label (and pairing it with
+  // an onShare override that routes somewhere useful instead of the image-
+  // share flow) keeps this component's real-flip behavior byte-for-byte
+  // unchanged for every other caller.
+  primaryLabelOverride?: string;
+  // Community-flip reveal (CommunityScreen) has no leaderboard rank of its
+  // own to jump to - the viewer is already IN the community feed the
+  // leaderboard button would send them to. Every other caller (the user's
+  // own logged win) omits this and keeps the real leaderboard button.
+  hideLeaderboardButton?: boolean;
+  // See FlexRevealContentProps.knownNetProfit - same fallback, needed again
+  // here since this component's own isLoss (below) drives the primary
+  // button's label/action independently of FlexRevealContent's copy.
+  knownNetProfit?: number | null;
 }
 
 // The reveal screen's content, with no Modal of its own - meant to be
@@ -257,10 +329,15 @@ interface FlexRevealBodyProps {
 // flow (LogSaleModal), never mounted alongside a second native Modal. The
 // entrance animation triggers on mount, since mounting IS becoming visible
 // here (no separate `visible` prop to watch).
-export function FlexRevealBody({ stat, itemName, brand, loadingSubStat, onClose, onShare, onLeaderboard }: FlexRevealBodyProps) {
+export function FlexRevealBody({ stat, itemName, brand, loadingSubStat, eyebrowOverride, footerOverride, onClose, onShare, onLeaderboard, primaryLabelOverride, hideLeaderboardButton, knownNetProfit }: FlexRevealBodyProps) {
   const entrance = useRef(new Animated.Value(0)).current;
   const shareCardRef = useRef<ViewShot>(null);
   const [sharing, setSharing] = useState(false);
+  // Same stat-or-local fallback as FlexRevealContent (see knownNetProfit) -
+  // this used to be `!!stat?.isLoss` alone, which is why a known loss could
+  // still get the "Share your win ->" button/action while fetchFlexStat was
+  // in flight (or never resolved on a slow backend).
+  const isLoss = stat ? !!stat.isLoss : (knownNetProfit != null && knownNetProfit < 0);
 
   useEffect(() => {
     Animated.spring(entrance, { toValue: 1, friction: 7, tension: 50, useNativeDriver: true }).start();
@@ -324,7 +401,7 @@ export function FlexRevealBody({ stat, itemName, brand, loadingSubStat, onClose,
               stamp/ribbon entrance animations replay for the real numbers
               instead of silently snapping in, since their own effects are
               keyed to mount, not to `stat` changing. */}
-          <FlexRevealContent key={stat ? "resolved" : "loading"} stat={stat} itemName={itemName} brand={brand} loadingSubStat={loadingSubStat} />
+          <FlexRevealContent key={stat ? "resolved" : "loading"} stat={stat} itemName={itemName} brand={brand} loadingSubStat={loadingSubStat} eyebrowOverride={eyebrowOverride} footerOverride={footerOverride} knownNetProfit={knownNetProfit} />
         </Animated.View>
       </View>
 
@@ -336,29 +413,38 @@ export function FlexRevealBody({ stat, itemName, brand, loadingSubStat, onClose,
           buttons (siblings of the card, not part of it) out of the image. */}
       <View style={{ position: "absolute", top: 0, left: -9999 }} pointerEvents="none">
         <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1, result: "tmpfile" }}>
-          <FlexRevealContent stat={stat} itemName={itemName} brand={brand} animate={false} />
+          <FlexRevealContent stat={stat} itemName={itemName} brand={brand} animate={false} eyebrowOverride={eyebrowOverride} footerOverride={footerOverride} knownNetProfit={knownNetProfit} />
         </ViewShot>
       </View>
 
       <View style={s.actions}>
         <TouchableOpacity
           style={s.primaryBtn}
-          onPress={onShare ?? shareFlexImage}
+          // A loss isn't a "win" to share - a caller that already customized
+          // this button (community-flip's onShare->navigate, WinsDemoCard's
+          // onShare->onScanNow) always keeps ITS OWN explicit choice
+          // regardless of win/loss; only the plain "share my actual sale"
+          // default (no onShare/primaryLabelOverride passed at all - the
+          // real personal-win path) swaps to closing the card instead of
+          // generating a share image for a financial loss.
+          onPress={onShare ?? (isLoss ? onClose : shareFlexImage)}
           disabled={sharing}
         >
           {/* numberOfLines+adjustsFontSizeToFit as a backstop against
               wrapping/overflow on narrow screens - same guard applied across
               this sweep, not a copy change (that's a separate, undecided fix). */}
           <Text style={s.primaryBtnText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
-            {sharing ? "Preparing…" : "Share your win →"}
+            {sharing ? "Preparing…" : (primaryLabelOverride ?? (isLoss ? "Done" : "Share your win →"))}
           </Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={s.secondaryBtn}
-          onPress={onLeaderboard ?? (() => Alert.alert("Coming soon", "The leaderboard is next up."))}
-        >
-          <Text style={s.secondaryBtnText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>See the leaderboard →</Text>
-        </TouchableOpacity>
+        {hideLeaderboardButton ? null : (
+          <TouchableOpacity
+            style={s.secondaryBtn}
+            onPress={onLeaderboard ?? (() => Alert.alert("Coming soon", "The leaderboard is next up."))}
+          >
+            <Text style={s.secondaryBtnText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>See the leaderboard →</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -372,21 +458,26 @@ interface FlexRevealCardProps {
   itemName?: string | null;
   brand?: string | null;
   loadingSubStat?: string;
+  eyebrowOverride?: string;
+  footerOverride?: string;
+  primaryLabelOverride?: string;
+  hideLeaderboardButton?: boolean;
   onClose: () => void;
   onShare?: () => void;
   onLeaderboard?: () => void;
+  knownNetProfit?: number | null;
 }
 
 // Standalone Modal-wrapped version, for any future spot that wants to show
 // the reveal on its own (not mid-flow after LogSaleModal - that path renders
 // FlexRevealBody directly instead, see LogSaleModal.tsx).
 export default function FlexRevealCard({
-  visible, stat, itemName, brand, loadingSubStat, onClose, onShare, onLeaderboard,
+  visible, stat, itemName, brand, loadingSubStat, eyebrowOverride, footerOverride, primaryLabelOverride, hideLeaderboardButton, onClose, onShare, onLeaderboard, knownNetProfit,
 }: FlexRevealCardProps) {
   if (!visible) return null;
   return (
     <Modal visible={visible} animationType="fade" transparent={false} onRequestClose={onClose}>
-      <FlexRevealBody stat={stat} itemName={itemName} brand={brand} loadingSubStat={loadingSubStat} onClose={onClose} onShare={onShare} onLeaderboard={onLeaderboard} />
+      <FlexRevealBody stat={stat} itemName={itemName} brand={brand} loadingSubStat={loadingSubStat} eyebrowOverride={eyebrowOverride} footerOverride={footerOverride} primaryLabelOverride={primaryLabelOverride} hideLeaderboardButton={hideLeaderboardButton} onClose={onClose} onShare={onShare} onLeaderboard={onLeaderboard} knownNetProfit={knownNetProfit} />
     </Modal>
   );
 }
@@ -415,10 +506,17 @@ const s = StyleSheet.create({
   brandWord: { color: C.text2, fontSize: 15, fontWeight: "800", letterSpacing: 3 },
   body: { alignItems: "center" },
   eyebrow: { color: C.green, fontSize: 13, fontWeight: "800", letterSpacing: 2, marginBottom: 10, textTransform: "uppercase" },
+  // Muted gray instead of the celebratory green - even neutral "LOGGED" copy
+  // still reads as a win if it's rendered in the app's money-success color.
+  eyebrowLoss: { color: C.text3 },
   itemName: { color: C.text2, fontSize: 16, fontWeight: "600", textAlign: "center", marginBottom: 18, maxWidth: 280 },
   hero: {
     color: C.text1, fontSize: 76, fontWeight: "900", letterSpacing: -2, textAlign: "center",
     textShadowColor: C.green + "55", textShadowRadius: 30, textShadowOffset: { width: 0, height: 0 },
+  },
+  heroLoss: {
+    color: C.red,
+    textShadowColor: C.red + "40",
   },
   heroShimmer: {
     width: 190, height: 66, borderRadius: 16, backgroundColor: C.surfaceHigh,

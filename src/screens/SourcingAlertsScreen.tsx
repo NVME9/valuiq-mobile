@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import Wordmark from "../components/Wordmark";
 import { API_BASE } from "../lib/api";
 
 interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void; }
@@ -58,7 +59,7 @@ export default function SourcingAlertsScreen({ token, plan, onNavigate, onBack }
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
       <View style={s.nav}>
         <TouchableOpacity onPress={()=>onBack?.()} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
-        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Text style={s.logoText}>ValuIQ</Text></View>
+        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
         {isPaid&&<TouchableOpacity onPress={()=>setCreating(v=>!v)} style={[s.navBtn,{marginLeft:"auto" as any,borderColor:C.green+"40"}]}><Text style={[s.navBtnText,{color:C.green}]}>+ New Alert</Text></TouchableOpacity>}
       </View>
       <ScrollView contentContainerStyle={{padding:20,paddingBottom:60}} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>}>

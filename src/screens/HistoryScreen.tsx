@@ -6,14 +6,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
-import Coachmark from "../components/Coachmark";
 import LogSaleModal from "../components/LogSaleModal";
 import PhotoLightbox from "../components/PhotoLightbox";
 import FlipActionsRow from "../components/FlipActionsRow";
 import FlexRevealCard from "../components/FlexRevealCard";
+import WinsDemoCard from "../components/WinsDemoCard";
 import { toPendingScan } from "../lib/saleCapture";
 import { fetchFlexStat, cacheFlexStat, readCachedFlexStat, concreteLine, FlexStat } from "../lib/flexReveal";
-import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty, getWinsSummary } from "../lib/api";
+import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty, getWinsSummary, peekProfileData, getScanHistory, peekScanHistory, invalidateScanHistoryCache, getThriftRuns, peekThriftRuns, invalidateThriftRunsCache } from "../lib/api";
 
 function shareMsg(name: string, profit?: number, platform?: string): string {
   const p = (platform || "").split("|||")[0];
@@ -24,8 +24,13 @@ function shareMsg(name: string, profit?: number, platform?: string): string {
 interface Props {
   token:string; plan:string; scansLeft:number|null;
   setScansLeft:(n:number|null)=>void;
-  onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void;
-  tourStep?: string|null; advanceTour?: (s: string|null) => void; skipTour?: () => void;
+  onNavigate:(s:string, data?:any)=>void; onBack?:()=>void; onLogout:()=>void;
+  // Dev-only "preview new-user flow" override (see Profile screen) - forces
+  // this whole tab to render as if the account has zero logged wins, even
+  // when the real winsSummary/scans/thrift/specialty state says otherwise.
+  // Never mutates or drops the real state underneath - just a display-layer
+  // override that disappears the instant preview is toggled off.
+  previewNewUser?: boolean;
 }
 
 type HistoryTab = "scans" | "thrift" | "specialty";
@@ -54,21 +59,39 @@ function isThinData(full: any): boolean | null {
   return false;
 }
 
-export default function HistoryScreen({ token, plan, onNavigate, onBack, tourStep, advanceTour, skipTour }: Props) {
+export default function HistoryScreen({ token, plan, onNavigate, onBack, previewNewUser }: Props) {
   const [tab, setTab]               = useState<HistoryTab>("scans");
-  const [scans, setScans]           = useState<any[]>([]);
-  const [thriftRuns, setThriftRuns] = useState<any[]>([]);
-  const [specialtyScans, setSpecialtyScans] = useState<any[]>([]);
+  // Instant-paint from cache if this exact list (same token/type/limit) was
+  // already fetched this session (e.g. hopping Home -> Wins -> Home) -
+  // mirrors winsSummary's peekProfileData below. A fresh install/first-ever
+  // visit this session has nothing to peek and falls back to [] + the
+  // `loading` spinner exactly like before.
+  const [scans, setScans]           = useState<any[]>(() => peekScanHistory(token, "scan", 50) || []);
+  const [thriftRuns, setThriftRuns] = useState<any[]>(() => peekThriftRuns(token) || []);
+  const [specialtyScans, setSpecialtyScans] = useState<any[]>(() => peekScanHistory(token, "specialty", 50) || []);
   // The ONE real wins total - from /api/profile's unbounded, Specialty-
   // inclusive aggregate (getWinsSummary in lib/api.ts), the SAME source
   // Dashboard and Profile read. Replaces a prior local computation that
   // only summed this screen's own `scans` (type=scan, limit=50) state -
   // which silently excluded any win logged from the Specialty tab, even
   // though that tab's own cards already show a SOLD badge for it.
-  const [winsSummary, setWinsSummary] = useState<{ count: number; total: number }>({ count: 0, total: 0 });
-  const [loading, setLoading]       = useState(true);
+  // Instant-paint from cache if Dashboard/Profile already fetched it
+  // recently (see getProfileData in lib/api.ts).
+  const [winsSummary, setWinsSummary] = useState<{ count: number; total: number }>(() => {
+    const cached = peekProfileData(token);
+    return cached?.stats ? { count: Number(cached.stats.soldCount) || 0, total: Number(cached.stats.soldTotal) || 0 } : { count: 0, total: 0 };
+  });
+  // Skip the full-screen spinner when a cached scan list already primed
+  // `scans` above - the list paints immediately, and loadData() below still
+  // fires to silently refresh it in the background.
+  const [loading, setLoading]       = useState(() => !peekScanHistory(token, "scan", 50));
   const [refreshing, setRefreshing] = useState(false);
   const [showAll, setShowAll]       = useState(false);
+  // Scans-tab filter row (All/Sold/Wins/Losses) - client-side only, over
+  // rows already loaded by loadData(). Undifferentiated "everything mixed
+  // together, scroll to find it" was the actual complaint: a user couldn't
+  // see just their wins or just their losses without scrolling the whole list.
+  const [scanFilter, setScanFilter] = useState<"all"|"sold"|"wins"|"losses">("all");
   const [expanded, setExpanded]     = useState<string|null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected]     = useState<Record<string, boolean>>({});
@@ -83,7 +106,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
   const [rerunning, setRerunning]   = useState(false);
   const [logSaleScan, setLogSaleScan] = useState<any|null>(null);
   const [viewingPhoto, setViewingPhoto] = useState<string|null>(null);
-  const [viewingReveal, setViewingReveal] = useState<{ stat: FlexStat | null; itemName: string; brand: string|null; loadingSubStat?: string } | null>(null);
+  const [viewingReveal, setViewingReveal] = useState<{ stat: FlexStat | null; itemName: string; brand: string|null; loadingSubStat?: string; netProfit: number | null } | null>(null);
 
   // Lets a win be revisited from History instead of only ever seeing the
   // Flex Reveal once, at log time - and does it WITHOUT the 1-2s dead-button
@@ -97,18 +120,26 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
   function openReveal(item: any) {
     const brand = item.brand && item.brand !== "Unknown" ? item.brand : null;
     const itemName = item.item_name || "Item";
+    // The row's own known profit sign, available with zero network call -
+    // passed through as knownNetProfit so a loss renders honestly even
+    // while (or if) fetchFlexStat below is still in flight. See
+    // FlexRevealCard.tsx's knownNetProfit comment for the full incident.
+    const netProfit = item.net_profit ?? item.profit ?? null;
 
-    const cached = readCachedFlexStat(item.specialty_data);
+    // netProfit passed through so a cached stat's isLoss gets re-derived
+    // from the real number rather than trusted from the (possibly stale,
+    // pre-isLoss-field) cached blob - see readCachedFlexStat's comment.
+    const cached = readCachedFlexStat(item.specialty_data, netProfit);
     if (cached) {
-      setViewingReveal({ stat: cached, itemName, brand });
+      setViewingReveal({ stat: cached, itemName, brand, netProfit });
       return;
     }
 
     const loadingSubStat = concreteLine({
-      netProfit: item.net_profit ?? item.profit ?? null,
+      netProfit,
       daysToSale: item.days_to_sale ?? null,
     });
-    setViewingReveal({ stat: null, itemName, brand, loadingSubStat });
+    setViewingReveal({ stat: null, itemName, brand, loadingSubStat, netProfit });
 
     fetchFlexStat(token, item.id).then(async (stat) => {
       if (!stat) {
@@ -203,6 +234,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
         };
         // Persist to DB (PATCH preserves image_url / thumbnail)
         try { await updateScan(token, scan.id, updates); } catch {}
+        invalidateScanHistoryCache(token);
         setScans(prev => prev.map(s => s.id === scan.id ? {
           ...s, ...updates,
           profit: data.netProfit ?? s.profit,
@@ -263,6 +295,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
           specialty_data: JSON.stringify(r),
         };
         try { await updateScan(token, item.id, updates); } catch {}
+        invalidateScanHistoryCache(token);
         setSpecialtyScans(prev => prev.map(s => s.id === item.id ? { ...s, ...updates } : s));
         closeEditor();
         setExpanded(item.id);
@@ -276,22 +309,20 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
   }
   const loadData = useCallback(async () => {
     if (!token) { setLoading(false); return; }
-    try {
-      const [scanRes, thriftRes, specRes] = await Promise.all([
-        fetch(`${API_BASE}/api/scan-history?token=${token}&type=scan&limit=50`),
-        fetch(`${API_BASE}/api/thrift-run?token=${token}`),
-        fetch(`${API_BASE}/api/scan-history?token=${token}&type=specialty&limit=50`),
-      ]);
-      const scanData = await scanRes.json();
-      const thriftJson = await thriftRes.json();
-      const specData = await specRes.json();
-      setScans(Array.isArray(scanData) ? scanData : []);
-      setThriftRuns(thriftJson && thriftJson.success && Array.isArray(thriftJson.runs) ? thriftJson.runs : []);
-      setSpecialtyScans(Array.isArray(specData) ? specData : []);
-    } catch {}
-    try {
-      setWinsSummary(await getWinsSummary(token));
-    } catch {}
+    // All four calls are independent - fire them together instead of the
+    // previous await-the-first-three-then-await-summary chain, which added
+    // a full extra round trip (usually served from cache now anyway, see
+    // getWinsSummary in lib/api.ts) onto every load.
+    const [scanRes, thriftRes, specRes, summaryRes] = await Promise.allSettled([
+      getScanHistory(token, "scan", 50),
+      getThriftRuns(token),
+      getScanHistory(token, "specialty", 50),
+      getWinsSummary(token),
+    ]);
+    setScans(scanRes.status === "fulfilled" && Array.isArray(scanRes.value) ? scanRes.value : []);
+    setThriftRuns(thriftRes.status === "fulfilled" && Array.isArray(thriftRes.value) ? thriftRes.value : []);
+    setSpecialtyScans(specRes.status === "fulfilled" && Array.isArray(specRes.value) ? specRes.value : []);
+    if (summaryRes.status === "fulfilled") setWinsSummary(summaryRes.value);
     setLoading(false);
     setRefreshing(false);
   }, [token]);
@@ -304,6 +335,11 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
   async function deleteOne(id: string) {
     try {
       await fetch(`${API_BASE}/api/scan-history?token=${token}&id=${id}`, { method: "DELETE" });
+      // Local state (scans/thriftRuns) is updated in-place by both callers
+      // right after this resolves, but the CACHED list getScanHistory() will
+      // serve on the next mount still has this row - invalidate so a later
+      // tab-hop back doesn't resurrect a deleted item from a stale cache.
+      invalidateScanHistoryCache(token);
     } catch {}
   }
 
@@ -395,6 +431,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
             bestPlatform: updatedItem.bestPlatform,
             thumb: item.thumb || "", reasoning: item.reasoning || "", listingTitle: item.listingTitle || "",
           });
+          invalidateThriftRunsCache(token);
         } catch {}
         // Update local state: replace the item inside its run + recompute run totals
         setThriftRuns(prev => prev.map(r => {
@@ -417,26 +454,38 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
     setRerunning(false);
   }
 
-  const displayScans  = showAll ? scans : scans.slice(0, 10);
+  const filteredScans = scans.filter(sc => {
+    if (scanFilter === "all") return true;
+    const sold = sc.sold_status === "sold";
+    if (scanFilter === "sold") return sold;
+    const p = Number(sc.profit ?? sc.net_profit ?? 0);
+    if (scanFilter === "wins") return sold && p > 0;
+    if (scanFilter === "losses") return sold && p < 0;
+    return true;
+  });
+  const displayScans  = showAll ? filteredScans : filteredScans.slice(0, 10);
   const displayThrift = thriftRuns;
 
   const buyScans    = scans.filter(s => (s.verdict||s.decision||"").toUpperCase() === "BUY");
   const selCount    = selectedIds().length;
 
+  // Preview override (dev, see Profile's "Preview new-user flow"): render
+  // this whole tab exactly as a brand-new user would see it - zero wins,
+  // zero lists, everywhere this screen displays them - without touching the
+  // real `scans`/`thriftRuns`/`specialtyScans`/`winsSummary` state underneath.
+  // Toggling preview off needs no re-fetch: the real arrays were never
+  // mutated, only which value each render reads from.
+  const effWinsSummary  = previewNewUser ? { count: 0, total: 0 } : winsSummary;
+  const effScans        = previewNewUser ? [] : scans;
+  const effDisplayScans = previewNewUser ? [] : displayScans;
+  const effDisplayThrift= previewNewUser ? [] : displayThrift;
+  const effSpecialty    = previewNewUser ? [] : specialtyScans;
+  const effBuyScans     = previewNewUser ? [] : buyScans;
+  const effThriftRuns   = previewNewUser ? [] : thriftRuns;
+
   return (
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
-      <Coachmark
-        visible={tourStep === "history"}
-        step={5} totalSteps={5}
-        title="Everything saves here"
-        body="Every scan lands in your history. Tap any item to revisit it, or re-run the analysis anytime for fresh prices. You're ready to flip!"
-        ctaLabel="Start flipping"
-        anchor="center"
-        onNext={() => skipTour && skipTour()}
-        onSkip={() => skipTour && skipTour()}
-      />
-
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={onBack || (() => onNavigate("dashboard"))}>
@@ -451,10 +500,10 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
       {/* Summary stats */}
       <View style={s.statsBar}>
         {[
-          [scans.length, "Scans"],
-          [buyScans.length, "BUY Finds"],
-          [`$${Math.round(winsSummary.total)}`, "Made"],
-          [thriftRuns.length, "Runs"],
+          [effScans.length, "Scans"],
+          [effBuyScans.length, "BUY Finds"],
+          [`$${Math.round(effWinsSummary.total)}`, "Made"],
+          [effThriftRuns.length, "Runs"],
         ].map(([val, label]) => (
           <View key={label as string} style={s.statItem}>
             <Text style={[s.statVal, {color:C.green}]}>{val}</Text>
@@ -462,6 +511,15 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
           </View>
         ))}
       </View>
+
+      {/* BEAT 4: empty-Wins "here's what your wins will look like" demo -
+          gated on the real cross-tab wins total (not just this subtab's own
+          list), so it shows/hides correctly no matter which subtab is
+          active and disappears the instant a real win is logged. previewNewUser
+          forces this on even with real wins (see effWinsSummary above). */}
+      {!loading && effWinsSummary.count === 0 && (
+        <WinsDemoCard onScanNow={() => onNavigate("scanner")} />
+      )}
 
       {/* Tabs */}
       <View style={s.tabs}>
@@ -494,23 +552,75 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
         <ScrollView
           contentContainerStyle={s.scroll}
           refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.green}
-            onRefresh={() => { setRefreshing(true); loadData(); }}/>}
+            onRefresh={() => { setRefreshing(true); invalidateScanHistoryCache(token); invalidateThriftRunsCache(token); loadData(); }}/>}
         >
           {/* SCANS TAB */}
           {tab === "scans" && (
             <>
-              {displayScans.length === 0 ? (
-                <View style={s.empty}>
-                  <Text style={s.emptyTxt}>No scans yet</Text>
-                  <TouchableOpacity style={s.emptyBtn} onPress={() => onNavigate("scanner")}>
-                    <Text style={s.emptyBtnTxt}>Scan Your First Item</Text>
+              {/* Filter row - client-side only, over rows already in `scans`.
+                  Was undifferentiated: every scan (BUY/PASS/sold/unsold, win
+                  or loss) in one mixed scroll with no way to isolate wins or
+                  losses. */}
+              <View style={s.scanFilterRow}>
+                {([
+                  ["all", "All"], ["sold", "Sold"], ["wins", "Wins"], ["losses", "Losses"],
+                ] as [typeof scanFilter, string][]).map(([key, label]) => (
+                  <TouchableOpacity
+                    key={key}
+                    style={[s.scanFilterChip, scanFilter === key && s.scanFilterChipActive]}
+                    onPress={() => setScanFilter(key)}
+                  >
+                    <Text style={[s.scanFilterChipTxt, scanFilter === key && s.scanFilterChipTxtActive]}>{label}</Text>
                   </TouchableOpacity>
-                </View>
+                ))}
+              </View>
+
+              {effDisplayScans.length === 0 ? (
+                scanFilter !== "all" ? (
+                  // A real, empty RESULT for this filter (e.g. no losses on
+                  // file) - never "scan your first item" (wrong call to
+                  // action for a filtered view) or "couldn't load" (the base
+                  // unfiltered list loaded fine; this filter just matched
+                  // nothing).
+                  <View style={s.empty}>
+                    <Text style={s.emptyTxt}>No {scanFilter} yet</Text>
+                    <TouchableOpacity style={s.emptyBtn} onPress={() => setScanFilter("all")}>
+                      <Text style={s.emptyBtnTxt}>Show All</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) :
+                // MEASURED BUG: an empty `scans` list used to always mean
+                // "Scan Your First Item," even when it was really a timed-
+                // out/failed fetch with nothing to fall back on (a cold
+                // cache - see getScanHistory's stale-fallback in api.ts,
+                // which covers every OTHER case). effWinsSummary comes from
+                // a separately-cached /api/profile call, so a real "you
+                // have N sold items" here flatly contradicts an empty list -
+                // that combination means the load failed, not that the
+                // account is empty, and must never tell a user with real
+                // history to "scan your first item."
+                effWinsSummary.count > 0 ? (
+                  <View style={s.empty}>
+                    <Text style={s.emptyTxt}>Couldn't load your scans</Text>
+                    <TouchableOpacity style={s.emptyBtn} onPress={() => { invalidateScanHistoryCache(token); loadData(); }}>
+                      <Text style={s.emptyBtnTxt}>Retry</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={s.empty}>
+                    <Text style={s.emptyTxt}>No scans yet</Text>
+                    <TouchableOpacity style={s.emptyBtn} onPress={() => onNavigate("scanner")}>
+                      <Text style={s.emptyBtnTxt}>Scan Your First Item</Text>
+                    </TouchableOpacity>
+                  </View>
+                )
               ) : (
-                displayScans.map(scan => {
+                effDisplayScans.map(scan => {
                   const isSel = !!selected[scan.id];
                   let full: any = null;
                   try { full = scan.specialty_data ? JSON.parse(scan.specialty_data) : null; } catch { full = null; }
+                  const scanProfit = scan.profit || scan.net_profit || 0;
+                  const scanIsLoss = scanProfit < 0;
                   return (
                   <TouchableOpacity
                     key={scan.id}
@@ -550,12 +660,16 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                             </Text>
                           </View>
                         )}
-                        {(scan.profit||scan.net_profit||0) > 0 && (
-                          scan.sold_status === "sold" ? (
-                            <Text style={s.soldProfit}>${Math.round(scan.profit||scan.net_profit||0)} made</Text>
-                          ) : (
-                            <Text style={s.profit}>+${Math.round(scan.profit||scan.net_profit||0)} est.</Text>
-                          )
+                        {scan.sold_status === "sold" ? (
+                          // A sold card ALWAYS shows a signed dollar amount -
+                          // green for a real profit, red for a real loss.
+                          // Never blank: a loss that renders as nothing reads
+                          // as "this win is missing," not as an honest loss.
+                          <Text style={scanIsLoss ? s.soldLoss : s.soldProfit}>
+                            {scanIsLoss ? `-$${Math.round(Math.abs(scanProfit))}` : `+$${Math.round(scanProfit)} made`}
+                          </Text>
+                        ) : (
+                          scanProfit > 0 && <Text style={s.profit}>+${Math.round(scanProfit)} est.</Text>
                         )}
                       </View>
                     </View>
@@ -675,10 +789,10 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                 })
               )}
 
-              {scans.length > 10 && !selectMode && (
+              {effScans.length > 10 && !selectMode && (
                 <TouchableOpacity style={s.showMore} onPress={() => setShowAll(v => !v)}>
                   <Text style={s.showMoreTxt}>
-                    {showAll ? "Show Less" : `Show ${scans.length - 10} More`}
+                    {showAll ? "Show Less" : `Show ${effScans.length - 10} More`}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -688,7 +802,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
           {/* THRIFT RUNS TAB */}
           {tab === "thrift" && (
             <>
-              {displayThrift.length === 0 ? (
+              {effDisplayThrift.length === 0 ? (
                 <View style={s.empty}>
                   <Text style={s.emptyTxt}>No Thrift Runs yet</Text>
                   <TouchableOpacity style={s.emptyBtn} onPress={() => onNavigate("thrift-run")}>
@@ -696,7 +810,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                   </TouchableOpacity>
                 </View>
               ) : (
-                displayThrift.map(run => {
+                effDisplayThrift.map(run => {
                   const isSel = !!selected[run.id];
                   const items = (() => { try { return JSON.parse(run.items || "[]"); } catch { return []; } })();
                   return (
@@ -718,7 +832,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
                         <View style={{flex:1}}>
                           <Text style={s.cardName} numberOfLines={1}>{run.store_name || "Thrift Run"}</Text>
                           <Text style={s.cardMeta}>{new Date(run.created_at).toLocaleDateString()}</Text>
-                          <Text style={s.cardPlatform}>{(run.total_items||items.length)} items  -  {run.buy_count||0} BUY</Text>
+                          <Text style={s.cardPlatform} numberOfLines={1}>{(run.total_items||items.length)} items · {run.buy_count||0} BUY</Text>
                         </View>
                         <View style={s.cardRight}>
                           <Text style={[s.profit, {fontSize:16}]}>+${Math.round(run.total_profit||0)}</Text>
@@ -805,13 +919,13 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
 
           {tab === "specialty" && (
             <>
-              {specialtyScans.length === 0 ? (
+              {effSpecialty.length === 0 ? (
                 <View style={s.emptyWrap}>
                   <Text style={s.emptyText}>No specialty appraisals yet.</Text>
                   <Text style={s.emptySub}>Run the Specialty Scanner to appraise sneakers, watches, wine, cards and more.</Text>
                 </View>
               ) : (
-                specialtyScans.map(item => {
+                effSpecialty.map(item => {
                   const isSel = !!selected[item.id];
                   let appr: any = {};
                   try { appr = JSON.parse(item.specialty_data || "{}"); } catch { appr = {}; }
@@ -958,7 +1072,8 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
         visible={!!logSaleScan}
         token={token}
         scan={logSaleScan ? toPendingScan(logSaleScan) : null}
-        onClose={() => { setLogSaleScan(null); loadData(); }}
+        onClose={() => { setLogSaleScan(null); invalidateScanHistoryCache(token); loadData(); }}
+        onLeaderboard={() => { setLogSaleScan(null); onNavigate("community", { tab: "leaderboard" }); }}
       />
 
       <FlexRevealCard
@@ -967,7 +1082,9 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, tourSte
         itemName={viewingReveal?.itemName}
         brand={viewingReveal?.brand}
         loadingSubStat={viewingReveal?.loadingSubStat}
+        knownNetProfit={viewingReveal?.netProfit ?? null}
         onClose={() => setViewingReveal(null)}
+        onLeaderboard={() => { setViewingReveal(null); onNavigate("community", { tab: "leaderboard" }); }}
       />
 
       <PhotoLightbox uri={viewingPhoto} onClose={() => setViewingPhoto(null)} />
@@ -990,6 +1107,11 @@ const s = StyleSheet.create({
   tabActive:     { borderBottomWidth:2, borderBottomColor:C.green },
   tabTxt:        { color:C.text4, fontSize:13, fontWeight:"700" },
   tabActiveTxt:  { color:C.green },
+  scanFilterRow:        { flexDirection:"row", gap:8, paddingHorizontal:16, paddingTop:12, paddingBottom:4 },
+  scanFilterChip:       { paddingHorizontal:14, paddingVertical:6, borderRadius:100, borderWidth:1, borderColor:C.border, backgroundColor:C.surface },
+  scanFilterChipActive: { borderColor:C.green, backgroundColor:C.greenBg },
+  scanFilterChipTxt:      { color:C.text3, fontSize:12, fontWeight:"700" },
+  scanFilterChipTxtActive:{ color:C.green },
   selectBar:     { flexDirection:"row", alignItems:"center", justifyContent:"space-between", paddingHorizontal:16, paddingVertical:10, backgroundColor:C.surface, borderBottomWidth:1, borderBottomColor:C.border },
   selectCount:   { color:C.text2, fontSize:13, fontWeight:"600" },
   deleteSelectedBtn: { backgroundColor:"#ff5a5a", borderRadius:8, paddingHorizontal:16, paddingVertical:8 },
@@ -1020,6 +1142,7 @@ const s = StyleSheet.create({
   soldBadge:     { borderRadius:8, paddingHorizontal:8, paddingVertical:4, backgroundColor:C.gold+"20", borderWidth:1, borderColor:C.gold+"50" },
   soldBadgeTxt:  { fontSize:9, fontWeight:"900", color:C.gold, letterSpacing:0.3 },
   soldProfit:    { color:C.gold, fontSize:15, fontWeight:"800" },
+  soldLoss:      { color:C.red, fontSize:15, fontWeight:"800" },
   expanded:      { borderTopWidth:1, borderTopColor:C.border, padding:14 },
   expandedRow:   { flexDirection:"row", justifyContent:"space-around", marginBottom:14 },
   expandedStat:  { alignItems:"center" },

@@ -6,6 +6,7 @@ if (require("react-native").Platform.OS !== "web") { try { const c = require("ex
 import * as ImagePicker from "expo-image-picker";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
+import Wordmark from "../components/Wordmark";
 import ShareButton from "../components/ShareButton";
 import { API_BASE } from "../lib/api";
 
@@ -124,7 +125,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <View style={s.nav}>
         <TouchableOpacity onPress={()=>onBack?.()} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
-        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Text style={s.logoText}>ValuIQ</Text></View>
+        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
       </View>
       <ScrollView contentContainerStyle={{ padding:24, paddingBottom:60, alignItems:"center" }}>
         <Text style={{ fontSize:64, marginBottom:16 }}>🛍️</Text>
@@ -170,7 +171,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
   if (phase==="done") return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
-        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Text style={s.logoText}>ValuIQ</Text></View>
+        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
         <TouchableOpacity onPress={newRun} style={[s.navBtn,{marginLeft:"auto" as any}]}><Text style={s.navBtnText}>New Run</Text></TouchableOpacity>
       </View>
       <ScrollView contentContainerStyle={{ padding:20, paddingBottom:60 }}>

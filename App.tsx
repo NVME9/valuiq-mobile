@@ -6,7 +6,9 @@ import {
 import { C } from "./src/lib/theme";
 import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken , hasProAccess } from "./src/lib/api";
 import { supabase } from "./src/lib/supabase";
+import * as Updates from "expo-updates";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { isBiometricEnabled, saveBiometricRefreshToken } from "./src/lib/biometrics";
 import LoginScreen from "./src/screens/LoginScreen";
 import ScannerScreen from "./src/screens/ScannerScreen";
 import DashboardScreen from "./src/screens/DashboardScreen";
@@ -49,6 +51,39 @@ export type Screen =
   "bundle"|"alerts"|"leaderboard"|"inventory"|"profit-tracker"|"deal-hunter"|"ai-coach"|"history"|"faq"|"admin"|"titan"|"import-sales";
 
 const { height } = Dimensions.get("window");
+
+// Races any promise against a timeout - used for the expo-updates check on
+// launch (see init()) so a slow/unreachable update service can never hang
+// first paint the way an un-timed backend call did earlier in this app's
+// history (see api.ts).
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+  ]);
+}
+
+// MEASURED BUG: LoginScreen's biometric quick-login reads its OWN separately-
+// stored refresh token (biometrics.ts's saveBiometricRefreshToken), written
+// only at the moment biometrics are enabled/last used - every OTHER refresh
+// (init()'s session-restore, the AppState foreground-resume listener) only
+// updated the MAIN session storage, leaving the biometric copy silently
+// stale. A user who then hit the LoginScreen for any reason (including the
+// refresh-token race this same incident surfaced) got auto-logged-in via
+// biometrics using that stale token, which Supabase rejects as already-
+// rotated - surfacing the alarming "Session expired. Please sign in with
+// your password." even though their real session was fine. Called after
+// every successful saveSession(refreshed) below to keep the two in sync.
+async function syncBiometricToken(refreshed: Session) {
+  try {
+    if (await isBiometricEnabled()) await saveBiometricRefreshToken(refreshed.refresh_token);
+  } catch {}
+}
+
+// Last plan successfully resolved from the backend - purely a local, instant
+// starting guess for the badge on next launch (see init()); loadUserData
+// always re-fetches and corrects it, this is never used for feature-gating.
+const LAST_PLAN_KEY = "@valuiq_last_plan";
 
 // ── PLAN, DISPLAY HELPERS ─────────────────────────────────────
 const PLAN_LABEL: Record<string,string> = {
@@ -170,13 +205,43 @@ export default function App() {
   const [splashDone, setSplashDone] = useState(false);
   const [onboarded, setOnboarded] = useState(false);
   const [aiConsented, setAiConsented] = useState(false);
-  const [tourStep, setTourStep]     = useState<string|null>(null);
-  const tourAutoFired = useRef(false);  // auto-tour fires at most once per app session
+  const [firstScanNudge, setFirstScanNudge] = useState(false); // one-line prompt shown on the Scan screen, first launch only
+  const firstScanAutoFired = useRef(false);  // auto-drop-into-Scan fires at most once per app session
+  // MEASURED BUG: this used to be set for ANY fresh login (sign-in OR
+  // sign-up), gated only by the separate @valuiq_tour_done AsyncStorage flag
+  // - that flag is unreliable (cleared by a dev reset, a reinstall, or a
+  // delayed write losing a race with a force-quit), so a RETURNING user
+  // could land on Scan instead of Home just because that flag happened to
+  // be missing. Renamed + narrowed to true ONLY for the instant span between
+  // a just-completed CREATE ACCOUNT (LoginScreen's justSignedUp, passed
+  // through handleLogin) and maybeStartFirstScan consuming it - sign-in,
+  // biometric quick-login, Apple/Google, and a session silently restored on
+  // app boot or refreshed on foreground-resume all leave this false, so none
+  // of them can ever route to Scan.
+  const justSignedUpRef = useRef(false);
+  // Dev-only "preview new-user flow" (Profile screen) - lets an existing
+  // user with real scans/wins walk the whole first-run experience WITHOUT
+  // touching their real data or signing out. previewStep drives whether the
+  // preview is currently showing the value screen or is "active" (main app,
+  // with preview-only overrides live - see HistoryScreen's previewNewUser
+  // prop and dismissFirstScanNudge below).
+  const [previewNewUser, setPreviewNewUser] = useState(false);
+  const [previewStep, setPreviewStep] = useState<"value"|"active">("value");
   const fadeIn = useRef(new Animated.Value(0)).current;
 
   
 
   useEffect(() => { init(); }, []);
+
+  // Fires once the user is fully in (logged in + consented), not just the
+  // instant they agree to AI consent. Safe to re-run on every session/
+  // aiConsented change (a foreground-resume refresh, for instance) -
+  // maybeStartFirstScan no-ops unless justSignedUpRef is set (a CREATE
+  // ACCOUNT that JUST happened via handleLogin), so a plain restart, a
+  // sign-in, or a background-resume refresh can never trigger it.
+  useEffect(() => {
+    if (session && aiConsented) maybeStartFirstScan();
+  }, [session, aiConsented]);
 
   // Re-verify identity when the app returns from the background.
   // Without this, the access token goes stale while backgrounded and the
@@ -189,6 +254,7 @@ export default function App() {
           if (saved && saved.refresh_token) {
             const refreshed = await refreshToken(saved.refresh_token);
             await saveSession(refreshed);
+            await syncBiometricToken(refreshed);
             setSession(refreshed);
             await loadUserData(refreshed.access_token);
           }
@@ -209,75 +275,160 @@ export default function App() {
   }, [splashDone, appReady]);
 
   async function init() {
+    // MEASURED BUG: this app had zero custom expo-updates code anywhere,
+    // running purely on the SDK default (checkAutomatically: "ON_LOAD") -
+    // that mode checks for and DOWNLOADS an update on a cold launch, but
+    // only APPLIES it on the launch AFTER that one. Three separate OTA
+    // publishes each looked like "did nothing" because testing was one
+    // relaunch per publish - the fix was silently sitting downloaded,
+    // waiting for a second relaunch that never came. Explicitly checking
+    // and, if found, fetching + reloading BEFORE anything else renders
+    // means an update applies on the very next launch after it's
+    // published, not the one after that. Skipped entirely in dev (Expo Go/
+    // dev client have no embedded update channel and checkForUpdateAsync
+    // throws immediately there anyway - caught below, but skipping is
+    // cheaper and avoids a pointless network round trip every dev reload).
+    if (!__DEV__) {
+      try {
+        // Bounded the same way every other network call in this file is
+        // (see api.ts's INCIDENT comment) - an unreachable/slow update
+        // service must never hang first paint. A missed check here just
+        // means this launch runs on the current bundle and tries again
+        // next launch, which is the ORIGINAL (acceptable) behavior -
+        // strictly better than reintroducing a black-screen-on-launch bug
+        // for the sake of applying updates one launch sooner.
+        const check = await withTimeout(Updates.checkForUpdateAsync(), 3000);
+        if (check.isAvailable) {
+          await withTimeout(Updates.fetchUpdateAsync(), 8000);
+          await Updates.reloadAsync();
+          return; // reloadAsync restarts the JS runtime - nothing below this line will run
+        }
+      } catch (e) {
+        console.log("[DIAG update-check] failed:", String(e));
+      }
+    }
     // Check if user has seen onboarding,
     try {
       const seen = await AsyncStorage.getItem("@valuiq_onboarded");
       if (seen === "true") setOnboarded(true);
       const consent = await AsyncStorage.getItem("@valuiq_ai_consent");
       console.log("[DIAG init] consent read =", consent); if (consent === "true") setAiConsented(true);
+      const preview = await AsyncStorage.getItem("@valuiq_preview_new_user");
+      if (preview === "true") { setPreviewNewUser(true); setPreviewStep("value"); }
     } catch {}
     const saved = await loadSession(); console.log("[DIAG init] loadSession =", saved ? "FOUND" : "NONE");
     if (saved) {
+      // MEASURED BUG: DashboardScreen's plan badge used to sit on a
+      // textless skeleton pill for however long loadUserData's getPlan/
+      // getScanCount took to resolve - up to ~25s in the worst case (two
+      // sequential timeouts + a retry delay) on a cold backend, a
+      // conspicuously "stalled" oval for a returning user whose plan we
+      // already know from last time. A local, instantly-available last-
+      // known plan (written by loadUserData whenever it succeeds) lets a
+      // RETURNING user skip the skeleton entirely - loadUserData below still
+      // fires and corrects it moments later if the plan actually changed
+      // since last launch. Scoped inside `if (saved)` (a session is actually
+      // about to be restored) and cleared on logout (handleLogout) so it can
+      // never leak one account's plan onto a different account's fresh
+      // login on a shared device.
       try {
+        const lastPlan = await AsyncStorage.getItem(LAST_PLAN_KEY);
+        if (lastPlan) { setPlan(lastPlan); setPlanLoaded(true); }
+      } catch {}
+      try {
+        // refreshToken is timeout-bounded (see api.ts) so this can never hang
+        // the launch screen on a cold/slow backend.
         const refreshed = await refreshToken(saved.refresh_token); console.log("[DIAG init] refresh OK len=", (refreshed && refreshed.access_token ? refreshed.access_token.length : 0));
         await saveSession(refreshed);
+        await syncBiometricToken(refreshed);
         setSession(refreshed);
-        await loadUserData(refreshed.access_token);
-        const tdone = await AsyncStorage.getItem("@valuiq_tour_done");
-        const cdone = await AsyncStorage.getItem("@valuiq_ai_consent");
-        /* auto-tour only via maybeStartTour after consent; returning users use the ? button */
+        // Deliberately NOT awaited: plan/scan-count are UI-fill-in data, not
+        // launch-blocking data. The main UI must render as soon as the
+        // session itself is known - loadUserData resolves in the background
+        // and updates plan/scansLeft in place once it lands (or times out).
+        loadUserData(refreshed.access_token);
       } catch (e) { console.log("[DIAG init] refresh FAILED -> clearSession. error=", String(e)); await clearSession(); }
     }
     setAppReady(true);
   }
 
   async function loadUserData(token:string) {
-    let p = await getPlan(token);
+    // getPlan/getScanCount are independent reads - running them in parallel
+    // (was sequential) roughly halves the common-case wait before the
+    // dashboard's plan badge/scan counter can resolve.
+    let [p, count] = await Promise.all([getPlan(token), getScanCount(token)]);
     if (p === null) { await new Promise(r=>setTimeout(r,1200)); p = await getPlan(token); }
-    const count = await getScanCount(token);
     if (p !== null) {
       setPlan(p);
+      try { await AsyncStorage.setItem(LAST_PLAN_KEY, p); } catch {}
       const paid = ["seller","pro","lifetime","titan"].includes(p);
       setScansLeft(paid ? null : Math.max(0, 10 - count));
     }
     setPlanLoaded(true);
   }
 
-  async function handleLogin(s:Session) {
+  async function handleLogin(s:Session, justSignedUp?: boolean) {
+    // No explicit setScreen("dashboard") here: `screen` already defaults to
+    // "dashboard" and handleLogout already resets it there too, so this was
+    // redundant - and, worse, racing the first-scan effect below (both fire
+    // off the same `session` change) meant it could stomp a same-tick
+    // navigate("scanner") for an already-consented user replaying first
+    // launch via the dev reset.
+    justSignedUpRef.current = !!justSignedUp;
     setSession(s);
     await loadUserData(s.access_token);
-    setScreen("dashboard");
-    try {
-      const tdone = await AsyncStorage.getItem("@valuiq_tour_done");
-      const cdone = await AsyncStorage.getItem("@valuiq_ai_consent");
-      /* auto-tour only via maybeStartTour after consent; returning users use the ? button */
-    } catch {}
   }
 
   async function handleLogout() {
     await clearSession();
+    try { await AsyncStorage.removeItem(LAST_PLAN_KEY); } catch {}
     setSession(null); setPlan("free"); setPlanLoaded(false); setScansLeft(null); setScreen("dashboard");
   }
 
   const token = session?.access_token || "";
 
-  async function skipTour() {
+  // First scan (shutter press, barcode capture, or Analyze) has happened -
+  // retire the nudge for good so it never shows again on this install.
+  // In preview mode this must NOT touch the real @valuiq_tour_done flag -
+  // that flag belongs to the tester's actual account, and preview is
+  // explicitly promised to leave real state untouched.
+  async function dismissFirstScanNudge() {
+    setFirstScanNudge(false);
+    if (previewNewUser) return;
     try { await AsyncStorage.setItem("@valuiq_tour_done", "true"); } catch {}
-    setTourStep(null);
   }
-  function advanceTour(next: string|null) {
-    if (next === null) { skipTour(); return; }
-    if (next === "capture" || next === "result") { navigate("scanner"); }
-    else if (next === "history") { navigate("history"); }
-    setTourStep(next);
+  // Toggled from Profile's dev-only "Preview new-user flow" button. Turning
+  // it ON resets the LOCAL preview state machine (back to the value screen)
+  // without clearing any real AsyncStorage flag or deleting any real data -
+  // turning it OFF just drops the override, instantly restoring the
+  // tester's normal view (nothing to re-fetch, their real state was never
+  // touched). Persisted so backgrounding/reopening mid-preview doesn't lose it.
+  async function togglePreviewNewUser() {
+    const next = !previewNewUser;
+    setPreviewNewUser(next);
+    setPreviewStep("value");
+    if (!next) setFirstScanNudge(false);
+    try { await AsyncStorage.setItem("@valuiq_preview_new_user", next ? "true" : "false"); } catch {}
   }
-  // Start the guided tour for brand-new users the first time they reach the dashboard.
-  async function maybeStartTour() {
-    if (tourAutoFired.current) return;
-    try {
-      const done = await AsyncStorage.getItem("@valuiq_tour_done");
-      if (done !== "true") { tourAutoFired.current = true; setTourStep("scan"); }
-    } catch {}
+  // Brand-new users land straight on Scan (not Dashboard) with the nudge,
+  // right after AI consent - fires at most once per app session.
+  function maybeStartFirstScan() {
+    if (firstScanAutoFired.current) return;
+    // Consume-and-clear: only a CREATE ACCOUNT that JUST happened
+    // (LoginScreen's justSignedUp -> handleLogin -> justSignedUpRef) can
+    // route to Scan. Sign-in, biometric quick-login, Apple/Google, a
+    // silently-restored session (app restart), and a foreground-resume
+    // refresh all leave this false, so none of them can trigger it - a
+    // RETURNING user always lands on Home/Dashboard. No AsyncStorage flag
+    // involved anymore (the old @valuiq_tour_done gate was unreliable -
+    // cleared by a dev reset/reinstall/lost race with a force-quit - and a
+    // missing local flag must never look like a brand-new account).
+    const justSignedUp = justSignedUpRef.current;
+    justSignedUpRef.current = false;
+    if (!justSignedUp) return;
+    firstScanAutoFired.current = true;
+    setFirstScanNudge(true);
+    navigate("scanner");
   }
   function navigate(s: Screen, data?: any) {
     setNavData(data ?? null);
@@ -301,8 +452,7 @@ export default function App() {
     }
   }
 
-  const startTour = () => setTourStep("scan");
-  const props = { token, plan, scansLeft, setScansLeft, onNavigate:navigate, onBack:goBack, onLogout:handleLogout, navData, tourStep, advanceTour, skipTour, startTour };
+  const props = { token, plan, planLoaded, scansLeft, setScansLeft, onNavigate:navigate, onBack:goBack, onLogout:handleLogout, navData, firstScanNudge, onDismissFirstScanNudge: dismissFirstScanNudge, previewNewUser, onTogglePreviewNewUser: togglePreviewNewUser };
 
   const SCREENS: Record<Screen,React.ReactNode> = {
     "scanner":      <ScannerScreen {...props} />,
@@ -360,9 +510,26 @@ export default function App() {
     <SafeAreaProvider>
     <View style={s.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-      {(!splashDone || !appReady || (!!session && !planLoaded)) && <SplashScreen onDone={()=>setSplashDone(true)} />}
+      {/* Gated on splashDone/appReady ONLY - never on planLoaded. planLoaded
+          depends on a backend call (getPlan/getScanCount) that can be slow
+          on a cold start; the main UI must render with default plan="free"/
+          scansLeft=null and fill in once loadUserData resolves, instead of
+          holding a black screen (the splash animation itself fades to
+          opacity 0 well before appReady could ever depend on the network). */}
+      {(!splashDone || !appReady) && <SplashScreen onDone={()=>setSplashDone(true)} />}
       <Animated.View style={[{flex:1}, {opacity:fadeIn}]}>
-        {!session ? (
+        {previewNewUser && previewStep === "value" && session && aiConsented ? (
+          // PREVIEW: the real value screen, shown on top of an already-
+          // logged-in/consented session - onComplete here advances the
+          // LOCAL preview state machine only (never touches @valuiq_onboarded
+          // or @valuiq_tour_done), then drops straight into Scan with the
+          // guided-first-scan nudge live, exactly like a true first launch.
+          <OnboardingScreen onComplete={() => {
+            setPreviewStep("active");
+            setFirstScanNudge(true);
+            navigate("scanner");
+          }} />
+        ) : !session ? (
             !onboarded
               ? <OnboardingScreen onComplete={async () => {
                 try { await AsyncStorage.setItem("@valuiq_onboarded","true"); } catch {}
@@ -377,7 +544,6 @@ export default function App() {
               if (chk !== "true") await AsyncStorage.setItem("@valuiq_ai_consent", "true");
             } catch (e) { console.warn("consent save failed", e); }
             setAiConsented(true);
-            maybeStartTour();
           }} />
         ) : (
           <View style={s.root}>
@@ -400,7 +566,7 @@ export default function App() {
                       activeOpacity={0.7}
                     >
                       <Text style={s.tabIcon}>{t.icon}</Text>
-                      <Text style={[s.tabLabel, active && {color:C.green, fontWeight:"700"}]} numberOfLines={1}>
+                      <Text style={[s.tabLabel, active && {color:C.green, fontWeight:"700"}]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                         {t.label}
                       </Text>
                       {active && <View style={s.tabDot}/>}

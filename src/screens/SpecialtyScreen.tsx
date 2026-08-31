@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
+import Wordmark from "../components/Wordmark";
 import { analyzeSpecialty } from "../lib/api";
 import ShareButton from "../components/ShareButton";
 import StagedProgress from "../components/StagedProgress";
@@ -201,7 +202,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <View style={s.nav}>
         <TouchableOpacity onPress={() => onBack?.()} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
-        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Text style={s.logoText}>ValuIQ</Text></View>
+        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
         <Text style={s.h1}>🏺 Specialty Scanner</Text>
@@ -319,7 +320,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
         <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
-        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Text style={s.logoText}>ValuIQ</Text></View>
+        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
         <TouchableOpacity onPress={reset} style={[s.navBtn, { marginLeft: "auto" as any }]}><Text style={s.navBtnText}>New Scan</Text></TouchableOpacity>
       </View>
       <ScrollView ref={resultScrollRef} contentContainerStyle={{ padding: 20, paddingBottom: 80 }}>
@@ -511,7 +512,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
         <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
-        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Text style={s.logoText}>ValuIQ</Text></View>
+        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
         <View style={{flexDirection:"row", alignItems:"center", gap:10, marginBottom:10}}>

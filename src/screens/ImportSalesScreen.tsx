@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import { C } from "../lib/theme";
+import Wordmark from "../components/Wordmark";
 import { analyzeSales } from "../lib/api";
 
 interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string, data?:any)=>void; onBack?:()=>void; onLogout:()=>void; navData?:any; }
@@ -66,7 +67,7 @@ export default function ImportSalesScreen({ token, onNavigate, onBack }: Props) 
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={s.nav}>
           <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
-          <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Text style={s.logoText}>ValuIQ</Text></View>
+          <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
           <TouchableOpacity onPress={reset} style={[s.navBtn, { marginLeft: "auto" as any }]}><Text style={s.navBtnText}>New File</Text></TouchableOpacity>
         </View>
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 80 }}>
@@ -173,7 +174,7 @@ export default function ImportSalesScreen({ token, onNavigate, onBack }: Props) 
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <View style={s.nav}>
         <TouchableOpacity onPress={() => onBack?.()} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
-        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Text style={s.logoText}>ValuIQ</Text></View>
+        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
         <Text style={s.h1}>📊 Import Sales</Text>

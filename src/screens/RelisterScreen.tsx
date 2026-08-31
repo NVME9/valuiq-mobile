@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Share } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import Wordmark from "../components/Wordmark";
 import { API_BASE } from "../lib/api";
 
 const PLATFORMS = ["eBay","Poshmark","Mercari","Facebook Marketplace","Depop","Etsy","OfferUp"];
@@ -55,7 +56,7 @@ export default function RelisterScreen({ token, plan, onNavigate, onBack }: Prop
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <View style={s.nav}>
         <TouchableOpacity onPress={()=>onBack?.()} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
-        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Text style={s.logoText}>ValuIQ</Text></View>
+        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
         {results.length>0 && <TouchableOpacity onPress={()=>setResults([])} style={[s.navBtn,{marginLeft:"auto" as any}]}><Text style={s.navBtnText}>New</Text></TouchableOpacity>}
       </View>
 

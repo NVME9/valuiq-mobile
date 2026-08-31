@@ -25,7 +25,7 @@ interface Props {
   // with the real profit/days already known from the save response).
   // onRevealStat fills in the winning stat once fetchFlexStat resolves, so
   // the FIRST reveal is never blocked on that network round-trip either.
-  onReveal: (itemName: string, brand: string | null, loadingSubStat: string) => void;
+  onReveal: (itemName: string, brand: string | null, loadingSubStat: string, netProfit: number | null) => void;
   onRevealStat: (stat: FlexStat) => void;
 }
 
@@ -52,7 +52,7 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal, onRevea
       onReveal(_name, _brand || null, concreteLine({
         netProfit: result.scan.net_profit ?? null,
         daysToSale: result.scan.days_to_sale ?? null,
-      }));
+      }), result.scan.net_profit ?? null);
       fetchFlexStat(token, scanId).then((stat) => {
         if (stat) {
           onRevealStat(stat);

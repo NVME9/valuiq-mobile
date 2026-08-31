@@ -6,7 +6,7 @@
 // buy-vs-skip, it only renders what classifyOutcome() already decided.
 // The hot tier reuses FlexRevealCard's glow + count-up building blocks
 // rather than reinventing motion for a second "big number" moment.
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, Animated, Easing, Image, TouchableOpacity } from "react-native";
 import Svg, { Defs, RadialGradient, Stop, Rect } from "react-native-svg";
 import { C } from "../lib/theme";
@@ -52,6 +52,11 @@ export default function ProfitFlexHero({
   heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, dataTag, dataTagColor, secondaryStats = [], footNote,
   skipDetail,
 }: ProfitFlexHeroProps) {
+  // MEASURED BUG: a long AI-generated item name ("American Flag with Fish
+  // Trucker Hat (likely...") had no way to be seen in full - numberOfLines
+  // capped it with no expand affordance anywhere on the result screen.
+  // Tap the title (or the toggle line under it) to see the whole thing.
+  const [titleExpanded, setTitleExpanded] = useState(false);
   const isHot = outcome.tier === "hot";
   const count = useCountUp(Math.round(heroProfit), isHot, 900);
   const heroText = isHot ? money(count) : money(heroProfit);
@@ -107,7 +112,10 @@ export default function ProfitFlexHero({
         {dataTag ? <Text style={[st.tag, { color: dataTagColor }]} numberOfLines={1}>{dataTag}</Text> : null}
       </View>
 
-      <Text style={st.itemName} numberOfLines={2}>{itemName}</Text>
+      <TouchableOpacity onPress={() => setTitleExpanded(v => !v)} activeOpacity={0.7}>
+        <Text style={st.itemName} numberOfLines={titleExpanded ? undefined : 2}>{itemName}</Text>
+        <Text style={st.itemNameToggle}>{titleExpanded ? "▲ Show less" : "▼ Tap to see full name"}</Text>
+      </TouchableOpacity>
       {categoryLine ? <Text style={st.itemMeta}>{categoryLine}</Text> : null}
 
       {isSkip ? (
@@ -150,7 +158,16 @@ export default function ProfitFlexHero({
 }
 
 const st = StyleSheet.create({
-  card: { borderWidth: 1.5, borderRadius: 18, padding: 18, marginBottom: 14, overflow: "hidden" },
+  // MEASURED BUG: the skip-tier reason text ("Sells for about $14. Enter
+  // what you'd pay...") was rendering clipped mid-sentence at the card's
+  // bottom edge. Not a numberOfLines cap - there wasn't one - but this
+  // card's overflow:"hidden" (needed to clip the hot-tier glow SVG to the
+  // rounded corners) paired with skipReason's lineHeight sitting too close
+  // to its fontSize for bold text's real rendered height on Android, which
+  // shaved off the last line's descenders. paddingBottom bumped so any
+  // multi-line content in this card has real room before that clip
+  // boundary, regardless of which tier is showing.
+  card: { borderWidth: 1.5, borderRadius: 18, padding: 18, paddingBottom: 24, marginBottom: 14, overflow: "hidden" },
   glowWrap: { position: "absolute", top: -10, left: -10 },
   editBtn: { position: "absolute", top: 14, right: 14, width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(0,0,0,0.35)", borderWidth: 1, borderColor: C.border, alignItems: "center", justifyContent: "center", zIndex: 2 },
   editBtnIcon: { fontSize: 16 },
@@ -159,12 +176,13 @@ const st = StyleSheet.create({
   badge: { fontSize: 15, fontWeight: "900", letterSpacing: 0.5 },
   tag: { fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
   itemName: { color: C.text1, fontSize: 16, fontWeight: "700", marginBottom: 2 },
+  itemNameToggle: { color: C.text4, fontSize: 11, fontWeight: "700", marginBottom: 4 },
   itemMeta: { color: C.text3, fontSize: 12, marginBottom: 12 },
   hero: { fontSize: 48, fontWeight: "900", letterSpacing: -1.5, marginTop: 2 },
   heroLabel: { color: C.text4, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8, marginTop: -4, marginBottom: 8 },
   copy: { fontSize: 14, fontWeight: "700", marginBottom: 14 },
-  skipReason: { fontSize: 16, fontWeight: "800", lineHeight: 22, marginBottom: 6 },
-  skipDetail: { color: C.text3, fontSize: 13, lineHeight: 19, marginBottom: 12 },
+  skipReason: { fontSize: 16, fontWeight: "800", lineHeight: 24, marginBottom: 8 },
+  skipDetail: { color: C.text3, fontSize: 13, lineHeight: 19, marginBottom: 14 },
   statsRow: { flexDirection: "row", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: C.border, paddingTop: 12, marginBottom: 2 },
   stat: { flex: 1, alignItems: "center" },
   statVal: { color: C.text1, fontSize: 16, fontWeight: "800" },

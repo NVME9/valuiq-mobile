@@ -3,35 +3,36 @@ import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, RefreshControl, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
-import { API_BASE, getCommunityWins, reportWin } from "../lib/api";
+import { getCommunityFlips, peekCommunityFlips, CommunityFlip, reportWin } from "../lib/api";
+import { formatFeedDetail, avatarForFlip } from "../lib/flipFormat";
+import FlexRevealCard from "../components/FlexRevealCard";
+import { FlexStat } from "../lib/flexReveal";
 
-const EXAMPLE_WINS = [
-  { id:"1", username:"FlipQueen",   item_name:"Coach Leather Crossbody",      profit:67,  platform:"Poshmark", store_name:"Goodwill",        likes:24, created_at:new Date(Date.now()-7200000).toISOString()   },
-  { id:"2", username:"ThriftKing",  item_name:"DeWalt 20V Drill, Kit",          profit:112, platform:"eBay",     store_name:"Salvation Army",  likes:41, created_at:new Date(Date.now()-14400000).toISOString()  },
-  { id:"3", username:"VintageVibe", item_name:"Pyrex Butterprint Set",         profit:89,  platform:"Etsy",     store_name:"Habitat ReStore", likes:33, created_at:new Date(Date.now()-21600000).toISOString()  },
-  { id:"4", username:"SneakerPro",  item_name:"Jordan 1 Retro, High OG",       profit:145, platform:"StockX",   store_name:"Goodwill",        likes:67, created_at:new Date(Date.now()-86400000).toISOString()  },
-  { id:"5", username:"GarageGold",  item_name:"Craftsman Socket Set",          profit:78,  platform:"Facebook", store_name:"Estate Sale",     likes:19, created_at:new Date(Date.now()-172800000).toISOString() },
-  { id:"6", username:"MercariMom",  item_name:"Lululemon, Align 3-Pack",        profit:134, platform:"Mercari",  store_name:"Goodwill",        likes:55, created_at:new Date(Date.now()-259200000).toISOString() },
-  { id:"7", username:"EbayElite",   item_name:"Snap-On, Wrench Set",            profit:220, platform:"eBay",     store_name:"Garage Sale",     likes:89, created_at:new Date(Date.now()-345600000).toISOString() },
-  { id:"8", username:"LuxLister",   item_name:"Kate, Spade Tote, Bag",           profit:95,  platform:"Poshmark", store_name:"Goodwill Bins",   likes:42, created_at:new Date(Date.now()-432000000).toISOString() },
-  { id:"9", username:"FlipMaster",  item_name:"KitchenAid Stand Mixer",        profit:190, platform:"eBay",     store_name:"ThriftTown",      likes:103,created_at:new Date(Date.now()-518400000).toISOString() },
-  { id:"10",username:"CardShark",   item_name:"Pokémon 1st Edition, Lot",       profit:340, platform:"eBay",     store_name:"Garage Sale",     likes:214,created_at:new Date(Date.now()-604800000).toISOString() },
-];
+// A community flip's reveal never runs the real fetchFlexStat() crowd-
+// comparison (that needs a scanId the current user owns - a community row
+// is someone else's, or seed/mined, data). Built straight from the fields
+// already on the row instead: always tier "fallback", no badge - honest
+// about not having run the personal-record/segment/weekly comparisons.
+function communityStat(win: CommunityFlip): FlexStat {
+  return {
+    tier: "fallback",
+    headline: `$${Math.round(win.profit).toLocaleString()}`,
+    subStat: formatFeedDetail(win),
+    // Always false in practice today - both community_wins submissions and
+    // the seed/mined pool are filtered to profit > 0 server-side
+    // (community-flips/route.ts) - but computed honestly from the real sign
+    // rather than hardcoded, in case that filter ever loosens.
+    isLoss: win.profit < 0,
+  };
+}
 
-const LEADERBOARD = [
-  { rank:1, username:"CardShark",   profit:3240, wins:18, badge:"👑" },
-  { rank:2, username:"FlipMaster",  profit:2890, wins:24, badge:"🥈" },
-  { rank:3, username:"EbayElite",   profit:2540, wins:19, badge:"🥉" },
-  { rank:4, username:"SneakerPro",  profit:2180, wins:15, badge:"⚡" },
-  { rank:5, username:"MercariMom",  profit:1920, wins:22, badge:"🔥" },
-  { rank:6, username:"ThriftKing",  profit:1780, wins:20, badge:"💪" },
-  { rank:7, username:"LuxLister",   profit:1650, wins:17, badge:"✨" },
-  { rank:8, username:"GarageGold",  profit:1420, wins:14, badge:"🛒" },
-  { rank:9, username:"VintageVibe", profit:1280, wins:16, badge:"🏺" },
-  { rank:10,username:"FlipQueen",   profit:1140, wins:21, badge:"👸" },
-];
+function computeStats(list: CommunityFlip[]) {
+  const totalProfit = list.reduce((sum, w) => sum + (Number(w.profit) || 0), 0);
+  return { total: list.length, totalProfit, avgProfit: list.length ? Math.round(totalProfit / list.length) : 0 };
+}
 
-function timeAgo(date: string) {
+function timeAgo(date?: string) {
+  if (!date) return "";
   const diff = Date.now() - new Date(date).getTime();
   const h = Math.floor(diff / 3600000), d = Math.floor(diff / 86400000);
   if (h < 1) return "Just now";
@@ -43,43 +44,46 @@ function timeAgo(date: string) {
 interface Props {
   token:string; plan:string; scansLeft:number|null;
   setScansLeft:(n:number|null)=>void;
-  onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void;
+  onNavigate:(s:string, data?:any)=>void; onBack?:()=>void; onLogout:()=>void;
+  navData?: any;
 }
 
-export default function CommunityScreen({ token, onNavigate, onBack }: Props) {
-  const [tab, setTab]           = useState<"wins"|"leaderboard">("wins");
-  const [filter, setFilter]     = useState<"hot"|"profit"|"recent">("hot");
-  const [wins, setWins]         = useState<any[]>(EXAMPLE_WINS.map(w => ({ ...w, isExample: true })));
-  const [liked, setLiked]       = useState<Set<string>>(new Set());
+export default function CommunityScreen({ token, onNavigate, onBack, navData }: Props) {
+  const [tab, setTab]           = useState<"wins"|"leaderboard">(navData?.tab === "leaderboard" ? "leaderboard" : "wins");
+  const [filter, setFilter]     = useState<"profit"|"recent">("recent");
+  // Real, anonymized flips only - see getCommunityFlips in lib/api.ts. No
+  // fake/hardcoded rows: an empty array here means an honest "be the
+  // first" empty state, not a silently-injected example.
+  // Instant-paint from cache on mount - this screen fully unmounts/remounts
+  // on every tab switch (no persistent tab navigator), so without a peek
+  // here every single revisit showed the loading spinner/empty feed for a
+  // beat even when getCommunityFlips below would resolve from cache anyway.
+  const [wins, setWins]         = useState<CommunityFlip[]>(() => peekCommunityFlips(40) || []);
+  const [loading, setLoading]   = useState(() => !peekCommunityFlips(40));
   const [refreshing, setRefreshing] = useState(false);
-  const [stats, setStats]       = useState({ total: 0, totalProfit: 0, avgProfit: 0 });
-  useEffect(() => {
-    getCommunityWins().then((real: any[]) => {
-      if (real && real.length) {
-        const realTagged = real.map(w => ({ ...w, isExample: false }));
-        setWins([...realTagged, ...EXAMPLE_WINS.map(w => ({ ...w, isExample: true }))]);
-        const totalProfit = realTagged.reduce((sum, w) => sum + (Number(w.profit) || 0), 0);
-        setStats({ total: realTagged.length, totalProfit, avgProfit: realTagged.length ? Math.round(totalProfit / realTagged.length) : 0 });
-      }
-    }).catch(() => {});
-  }, []);
+  const [stats, setStats]       = useState(() => computeStats(peekCommunityFlips(40) || []));
+  const [revealWin, setRevealWin] = useState<CommunityFlip | null>(null);
+
+  async function load() {
+    const real = await getCommunityFlips(40);
+    setWins(real);
+    setStats(computeStats(real));
+    setLoading(false);
+    setRefreshing(false);
+  }
+
+  useEffect(() => { load(); }, []);
 
   const sorted = [...wins].sort((a, b) =>
     filter === "profit" ? b.profit - a.profit :
-    filter === "recent" ? new Date(b.created_at).getTime() - new Date(a.created_at).getTime() :
-    b.likes - a.likes,
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
 
-  function toggleLike(id: string) {
-    setLiked(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) { next.delete(id); } else { next.add(id); }
-      return next;
-    });
-    setWins(prev => prev.map(w =>
-      w.id === id ? { ...w, likes: w.likes + (liked.has(id) ? -1 : 1) } : w,
-    ));
-  }
+  // "Leaderboard" of anonymized flips ranked by profit, not a per-user
+  // ranking - a real per-user leaderboard needs opt-in identities, which
+  // don't exist yet (see getCommunityFlips). This is still real, alive
+  // data: the top real profits in the pool, never fabricated names/totals.
+  const topFlips = [...wins].sort((a, b) => b.profit - a.profit).slice(0, 10);
 
   return (
     <SafeAreaView style={s.safe}>
@@ -96,16 +100,22 @@ export default function CommunityScreen({ token, onNavigate, onBack }: Props) {
         <View style={{ width:36 }}/>
       </View>
 
-      {/* Stats banner */}
+      {/* Stats banner - deliberately labeled as a SAMPLE, not a lifetime
+          platform total. getCommunityFlips(40) returns a randomly-windowed
+          40-row slice of the real+seed pool (see api.ts) that changes on
+          every refresh - "Real Flips"/"Total Profit" read as running
+          platform totals to a new user, when "40"/"$2K" are really just the
+          fetch limit and its sum. Relabeled to be honest about scope instead
+          of implying a persisted count the backend doesn't actually track. */}
       <View style={s.statsBanner}>
         <View style={s.statItem}>
           <Text style={s.statVal}>{stats.total}</Text>
-          <Text style={s.statLabel}>Wins This Week</Text>
+          <Text style={s.statLabel}>Recent Flips</Text>
         </View>
         <View style={s.statDivider}/>
         <View style={s.statItem}>
           <Text style={[s.statVal, { color:C.green }]}>${Math.round(stats.totalProfit/1000)}K</Text>
-          <Text style={s.statLabel}>Total Profit</Text>
+          <Text style={s.statLabel}>Profit Shown</Text>
         </View>
         <View style={s.statDivider}/>
         <View style={s.statItem}>
@@ -113,6 +123,7 @@ export default function CommunityScreen({ token, onNavigate, onBack }: Props) {
           <Text style={s.statLabel}>Avg Per Flip</Text>
         </View>
       </View>
+      <Text style={s.statsCaption}>A snapshot of real flips - not a running platform total</Text>
 
       {/* Tab switcher */}
       <View style={s.tabRow}>
@@ -120,105 +131,152 @@ export default function CommunityScreen({ token, onNavigate, onBack }: Props) {
           <Text style={[s.tabTxt, tab==="wins"&&s.tabTxtActive]}>🔥 Community Wins</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[s.tabBtn, tab==="leaderboard"&&s.tabBtnActive]} onPress={()=>setTab("leaderboard")}>
-          <Text style={[s.tabTxt, tab==="leaderboard"&&s.tabTxtActive]}>🏆 Leaderboard</Text>
+          <Text style={[s.tabTxt, tab==="leaderboard"&&s.tabTxtActive]}>🏆 Top Flips</Text>
         </TouchableOpacity>
       </View>
 
       <ScrollView
         contentContainerStyle={s.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.green}
-          onRefresh={() => { setRefreshing(true); setTimeout(()=>setRefreshing(false),1000); }}/>}
+          onRefresh={() => { setRefreshing(true); load(); }}/>}
       >
+        {loading ? (
+          <ActivityIndicator color={C.green} style={{ marginTop:40 }}/>
+        ) : (
+        <>
         {/* ── WINS, TAB ── */}
         {tab === "wins" && (
           <>
-            {/* Filter */}
-            <View style={s.filterRow}>
-              {(["hot","profit","recent"] as const).map(f => (
-                <TouchableOpacity key={f} onPress={()=>setFilter(f)}
-                  style={[s.filterChip, filter===f&&s.filterChipActive]}>
-                  <Text style={[s.filterTxt, filter===f&&s.filterTxtActive]}>
-                    {f==="hot"?"🔥 Hot":f==="profit"?"💰 Top, Profit":"⚡ Recent"}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {sorted.map(win => (
-              <View key={win.id} style={s.winCard}>
-                <View style={s.winHeader}>
-                  <View style={s.avatar}>
-                    <Text style={s.avatarTxt}>{win.username[0]}</Text>
-                  </View>
-                  <View style={{ flex:1 }}>
-                    <Text style={s.username}>{win.username}{win.isExample ? "  \u00B7 Example" : ""}</Text>
-                    <Text style={s.winMeta}>{win.store_name} · {timeAgo(win.created_at)}</Text>
-                  </View>
-                  <View style={s.profitBadge}>
-                    <Text style={s.profitAmt}>+${win.profit}</Text>
-                  </View>
-                </View>
-
-                <Text style={s.itemName}>{win.item_name}</Text>
-                <Text style={s.platform}>Sold on {win.platform}</Text>
-
-                <View style={s.winFooter}>
-                  <TouchableOpacity style={s.likeBtn} onPress={()=>toggleLike(win.id)}>
-                    <Text style={[s.likeTxt, liked.has(win.id)&&{color:C.red}]}>
-                      {liked.has(win.id)?"❤️":"🤍"} {win.likes}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.scanItBtn} onPress={()=>onNavigate("scanner")}>
-                    <Text style={s.scanItTxt}>Scan similar →</Text>
-                  </TouchableOpacity>
-                {!win.isExample && (
-                  <TouchableOpacity style={{ paddingHorizontal: 8, paddingVertical: 6 }} onPress={() => {
-                    Alert.alert("Report post", "Report this post for review?", [
-                      { text: "Cancel", style: "cancel" },
-                      { text: "Report", style: "destructive", onPress: async () => { await reportWin(token, win.id); Alert.alert("Thanks", "Our team will review this post."); } },
-                    ]);
-                  }}>
-                    <Text style={{ color: C.text4, fontSize: 12 }}>{"\u2691"} Report</Text>
-                  </TouchableOpacity>
-                )}
-                </View>
+            {wins.length === 0 ? (
+              <View style={s.emptyWrap}>
+                <Text style={s.emptyTitle}>Be the first this week</Text>
+                <Text style={s.emptySub}>Real community flips will show up here as resellers scan and sell.</Text>
               </View>
-            ))}
+            ) : (
+              <>
+                <View style={s.filterRow}>
+                  {(["recent","profit"] as const).map(f => (
+                    <TouchableOpacity key={f} onPress={()=>setFilter(f)}
+                      style={[s.filterChip, filter===f&&s.filterChipActive]}>
+                      <Text style={[s.filterTxt, filter===f&&s.filterTxtActive]}>
+                        {f==="profit"?"💰 Top Profit":"⚡ Recent"}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {sorted.map((win, i) => (
+                  <TouchableOpacity key={win.id || `${win.item_name}-${i}`} style={s.winCard} activeOpacity={0.75} onPress={() => setRevealWin(win)}>
+                    {/* No repeated "A reseller" identity line - the real
+                        item + real buy/sell/profit/days below is what
+                        makes this credible, a person label doesn't add
+                        anything and just looks templated when it's on
+                        every card. */}
+                    <View style={s.winHeader}>
+                      <View style={s.avatar}>
+                        <Text style={s.avatarTxt}>{avatarForFlip(win)}</Text>
+                      </View>
+                      <View style={{ flex:1 }}>
+                        {/* Short/1-line on purpose: this card is a preview,
+                            not the detail view - a tap opens the reveal
+                            (below), which shows the item name in FULL with
+                            no cap. Truncating here is fine now that the
+                            full name always lives one tap away. */}
+                        <Text style={s.username} numberOfLines={1}>{win.item_name}</Text>
+                        <Text style={s.winMeta}>{timeAgo(win.created_at)}</Text>
+                      </View>
+                      <View style={s.profitBadge}>
+                        <Text style={s.profitAmt}>+${win.profit}</Text>
+                      </View>
+                    </View>
+
+                    <Text style={s.platform}>{formatFeedDetail(win)}</Text>
+
+                    <View style={s.winFooter}>
+                      <TouchableOpacity style={s.scanItBtn} onPress={()=>onNavigate("scanner")}>
+                        <Text style={s.scanItTxt}>Scan similar →</Text>
+                      </TouchableOpacity>
+                      {win.id && (
+                        <TouchableOpacity style={{ paddingHorizontal: 8, paddingVertical: 6 }} onPress={() => {
+                          Alert.alert("Report post", "Report this post for review?", [
+                            { text: "Cancel", style: "cancel" },
+                            { text: "Report", style: "destructive", onPress: async () => { await reportWin(token, win.id!); Alert.alert("Thanks", "Our team will review this post."); } },
+                          ]);
+                        }}>
+                          <Text style={{ color: C.text4, fontSize: 12 }}>{"⚑"} Report</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </>
+            )}
           </>
         )}
 
-        {/* ── LEADERBOARD, TAB ── */}
+        {/* ── TOP FLIPS, TAB ── */}
         {tab === "leaderboard" && (
           <>
-            <Text style={s.lbTitle}>Top Flippers This Week</Text>
-            <Text style={s.lbSub}>Based on total profit found with ValuIQ</Text>
+            <Text style={s.lbTitle}>Top Real Flips</Text>
+            <Text style={s.lbSub}>Ranked by profit found with ValuIQ - names hidden for now</Text>
 
-            {LEADERBOARD.map((user) => (
-              <View key={user.rank} style={[s.lbCard, user.rank <= 3 && { borderColor: user.rank===1?C.yellow:user.rank===2?"#C0C0C0":"#CD7F32" }]}>
-                <Text style={s.lbRank}>{user.badge}</Text>
+            {topFlips.length === 0 ? (
+              <View style={s.emptyWrap}>
+                <Text style={s.emptyTitle}>No ranked flips yet</Text>
+                <Text style={s.emptySub}>The top real flips this week will show up here.</Text>
+              </View>
+            ) : topFlips.map((win, i) => (
+              <TouchableOpacity key={win.id || `${win.item_name}-${i}`} style={[s.lbCard, i < 3 && { borderColor: i===0?C.yellow:i===1?"#C0C0C0":"#CD7F32" }]} activeOpacity={0.75} onPress={() => setRevealWin(win)}>
+                <Text style={s.lbRank}>{i===0?"👑":i===1?"🥈":i===2?"🥉":`#${i+1}`}</Text>
                 <View style={{ flex:1 }}>
-                  <Text style={s.lbUsername}>{user.username}</Text>
-                  <Text style={s.lbWins}>{user.wins} profitable finds</Text>
+                  <Text style={s.lbUsername} numberOfLines={1}>{win.item_name}</Text>
+                  <Text style={s.lbWins} numberOfLines={1}>{formatFeedDetail(win)}</Text>
                 </View>
                 <View style={{ alignItems:"flex-end" }}>
-                  <Text style={[s.lbProfit, user.rank===1&&{color:C.yellow}]}>
-                    ${user.profit.toLocaleString()}
+                  <Text style={[s.lbProfit, i===0&&{color:C.yellow}]}>
+                    ${win.profit.toLocaleString()}
                   </Text>
-                  <Text style={s.lbLabel}>profit found</Text>
+                  <Text style={s.lbLabel}>profit</Text>
                 </View>
-              </View>
+              </TouchableOpacity>
             ))}
 
             <View style={s.joinCard}>
               <Text style={s.joinTitle}>Want to appear here?</Text>
-              <Text style={s.joinBody}>Every scan you make with ValuIQ contributes to your leaderboard ranking.</Text>
+              <Text style={s.joinBody}>Every real flip you log with ValuIQ can be shared to the community feed.</Text>
               <TouchableOpacity style={s.joinBtn} onPress={()=>onNavigate("scanner")}>
                 <Text style={s.joinBtnTxt}>Start Scanning →</Text>
               </TouchableOpacity>
             </View>
           </>
         )}
+        </>
+        )}
       </ScrollView>
+
+      {/* Tap-to-reveal for a community flip - NOT the viewer's own win, so
+          the eyebrow/footer copy is overridden to say so explicitly instead
+          of the default "Your flip" framing. stat is built locally
+          (communityStat above) from fields already on the row - no
+          fetchFlexStat crowd-comparison call, since that needs a scanId the
+          viewer owns and this is someone else's (or seed/mined) flip.
+          Primary button routes to Scan (not a share flow - it's not the
+          viewer's flip to share) via the onShare override, same pattern
+          WinsDemoCard uses for its "not the viewer's own" reveal. Leaderboard
+          button is hidden outright - the viewer is already in the community
+          feed that button would otherwise send them to. */}
+      <FlexRevealCard
+        visible={!!revealWin}
+        stat={revealWin ? communityStat(revealWin) : null}
+        itemName={revealWin?.item_name}
+        brand={revealWin?.brand}
+        eyebrowOverride="COMMUNITY FLIP"
+        footerOverride="A real flip from the ValuIQ community."
+        primaryLabelOverride="Scan similar →"
+        onShare={() => { setRevealWin(null); onNavigate("scanner"); }}
+        hideLeaderboardButton
+        onClose={() => setRevealWin(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -232,11 +290,12 @@ const s = StyleSheet.create({
   logoIcon:       { width:28, height:28, backgroundColor:C.green, borderRadius:8, alignItems:"center", justifyContent:"center" },
   logoIconTxt:    { color:C.greenDark, fontSize:14, fontWeight:"900" },
   logoTxt:        { color:C.text1, fontSize:17, fontWeight:"800" },
-  statsBanner:    { flexDirection:"row", backgroundColor:C.surface, borderBottomWidth:1, borderBottomColor:C.border, paddingTop: 16, paddingBottom: 10 },
+  statsBanner:    { flexDirection:"row", backgroundColor:C.surface, paddingTop: 16, paddingBottom: 10 },
   statItem:       { flex:1, alignItems:"center" },
   statVal:        { color:C.text1, fontSize:20, fontWeight:"900", letterSpacing:-0.5 },
   statLabel:      { color:C.text4, fontSize:10, fontWeight:"700", marginTop:2 },
   statDivider:    { width:1, backgroundColor:C.border },
+  statsCaption:   { color:C.text4, fontSize:10, textAlign:"center", paddingVertical:6, paddingHorizontal:16, backgroundColor:C.surface, borderBottomWidth:1, borderBottomColor:C.border },
   tabRow:         { flexDirection:"row", borderBottomWidth:1, borderBottomColor:C.border },
   tabBtn:         { flex:1, paddingTop:16, paddingBottom:10, alignItems:"center", borderBottomWidth:2, borderBottomColor:"transparent" },
   tabBtnActive:   { borderBottomColor:C.green },
@@ -251,7 +310,7 @@ const s = StyleSheet.create({
   winCard:        { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:14, padding:14, marginBottom:10 },
   winHeader:      { flexDirection:"row", alignItems:"center", gap:10, marginBottom:10 },
   avatar:         { width:36, height:36, backgroundColor:C.green+"30", borderRadius:18, alignItems:"center", justifyContent:"center" },
-  avatarTxt:      { color:C.green, fontSize:16, fontWeight:"900" },
+  avatarTxt:      { fontSize:16 },
   username:       { color:C.text1, fontSize:13, fontWeight:"700" },
   winMeta:        { color:C.text4, fontSize:11, marginTop:1 },
   profitBadge:    { backgroundColor:C.green+"20", borderRadius:100, paddingHorizontal:10, paddingVertical:4 },
@@ -259,14 +318,15 @@ const s = StyleSheet.create({
   itemName:       { color:C.text1, fontSize:14, fontWeight:"700", marginBottom:3 },
   platform:       { color:C.text4, fontSize:12, marginBottom:10 },
   winFooter:      { flexDirection:"row", alignItems:"center", justifyContent:"space-between" },
-  likeBtn:        { padding:6 },
-  likeTxt:        { color:C.text3, fontSize:14 },
   scanItBtn:      { borderWidth:1, borderColor:C.border, borderRadius:8, paddingHorizontal:12, paddingVertical:6 },
   scanItTxt:      { color:C.text3, fontSize:12, fontWeight:"600" },
+  emptyWrap:      { alignItems:"center", paddingVertical:50, paddingHorizontal:20 },
+  emptyTitle:     { color:C.text2, fontSize:15, fontWeight:"700", marginBottom:6, textAlign:"center" },
+  emptySub:       { color:C.text4, fontSize:13, textAlign:"center", lineHeight:19 },
   lbTitle:        { color:C.text1, fontSize:18, fontWeight:"900", marginBottom:4 },
   lbSub:          { color:C.text4, fontSize:12, marginBottom:16 },
   lbCard:         { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:13, padding:14, marginBottom:8, flexDirection:"row", alignItems:"center", gap:12 },
-  lbRank:         { fontSize:24, width:32 },
+  lbRank:         { fontSize:20, width:36, fontWeight:"900", color:C.text3 },
   lbUsername:     { color:C.text1, fontSize:14, fontWeight:"700" },
   lbWins:         { color:C.text4, fontSize:11, marginTop:2 },
   lbProfit:       { color:C.green, fontSize:18, fontWeight:"900" },

@@ -6,16 +6,25 @@ import {
 } from "react-native";
 import { SafeAreaView as SAV } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
-import Coachmark from "../components/Coachmark";
-import { API_BASE, hasProAccess, getCommunityWins, getWinsSummary } from "../lib/api";
+import Wordmark from "../components/Wordmark";
+import { API_BASE, hasProAccess, getCommunityFlips, peekCommunityFlips, CommunityFlip, getWinsSummary, peekProfileData, getScanHistory, peekScanHistory } from "../lib/api";
+import { formatTickerItem, formatTickerProfit } from "../lib/flipFormat";
 
 const { width } = Dimensions.get("window");
 
 interface Props {
-  token: string; plan: string; scansLeft: number | null;
+  token: string; plan: string;
+  // False until App.tsx's loadUserData() actually resolves the real plan
+  // (getPlan/getScanCount) - plan itself defaults to "free" immediately on
+  // boot so feature-gating has a safe value to check, but the BADGE must
+  // never render off that default, or every cold launch flashes "Free" for
+  // whoever's actual plan is anything else. Optional/defaulted to true so
+  // any other caller of this component (none today) that doesn't pass it
+  // keeps the old always-show behavior instead of an unexplained blank pill.
+  planLoaded?: boolean;
+  scansLeft: number | null;
   setScansLeft: (n: number | null) => void;
   onNavigate: (s: string) => void; onBack?: () => void; onLogout: () => void;
-  tourStep?: string|null; advanceTour?: (s: string|null) => void; skipTour?: () => void; startTour?: () => void;
 }
 
 function planLevel(p: string) {
@@ -41,14 +50,6 @@ const LIVE_FEED = [
   { emoji:"\uD83C\uDFF7\uFE0F", text:"Price Battle shows your best platform after fees", time:"Tip" },
   { emoji:"\uD83D\uDD0D", text:"Use Specialty Scanner for cards, sneakers & vinyl", time:"Tip" },
   { emoji:"\uD83D\uDCCA", text:"Track every flip in Profit Tracker for real P&L", time:"Tip" },
-];
-
-const EXAMPLE_WINS = [
-  { username:"reseller_mike", item_name:"Nike Air Max", profit:42, isExample:true },
-  { username:"flip_queen", item_name:"Coach Handbag", profit:68, isExample:true },
-  { username:"thrift_king", item_name:"Vintage Levi Jacket", profit:35, isExample:true },
-  { username:"deal_hunter", item_name:"KitchenAid Mixer", profit:90, isExample:true },
-  { username:"side_hustle", item_name:"Lego Star Wars Set", profit:55, isExample:true },
 ];
 
 const TOOLS = [
@@ -91,18 +92,29 @@ const sh = StyleSheet.create({
   chevron: { color:C.text2, fontSize:13, fontWeight:"900" },
 });
 
-export default function DashboardScreen({ token, plan, scansLeft, onNavigate, onLogout, tourStep, advanceTour, skipTour, startTour }: Props) {
-  const [scans, setScans]         = useState<any[]>([]);
+export default function DashboardScreen({ token, plan, planLoaded = true, scansLeft, onNavigate, onLogout }: Props) {
+  // Instant-paint from cache on mount (tab switches remount this screen -
+  // there's no persistent tab navigator - so without this every single tab
+  // tap back to Home showed an empty "Recent Scans" list / no ticker for a
+  // beat even when getScanHistory/getCommunityFlips below would've resolved
+  // from cache anyway). Mirrors winsSummary's peekProfileData below.
+  const [scans, setScans]         = useState<any[]>(() => peekScanHistory(token, "scan", 5) || []);
   const [stats, setStats]         = useState<any>(null);
   const [refreshing, setRefresh]  = useState(false);
   const [liveIdx, setLiveIdx]     = useState(0);
-  const [wins, setWins]           = useState<any[]>([]);
+  const [wins, setWins]           = useState<CommunityFlip[]>(() => peekCommunityFlips(20) || []);
   // The ONE real wins total - from /api/profile's unbounded, Specialty-
   // inclusive aggregate (see getWinsSummary in lib/api.ts), NOT computed
   // from the `scans` list above (that's still a windowed limit=5 fetch,
   // kept only for the RECENT SCANS list UI). Profile and History read the
   // exact same source, so all three headline numbers always agree.
-  const [winsSummary, setWinsSummary] = useState<{ count: number; total: number }>({ count: 0, total: 0 });
+  // Instant-paint from cache if Profile/History already fetched it recently
+  // (see getProfileData in lib/api.ts) - avoids showing "$0 · 0 flips" for
+  // a beat on every tab switch while the real fetch is still in flight.
+  const [winsSummary, setWinsSummary] = useState<{ count: number; total: number }>(() => {
+    const cached = peekProfileData(token);
+    return cached?.stats ? { count: Number(cached.stats.soldCount) || 0, total: Number(cached.stats.soldTotal) || 0 } : { count: 0, total: 0 };
+  });
   const [tipIdx, setTipIdx]       = useState(0);
   const [showTools, setShowTools] = useState(true);
   const [showScans, setShowScans] = useState(true);
@@ -121,38 +133,40 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
       Animated.timing(scanPulse, { toValue:1,    duration:1200, useNativeDriver:true }),
     ]));
     pulse.start();
+    // 4s was too fast to actually read a full "bought $X -> sold $Y · Nd"
+    // line - 7s gives it a comfortable read before it fades to the next one.
     const interval = setInterval(() => {
       Animated.timing(liveFade, { toValue:0, duration:250, useNativeDriver:true }).start(() => {
-        setLiveIdx(i => (i+1) % Math.max((wins.length > 0 ? wins.length : 5), 1));
+        setLiveIdx(i => i+1);
       setTipIdx(i => (i+1) % LIVE_FEED.length);
         Animated.timing(liveFade, { toValue:1, duration:300, useNativeDriver:true }).start();
       });
-    }, 4000);
+    }, 7000);
     return () => { pulse.stop(); clearInterval(interval); };
   }, []);
 
+  // These three calls don't depend on each other - Promise.allSettled fires
+  // them together instead of the previous await-one-then-the-next chain,
+  // which made the dashboard's total load time the SUM of all three calls
+  // instead of the slowest one.
   async function loadData() {
-    try {
-      const r = await fetch(`${API_BASE}/api/scan-history?token=${token}&type=scan&limit=5`);
-      const d = await r.json();
-      const list = Array.isArray(d) ? d : (d.scans || []);
-      if (list.length >= 0) {
-        setScans(list);
-        const buys = list.filter((s: any) => (s.verdict || s.decision) === "BUY");
-        setStats({
-          totalScans: list.length,
-          profitFound: buys.reduce((sum: number, s: any) => sum + (s.profit || s.net_profit || 0), 0),
-          buys: buys.length,
-        });
-      }
-    } catch {}
-    try {
-      const w = await getCommunityWins(20);
-      if (Array.isArray(w) && w.length > 0) setWins(w);
-    } catch {}
-    try {
-      setWinsSummary(await getWinsSummary(token));
-    } catch {}
+    const [scanRes, flipsRes, summaryRes] = await Promise.allSettled([
+      getScanHistory(token, "scan", 5),
+      getCommunityFlips(20),
+      getWinsSummary(token),
+    ]);
+    if (scanRes.status === "fulfilled") {
+      const list = Array.isArray(scanRes.value) ? scanRes.value : ((scanRes.value as any).scans || []);
+      setScans(list);
+      const buys = list.filter((sc: any) => (sc.verdict || sc.decision) === "BUY");
+      setStats({
+        totalScans: list.length,
+        profitFound: buys.reduce((sum: number, sc: any) => sum + (sc.profit || sc.net_profit || 0), 0),
+        buys: buys.length,
+      });
+    }
+    if (flipsRes.status === "fulfilled" && flipsRes.value.length > 0) setWins(flipsRes.value);
+    if (summaryRes.status === "fulfilled") setWinsSummary(summaryRes.value);
     setRefresh(false);
   }
 
@@ -161,39 +175,33 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
   const myTools    = TOOLS.filter(t => t.minPlan <= level && !LAUNCH_HIDDEN.includes(t.id));
   const lockedTools = TOOLS.filter(t => t.minPlan > level && !LAUNCH_HIDDEN.includes(t.id));
       const tip        = LIVE_FEED[tipIdx];
-  const feedData   = wins.length > 0 ? wins : EXAMPLE_WINS;
-  const win        = feedData.length > 0 ? feedData[liveIdx % feedData.length] : null;
+  const win        = wins.length > 0 ? wins[liveIdx % wins.length] : null;
 
   return (
     <SAV style={s.safe}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
-      <Coachmark
-        visible={tourStep === "scan"}
-        step={1} totalSteps={5}
-        title="Welcome to ValuIQ!"
-        body="Let's find out what something is really worth. Tap the Scan tab at the bottom to value your first item."
-        ctaLabel="Got it"
-        anchor="bottom"
-        onNext={() => advanceTour && advanceTour("capture")}
-        onSkip={() => skipTour && skipTour()}
-      />
-
       {/* Nav */}
       <View style={s.nav}>
         <View style={s.logoRow}>
           <View style={s.logoBox}><Text style={s.logoV}>V</Text></View>
-          <Text style={s.logoTxt}>ValuIQ</Text>
+          <Wordmark style={s.logoTxt}/>
         </View>
         <View style={s.navRight}>
-          <View style={[s.planBadge, {borderColor:planColor(plan)+"50", backgroundColor:planColor(plan)+"15"}]}>
-            <Text style={[s.planBadgeTxt, {color:planColor(plan)}]}>{planLabel(plan)}</Text>
-          </View>
+          {/* Neutral placeholder pill (same size, no text/color) until
+              planLoaded - the real plan isn't known yet on a cold launch
+              (App.tsx defaults plan="free" only as a safe FEATURE-GATING
+              default), so rendering the real badge off that default used to
+              flash "Free" -> the real plan the instant it resolved. */}
+          {planLoaded ? (
+            <View style={[s.planBadge, {borderColor:planColor(plan)+"50", backgroundColor:planColor(plan)+"15"}]}>
+              <Text style={[s.planBadgeTxt, {color:planColor(plan)}]}>{planLabel(plan)}</Text>
+            </View>
+          ) : (
+            <View style={[s.planBadge, s.planBadgeSkeleton]} />
+          )}
           {isFree && scansLeft !== null && (
             <View style={s.scansBadge}><Text style={s.scansBadgeTxt}>{scansLeft}/10</Text></View>
           )}
-          <TouchableOpacity onPress={() => startTour && startTour()} style={{marginRight:10}}>
-            <Text style={{fontSize:20}}>{"\u2753"}</Text>
-          </TouchableOpacity>
           <TouchableOpacity onPress={() => onNavigate("profile")}>
             <Text style={{fontSize:22}}>👤</Text>
           </TouchableOpacity>
@@ -246,15 +254,24 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
           <Text style={s.winsBarChevron}>{"›"}</Text>
         </TouchableOpacity>
 
-        {/* LIVE FEED - real community wins */}
+        {/* LIVE FEED - real community wins. Item and profit are two
+            separate Text nodes, not one joined string: the item can be
+            arbitrarily long (real item names), so IT is what ellipsizes
+            (numberOfLines=1, flexShrink) - the "+$X" profit is the hook
+            and has flexShrink:0 so it can never be the part that clips. */}
         <TouchableOpacity style={s.liveBar} onPress={() => onNavigate("community")} activeOpacity={0.85}>
           <View style={s.liveDot}/>
           <Text style={s.liveLbl}>LIVE</Text>
-          <Animated.Text style={[s.liveTxt, {opacity:liveFade}]} numberOfLines={2}>
-            {win
-              ? `${"\uD83D\uDCB0"} ${win.username || "A reseller"} flipped ${win.item_name} for +$${win.profit}${win.isExample ? "  \u00B7 Example" : ""}`
-              : `${"\uD83D\uDD25"} See what resellers are flipping right now`}
-          </Animated.Text>
+          <Animated.View style={[s.liveTxtRow, {opacity:liveFade}]}>
+            {win ? (
+              <>
+                <Text style={s.liveItemTxt} numberOfLines={1}>{"\uD83D\uDCB0 "}{formatTickerItem(win)}</Text>
+                <Text style={s.liveProfitTxt}>{" \u00B7 " + formatTickerProfit(win)}</Text>
+              </>
+            ) : (
+              <Text style={s.liveItemTxt} numberOfLines={1}>{"\uD83D\uDD25 See what resellers are flipping right now"}</Text>
+            )}
+          </Animated.View>
           <Text style={s.liveTime}>{"\u203A"}</Text>
         </TouchableOpacity>
 
@@ -270,12 +287,12 @@ export default function DashboardScreen({ token, plan, scansLeft, onNavigate, on
               <Text style={s.nudgeEye} numberOfLines={1}>
                 {level === 0 ? "FREE PLAN" : level === 1 ? "SELLER PLAN" : "PRO PLAN"}
               </Text>
-              <Text style={s.nudgeTitle} numberOfLines={1}>
+              <Text style={s.nudgeTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                 {level === 0 ? `You have ${scansLeft ?? 10} scans left this month`
                   : level === 1 ? "Unlock Pro"
                   : "Go Lifetime"}
               </Text>
-              <Text style={s.nudgeSub} numberOfLines={1}>
+              <Text style={s.nudgeSub} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
                 {level === 0 ? "Seller is $14.99/month. One flip pays for 3 months."
                   : level === 1 ? "$34.99/month - AI Coach, Profit Tracker & more."
                   : "$149 one-time - everything in Pro, no monthly fees."}
@@ -445,6 +462,9 @@ const s = StyleSheet.create({
   navRight:      { flexDirection:"row", alignItems:"center", gap:8 },
   planBadge:     { borderRadius:100, borderWidth:1, paddingHorizontal:10, paddingVertical:4 },
   planBadgeTxt:  { fontSize:10, fontWeight:"800" },
+  // Matches planBadge's rendered footprint (padding + a line of 10px text)
+  // so nothing shifts layout when it's replaced by the real badge.
+  planBadgeSkeleton: { width:50, height:18, borderColor:C.border, backgroundColor:C.surfaceHigh },
   scansBadge:    { backgroundColor:C.greenBg, borderRadius:100, paddingHorizontal:8, paddingTop:16, paddingBottom:10, borderWidth:1, borderColor:C.greenBorder },
   scansBadgeTxt: { color:C.green, fontSize:10, fontWeight:"700" },
   scroll:        { padding:16, paddingBottom:100 },
@@ -460,7 +480,12 @@ const s = StyleSheet.create({
   winsBarSub:    { color:C.green, fontSize:12, fontWeight:"700", marginTop:2 },
   winsBarChevron:{ color:C.text4, fontSize:18, marginLeft:8 },
   // Live
-  liveBar:       { backgroundColor:"#130a00", borderWidth:1.5, borderColor:"#ff6b6b50", borderRadius:16, padding:16, marginBottom:16 },
+  // flexDirection was missing here - liveDot/liveLbl/the ticker text/chevron
+  // were stacking as 4 separate full-width block rows (RN Views default to
+  // column) instead of one row, which is almost certainly what read as
+  // "mid-scroll cutoff": the ticker text was fighting a broken layout, not
+  // actually being truncated by numberOfLines.
+  liveBar:       { flexDirection:"row", alignItems:"center", gap:8, backgroundColor:"#130a00", borderWidth:1.5, borderColor:"#ff6b6b50", borderRadius:16, padding:16, marginBottom:16 },
   liveTopRow:    { flexDirection:"row", alignItems:"center", gap:8, marginBottom:10 },
   livePulse:     { flexDirection:"row", alignItems:"center", gap:6 },
   liveDot:       { width:9, height:9, borderRadius:5, backgroundColor:C.red },
@@ -469,7 +494,9 @@ const s = StyleSheet.create({
   liveLbl:       { color:C.red, fontSize:11, fontWeight:"900", letterSpacing:1 },
   liveTime:      { color:C.text4, fontSize:10, marginLeft:"auto" as any },
   liveSeeAll:    { color:C.orange, fontSize:11, fontWeight:"700", marginLeft:8 },
-  liveTxt:       { flex:1, color:C.text1, fontSize:14, fontWeight:"700", lineHeight:20, marginBottom:2 },
+  liveTxtRow:    { flex:1, flexDirection:"row", alignItems:"center" },
+  liveItemTxt:   { flexShrink:1, color:C.text1, fontSize:14, fontWeight:"700" },
+  liveProfitTxt: { flexShrink:0, color:C.text1, fontSize:14, fontWeight:"900" },
   liveSubtxt:    { color:C.text4, fontSize:11 },
   // Specialty Hero
   specialtyHero:      { backgroundColor:"#0a0d08", borderWidth:1.5, borderColor:C.green+"40", borderRadius:18, padding:18, marginBottom:16, flexDirection:"row", alignItems:"center", overflow:"hidden" },

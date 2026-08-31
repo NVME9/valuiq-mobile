@@ -88,12 +88,42 @@ export async function sendMagicLink(email: string): Promise<void> {
   const r = await fetch(`${SUPABASE_URL}/auth/v1/otp`, { method:"POST", headers:SB, body:JSON.stringify({email,create_user:true}) });
   if (!r.ok) { const d = await r.json(); throw new Error(d.error_description || "Failed to send"); }
 }
+// Session restore must never hang the launch screen on a cold/slow backend -
+// a short timeout here means App.tsx's init() always reaches setAppReady()
+// quickly, falling back to "session expired" (re-login) rather than a black
+// screen if Supabase doesn't answer in time.
+//
+// MEASURED BUG: Supabase refresh tokens are single-use/rotating - the OLD
+// token is invalidated the instant a refresh succeeds and a NEW one is
+// issued. App.tsx has two independent callers of this function with the
+// SAME stored refresh_token (init()'s session-restore on launch, and the
+// AppState "active" foreground-resume listener) - if both fire close
+// together (exactly what an OTA update's reloadAsync() can trigger: the
+// reload effectively re-launches the app, which can register as "active"
+// around the same moment init() re-runs), whichever request reaches
+// Supabase SECOND gets rejected as an already-consumed token, throwing
+// "Session expired" and logging the user out - a routine update reload
+// must never do that. Coalescing by token: a second caller with the SAME
+// refresh_token while a request is already in flight gets the SAME promise
+// instead of firing a duplicate request that can only lose the race.
+let _refreshInFlight: { token: string; promise: Promise<Session> } | null = null;
 export async function refreshToken(refresh_token: string): Promise<Session> {
-  const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, { method:"POST", headers:SB, body:JSON.stringify({refresh_token}) });
-  const d = await r.json();
-  console.log("[DIAG refreshToken] status=" + r.status + " ok=" + r.ok + " resp=" + JSON.stringify(d).slice(0,300));
-  if (!r.ok) throw new Error("Session expired");
-  return d;
+  if (_refreshInFlight && _refreshInFlight.token === refresh_token) {
+    return _refreshInFlight.promise;
+  }
+  const promise = (async () => {
+    const r = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, { method:"POST", headers:SB, body:JSON.stringify({refresh_token}) });
+    const d = await r.json();
+    console.log("[DIAG refreshToken] status=" + r.status + " ok=" + r.ok + " resp=" + JSON.stringify(d).slice(0,300));
+    if (!r.ok) throw new Error("Session expired");
+    return d;
+  })();
+  _refreshInFlight = { token: refresh_token, promise };
+  try {
+    return await promise;
+  } finally {
+    if (_refreshInFlight?.promise === promise) _refreshInFlight = null;
+  }
 }
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ SESSION ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -124,10 +154,10 @@ export async function clearSession(): Promise<void> { await AsyncStorage.removeI
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ VALUIQ API ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 export async function getPlan(token: string): Promise<string | null> {
-  try { return (await fetch(`${API_BASE}/api/get-plan?token=${token}`).then(r=>r.json()))?.plan || "free"; } catch { return null; }
+  try { return (await fetchWithTimeout(`${API_BASE}/api/get-plan?token=${token}`, undefined, DATA_FETCH_TIMEOUT_MS).then(r=>r.json()))?.plan || "free"; } catch { return null; }
 }
 export async function getScanCount(token: string): Promise<number> {
-  try { return (await fetch(`${API_BASE}/api/scan-count?token=${token}`).then(r=>r.json()))?.count ?? 0; } catch { return 0; }
+  try { return (await fetchWithTimeout(`${API_BASE}/api/scan-count?token=${token}`, undefined, DATA_FETCH_TIMEOUT_MS).then(r=>r.json()))?.count ?? 0; } catch { return 0; }
 }
 export async function updateThriftItem(token: string, payload: any): Promise<any> {
   const r = await fetch(`${API_BASE}/api/thrift-run?token=${token}`, {
@@ -174,9 +204,6 @@ export async function rerunScan(token: string, opts: { itemName: string; brand?:
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
   return r.json();
-}
-export async function getScanHistory(token: string): Promise<any[]> {
-  try { const d = await fetch(`${API_BASE}/api/scan-history?token=${token}`).then(r=>r.json()); return Array.isArray(d) ? d : []; } catch { return []; }
 }
 export async function scanImage(token: string, photos: string[], description?: string, buyPrice?: number): Promise<any> {
   const body: any = {
@@ -277,27 +304,251 @@ export async function analyzeDeathPile(token: string, item: string, photoBase64?
   const r = await fetch(`${API_BASE}/api/deathpile`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, item, photo:photoBase64 ? `data:image/jpeg;base64,${photoBase64}` : undefined}) });
   return r.json();
 }
-export async function getCommunityWins(): Promise<any[]> {
-  try { const d = await fetch(`${API_BASE}/api/community-wins`).then(r=>r.json()); return Array.isArray(d) ? d : []; } catch { return []; }
+export interface CommunityFlip {
+  // Only present on real user-submitted wins - the "report this post"
+  // target. Seed/mined rows have no id: not a moderatable post, just a
+  // real sold-price fact.
+  id?: string;
+  item_name: string; brand: string | null; profit: number;
+  // Only populated for seed/mined rows - real user submissions
+  // (community_wins) don't store a buy/sell pair, only the profit.
+  buy_price: number | null; sell_price: number | null;
+  days_to_sale: number | null; platform: string | null;
+  username: string; created_at: string;
+}
+// THE single anonymized real-flips source - dashboard ticker, community
+// feed, and leaderboard tab all read from this one function/endpoint, so
+// there's exactly one place fake data could sneak back in. Every row is
+// anonymized server-side (see deal-ai-pro's /api/community-flips):
+// username is always a generic "A reseller", never a real name, whether
+// the row is scraped/seed data or a real user's own submitted win.
+// Short TTL, not zero: the endpoint deliberately serves a random window of
+// the mined pool so a revisit sees genuine variety (see its own comment in
+// deal-ai-pro/app/api/community-flips/route.ts) - a long cache would defeat
+// that. This just absorbs the common case of Dashboard/Community mounting
+// and unmounting again within a few seconds of each other (no persistent
+// tab navigator - see the profile cache comment above), not repeat visits
+// minutes apart. Public data, no token, so one cache entry per limit.
+const COMMUNITY_FLIPS_TTL = 20000;
+export async function getCommunityFlips(limit = 20): Promise<CommunityFlip[]> {
+  const key = `community-flips:${limit}`;
+  const cached = cacheGet<CommunityFlip[]>(key, COMMUNITY_FLIPS_TTL);
+  if (cached) return cached;
+  try {
+    const r = await fetchWithTimeout(`${API_BASE}/api/community-flips?limit=${limit}`, undefined, DATA_FETCH_TIMEOUT_MS);
+    const d = await r.json();
+    const flips = d?.success && Array.isArray(d.flips) ? d.flips : [];
+    cacheSet(key, flips);
+    return flips;
+  } catch {
+    // Same stale-over-empty rule as getScanHistory/getProfileData: a timed-
+    // out ticker must never flash empty when it already had real flips a
+    // moment ago - only a cold cache (nothing fetched yet this session)
+    // falls through to [].
+    const stale = _cache.get(key);
+    return stale ? (stale.data as CommunityFlip[]) : [];
+  }
+}
+// Synchronous cache peek - lets Dashboard/Community paint their ticker/feed
+// instantly on mount, before deciding whether they even need to call
+// getCommunityFlips at all. Mirrors peekProfileData/peekScanHistory.
+export function peekCommunityFlips(limit = 20): CommunityFlip[] | undefined {
+  return _cache.get(`community-flips:${limit}`)?.data as CommunityFlip[] | undefined;
 }
 
-// THE single source of truth for "money made" - /api/profile computes this
-// from an UNBOUNDED query (no .limit(), unlike the windowed scan-history
-// list fetches Dashboard/History use for their own item lists) over ALL the
-// user's non-thrift scans, Specialty included. Dashboard, Profile, and
-// History's headline wins figures all call this same function so they can
-// never disagree - only their own item LISTS still come from their own
-// separate, windowed fetches.
-export async function getWinsSummary(token: string): Promise<{ count: number; total: number }> {
+export interface DemoFlip {
+  itemName: string; brand: string | null; category: string;
+  buyPrice: number; sellPrice: number; profit: number; daysToSale: number;
+  platform: string | null;
+}
+// One real, resolved sold outcome from the community/moat pool (seed
+// account's mined "what sold" data - never a real user's private flip) -
+// powers the empty-Wins "here's what your wins will look like" demo card.
+export async function getDemoFlip(): Promise<DemoFlip | null> {
   try {
-    const r = await fetch(`${API_BASE}/api/profile?token=${token}`);
+    const r = await fetch(`${API_BASE}/api/moat-demo-flip`);
     const d = await r.json();
-    if (d?.success && d.stats) {
-      return { count: Number(d.stats.soldCount) || 0, total: Number(d.stats.soldTotal) || 0 };
+    return d?.success && d.flip ? d.flip as DemoFlip : null;
+  } catch { return null; }
+}
+
+// ---- tiny in-memory response cache ----
+// Dashboard/History/Profile each get fully unmounted and remounted on every
+// tab switch (no persistent tab navigator in this app), which used to mean
+// every single visit re-hit /api/profile from scratch even seconds after
+// the last visit - the main source of Wins/Profile feeling slow. A short
+// TTL here lets a revisit within the window paint instantly from cache
+// with zero network, while a visit after the window still gets a real
+// refresh (see PROFILE_TTL below).
+const _cache = new Map<string, { data: any; ts: number }>();
+function cacheGet<T>(key: string, ttlMs: number): T | undefined {
+  const hit = _cache.get(key);
+  if (!hit || Date.now() - hit.ts > ttlMs) return undefined;
+  return hit.data as T;
+}
+function cacheSet(key: string, data: any) { _cache.set(key, { data, ts: Date.now() }); }
+export function invalidateProfileCache(token: string) { _cache.delete(`profile:${token}`); }
+
+// INCIDENT (2026-08-30): a plain fetch() has no default timeout in React
+// Native - when /api/profile briefly hung server-side (next/server's
+// after() misbehaving on deploy), every screen that awaits it (Dashboard,
+// Profile, History all block on getProfileData/getScanHistory before their
+// own `loading` flips false) hung right along with it - no spinner timeout,
+// no error, just stuck. Worse, App.tsx's boot sequence awaited getPlan/
+// getScanCount (also plain fetch, no timeout) before ever rendering the
+// main UI, so a cold/slow backend meant a multi-second BLACK screen on
+// every launch, not just a stuck spinner. AbortController-backed timeout on
+// every launch-path + data call now, so a slow/hung backend degrades
+// gracefully instead of bricking the screen.
+//
+// Two different budgets on purpose:
+// - AUTH_FETCH_TIMEOUT_MS (4s) - refreshToken only, still on App.tsx's boot
+//   path (init() awaits it before setAppReady()) - has to stay short so a
+//   cold backend can never reintroduce the black-screen-on-launch bug.
+// - DATA_FETCH_TIMEOUT_MS (8s) - getProfileData/getScanHistory/getPlan/
+//   getScanCount. MEASURED BUG: at 4s (this used to be one shared constant),
+//   a merely-slow-but-VALID scan-history response got cut off just as often
+//   as a genuinely hung one, and getScanHistory's catch-all returned []  -
+//   which every caller renders as "0 scans" / "No scans yet" - CONTRADICTING
+//   the real "$56 Made" total sitting right next to it from a separately-
+//   cached /api/profile call. None of these four calls are on the boot
+//   path anymore (App.tsx's loadUserData is fire-and-forget; every screen
+//   that calls these already renders its own shell first and fills data in
+//   after), so they can afford a longer budget before giving up.
+const AUTH_FETCH_TIMEOUT_MS = 4000;
+const DATA_FETCH_TIMEOUT_MS = 8000;
+async function fetchWithTimeout(url: string, options?: RequestInit, timeoutMs: number = AUTH_FETCH_TIMEOUT_MS): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+export interface ProfileData { profile: any; stats: any; badges: any[] }
+const PROFILE_TTL = 30000;
+
+// THE single source of truth for both the full profile payload AND "money
+// made" - Dashboard, Profile, and History all read through this one cached
+// fetcher instead of each independently hitting /api/profile, so their
+// headline wins figures can never disagree AND a revisit within 30s of any
+// of the three screens fetching it is instant, no network, no spinner.
+export async function getProfileData(token: string): Promise<ProfileData | null> {
+  const key = `profile:${token}`;
+  const cached = cacheGet<ProfileData>(key, PROFILE_TTL);
+  if (cached) return cached;
+  try {
+    const r = await fetchWithTimeout(`${API_BASE}/api/profile?token=${token}`, undefined, DATA_FETCH_TIMEOUT_MS);
+    const d = await r.json();
+    if (d?.success) {
+      const data: ProfileData = { profile: d.profile || {}, stats: d.stats || {}, badges: d.badges || [] };
+      cacheSet(key, data);
+      return data;
     }
   } catch {}
+  // Timeout/network failure/non-success response - fall back to the last
+  // real value fetched THIS SESSION (even past its TTL) rather than null,
+  // which every caller renders as a zeroed-out "$0 made." A stale real
+  // number is more honest than a fabricated zero for a user who actually
+  // has real stats on file; only a genuinely cold cache (nothing fetched
+  // yet this session) falls through to null.
+  const stale = _cache.get(key);
+  return stale ? (stale.data as ProfileData) : null;
+}
+// Synchronous cache peek - lets a screen paint its LAST-known data on the
+// very first render (no blank/spinner frame) before deciding whether it
+// even needs to call getProfileData at all.
+export function peekProfileData(token: string): ProfileData | undefined {
+  return cacheGet<ProfileData>(`profile:${token}`, PROFILE_TTL);
+}
+
+export async function getWinsSummary(token: string): Promise<{ count: number; total: number }> {
+  const d = await getProfileData(token);
+  if (d?.stats) return { count: Number(d.stats.soldCount) || 0, total: Number(d.stats.soldTotal) || 0 };
   return { count: 0, total: 0 };
 }
+
+// Same shape as getProfileData's cache above: History re-fetches this
+// (up to 500 rows, filtered server-side) on every single mount, with zero
+// caching, and this app fully unmounts/remounts every screen on every tab
+// switch - so hopping Home -> Wins -> Home re-paid that cost every time.
+// A short TTL lets a revisit within the window paint instantly.
+//
+// Unlike the profile stat (read-only-ish, changes slowly), THIS list gets
+// directly mutated by the same screen (delete/edit/re-run/log-sale) - a
+// blind cache here would make "I just deleted this" or "I just logged this
+// sale" look like it silently didn't work for up to 30s. Callers that mutate
+// MUST call invalidateScanHistoryCache(token) right after, before re-fetching.
+const SCAN_HISTORY_TTL = 30000;
+export async function getScanHistory(token: string, type: string, limit: number): Promise<any[]> {
+  const key = `scan-history:${token}:${type}:${limit}`;
+  const cached = cacheGet<any[]>(key, SCAN_HISTORY_TTL);
+  if (cached) return cached;
+  try {
+    const r = await fetchWithTimeout(`${API_BASE}/api/scan-history?token=${encodeURIComponent(token)}&type=${type}&limit=${limit}`, undefined, DATA_FETCH_TIMEOUT_MS);
+    const d = await r.json();
+    const list = Array.isArray(d) ? d : [];
+    cacheSet(key, list);
+    return list;
+  } catch {
+    // MEASURED BUG: this used to return [] unconditionally on a timeout,
+    // which every caller (HistoryScreen's stat bar/empty state) renders as
+    // "0 Scans" / "No scans yet" - indistinguishable from a real empty
+    // account, even sitting right next to a real "$56 Made" from a
+    // separately-cached call that happened to succeed. Falling back to the
+    // last list this exact query fetched successfully (even past its TTL)
+    // is strictly more honest than a fabricated empty list; only a query
+    // that's never once succeeded this session (a genuinely cold cache)
+    // still has nothing to fall back to and returns [].
+    const stale = _cache.get(key);
+    return stale ? (stale.data as any[]) : [];
+  }
+}
+// Synchronous cache peek (any freshness, unlike getScanHistory's own TTL-
+// gated cacheGet above) - lets a screen paint its LAST-known list on the
+// very first render, before deciding whether it even needs to call
+// getScanHistory at all. Mirrors peekProfileData.
+export function peekScanHistory(token: string, type: string, limit: number): any[] | undefined {
+  const hit = _cache.get(`scan-history:${token}:${type}:${limit}`);
+  return hit ? (hit.data as any[]) : undefined;
+}
+export function invalidateScanHistoryCache(token: string) {
+  for (const k of Array.from(_cache.keys())) {
+    if (k.startsWith(`scan-history:${token}:`)) _cache.delete(k);
+  }
+}
+
+// MEASURED BUG: HistoryScreen's loadData() used to fetch this with a plain,
+// un-timed, un-cached fetch() sitting inside the same Promise.allSettled as
+// the (properly timed+cached) scan/specialty/profile calls - allSettled
+// waits for EVERY promise to settle before the caller can proceed, so a
+// merely-slow thrift-run response held up `loading` flipping false for the
+// WHOLE screen even though the other three calls had already resolved (or
+// were being served from cache). Same timeout+cache+stale-fallback
+// treatment as getScanHistory now closes that gap.
+const THRIFT_RUNS_TTL = 30000;
+export async function getThriftRuns(token: string): Promise<any[]> {
+  const key = `thrift-runs:${token}`;
+  const cached = cacheGet<any[]>(key, THRIFT_RUNS_TTL);
+  if (cached) return cached;
+  try {
+    const r = await fetchWithTimeout(`${API_BASE}/api/thrift-run?token=${token}`, undefined, DATA_FETCH_TIMEOUT_MS);
+    const d = await r.json();
+    const list = d?.success && Array.isArray(d.runs) ? d.runs : [];
+    cacheSet(key, list);
+    return list;
+  } catch {
+    const stale = _cache.get(key);
+    return stale ? (stale.data as any[]) : [];
+  }
+}
+export function peekThriftRuns(token: string): any[] | undefined {
+  const hit = _cache.get(`thrift-runs:${token}`);
+  return hit ? (hit.data as any[]) : undefined;
+}
+export function invalidateThriftRunsCache(token: string) { _cache.delete(`thrift-runs:${token}`); }
 
 export async function getProfitOracle(token: string, item: { category?: string; brand?: string; itemName?: string; buyPrice?: number; estValue?: number; bestPlatform?: string; lensBuyTarget?: number; lensNetProfit?: number; lensSellPrice?: number }): Promise<any> {
   try {

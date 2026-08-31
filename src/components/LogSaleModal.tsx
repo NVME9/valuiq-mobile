@@ -40,13 +40,14 @@ interface Props {
   token: string;
   scan: PendingScan | null;
   onClose: () => void;
+  onLeaderboard?: () => void;
 }
 
-export default function LogSaleModal({ visible, token, scan, onClose }: Props) {
+export default function LogSaleModal({ visible, token, scan, onClose, onLeaderboard }: Props) {
   // stat starts null: SaleCaptureCard's onReveal opens this shell the
   // instant the sale save succeeds, before the crowd-comparison fetch
   // resolves - onRevealStat fills stat in afterward via the ref below.
-  const [reveal, setReveal] = useState<{ stat: FlexStat | null; itemName: string; brand: string | null; loadingSubStat?: string } | null>(null);
+  const [reveal, setReveal] = useState<{ stat: FlexStat | null; itemName: string; brand: string | null; loadingSubStat?: string; netProfit: number | null } | null>(null);
   // SaleCaptureCard calls onReveal then onDone back to back, synchronously,
   // on a successful "sold" save. This ref lets onDone tell the two cases
   // apart: a reveal just got queued (skip closing - the reveal owns closing
@@ -65,7 +66,7 @@ export default function LogSaleModal({ visible, token, scan, onClose }: Props) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
       {reveal ? (
-        <FlexRevealBody stat={reveal.stat} itemName={reveal.itemName} brand={reveal.brand} loadingSubStat={reveal.loadingSubStat} onClose={close} />
+        <FlexRevealBody stat={reveal.stat} itemName={reveal.itemName} brand={reveal.brand} loadingSubStat={reveal.loadingSubStat} knownNetProfit={reveal.netProfit} onClose={close} onLeaderboard={onLeaderboard ? () => { setReveal(null); onLeaderboard(); } : undefined} />
       ) : (
         <KeyboardAvoidingView
           style={{ flex: 1 }}
@@ -87,9 +88,9 @@ export default function LogSaleModal({ visible, token, scan, onClose }: Props) {
                   if (justRevealedRef.current) { justRevealedRef.current = false; return; }
                   close();
                 }}
-                onReveal={(itemName, brand, loadingSubStat) => {
+                onReveal={(itemName, brand, loadingSubStat, netProfit) => {
                   justRevealedRef.current = true;
-                  setReveal({ stat: null, itemName, brand, loadingSubStat });
+                  setReveal({ stat: null, itemName, brand, loadingSubStat, netProfit });
                 }}
                 onRevealStat={(stat) => {
                   setReveal((prev) => (prev ? { ...prev, stat } : prev));

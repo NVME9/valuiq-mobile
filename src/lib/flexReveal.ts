@@ -59,6 +59,12 @@ export interface FlexStat {
   subStat: string;     // the concrete, always-true detail line beneath it
   badge?: string;       // short rank/record label, if earned
   streakRibbon?: string; // small "Nth flip this month" ribbon, independent of which tier won
+  // True when this stat represents a real financial LOSS (net profit < 0) -
+  // resellers take losses, and a loss isn't a "win": FlexRevealCard reads
+  // this to swap out the celebratory green-glow/badge/"share your win"
+  // treatment for an honest, non-celebratory one. Never inferred from the
+  // formatted headline string - always the real signed number.
+  isLoss?: boolean;
 }
 
 // Readiness bar for a segment percentile to be honest - matches the
@@ -76,7 +82,7 @@ const WEEKLY_TOP_PCT = 10;
 // Round numbers worth a milestone callout.
 const STREAK_MILESTONES = [5, 10, 25, 50, 100, 250, 500];
 
-function money(n: number): string {
+export function money(n: number): string {
   const neg = n < 0;
   return (neg ? "-$" : "$") + Math.round(Math.abs(n)).toLocaleString();
 }
@@ -176,6 +182,7 @@ export function selectFlexStat(input: FlexStatInput): FlexStat {
   // actually made" is the hero in every tier, fallback included.
   const headline = flip.netProfit != null ? money(flip.netProfit) : "Logged!";
   const subStat = concreteSubline(flip) || "Nice flip.";
+  const isLoss = flip.netProfit != null && flip.netProfit < 0;
 
   // Streak ribbon is independent of which tier won - skip it only when the
   // milestone tier already IS the streak message, to avoid saying it twice.
@@ -184,7 +191,7 @@ export function selectFlexStat(input: FlexStatInput): FlexStat {
       ? `🔥 ${streak.salesThisMonth}${ordinalSuffix(streak.salesThisMonth)} flip this month`
       : undefined;
 
-  return { tier, headline, subStat, badge, streakRibbon };
+  return { tier, headline, subStat, badge, streakRibbon, isLoss };
 }
 
 function ordinalSuffix(n: number): string {
@@ -226,11 +233,29 @@ export async function fetchFlexStat(token: string, scanId: string): Promise<Flex
 // dead button. Piggybacks on the scan row's existing specialty_data JSON
 // blob (already whitelisted on the scan-history PATCH) instead of adding a
 // new column - cheapest path, no migration.
-export function readCachedFlexStat(specialtyData: string | null | undefined): FlexStat | null {
+// knownNetProfit: the row's real net_profit, ALWAYS passed by the caller
+// (HistoryScreen has it on hand with zero extra fetch) so isLoss can be
+// re-derived here rather than trusted from the cached blob.
+//
+// MEASURED INCIDENT (2026-08-31): every FlexStat cached before the isLoss
+// field existed in this codebase has no such key at all - not `false`,
+// simply absent (JSON.stringify drops an undefined property). That reads
+// as falsy "not a loss" on every read forever after, rendering a real past
+// loss as a fully celebratory win (green glow, "Share your win", badge/
+// ribbon intact) - even though today's live selectFlexStat() computes
+// isLoss correctly, this cached-read path never calls it again once a stat
+// is cached, so the bug is permanent for that row without this fix.
+// isLoss is a pure function of net_profit < 0 - recomputing it here is a
+// single free comparison and can never be wrong, so this heals EVERY
+// existing cached row (and any future cache-shape drift) the next time
+// it's viewed, with no migration and no cache invalidation required.
+export function readCachedFlexStat(specialtyData: string | null | undefined, knownNetProfit: number | null | undefined): FlexStat | null {
   if (!specialtyData) return null;
   try {
     const blob = JSON.parse(specialtyData);
-    return blob && blob.flexStat ? (blob.flexStat as FlexStat) : null;
+    const cached = blob && blob.flexStat ? (blob.flexStat as FlexStat) : null;
+    if (!cached) return null;
+    return { ...cached, isLoss: knownNetProfit != null && knownNetProfit < 0 };
   } catch {
     return null;
   }

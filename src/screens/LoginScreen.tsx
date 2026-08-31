@@ -6,6 +6,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import Wordmark from "../components/Wordmark";
 import {
   isBiometricAvailable, isBiometricEnabled, enableBiometric,
   authenticateWithBiometrics, getBiometricEmail, getBiometricLabel,
@@ -20,7 +21,14 @@ import {
 type Mode = "signin" | "signup" | "forgot" | "reset";
 
 interface Props {
-  onLogin: (session: Session) => void;
+  // justSignedUp: true ONLY for a brand-new account just created via the
+  // Create Account form THIS session - App.tsx uses it (never the old
+  // @valuiq_tour_done flag, which reset on reloads and could route a
+  // RETURNING user into the first-scan nudge) to decide whether to route
+  // straight to Scan. Every other caller (sign-in, biometric quick-login,
+  // Apple/Google) omits it, which is falsy and means "existing account,
+  // land on Home like normal."
+  onLogin: (session: Session, justSignedUp?: boolean) => void;
 }
 
 export default function LoginScreen({ onLogin }: Props) {
@@ -77,7 +85,14 @@ export default function LoginScreen({ onLogin }: Props) {
       }
       setLoading(false);
       setEmail(storedEmail);
-      setError("Session expired. Please sign in with your password.");
+      // MEASURED BUG: this used to say "Session expired" - alarming and
+      // usually not even true (the real session is often fine; it's just
+      // THIS quick-login shortcut's separately-stored token that's stale -
+      // see App.tsx's syncBiometricToken). This auto-fires on mount
+      // whenever a stored biometric token exists, so a stale one used to
+      // greet the user with a scary error before they'd even tapped
+      // anything. Softened to a routine ask, not an incident report.
+      setError("Please sign in with your password to continue.");
     } catch {
       setLoading(false);
       setEmail(storedEmail);
@@ -93,12 +108,13 @@ export default function LoginScreen({ onLogin }: Props) {
       return;
     }
     setLoading(true);
+    const justSignedUp = mode === "signup";
     try {
-      const session = mode === "signup"
+      const session = justSignedUp
         ? await signUp(email.trim(), password)
         : await signIn(email.trim(), password);
       await saveSession(session);
-      if (mode === "signup") {
+      if (justSignedUp) {
         fetch(`${API_BASE}/api/email-sequences`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -114,18 +130,18 @@ export default function LoginScreen({ onLogin }: Props) {
           `Enable ${label}?`,
           `Sign in faster next time with ${label}.`,
           [
-            { text: "Not Now", style: "cancel", onPress: () => onLogin(session) },
+            { text: "Not Now", style: "cancel", onPress: () => onLogin(session, justSignedUp) },
             {
               text: "Enable",
               onPress: async () => {
                 await enableBiometric(email.trim(), session.refresh_token || "");
-                onLogin(session);
+                onLogin(session, justSignedUp);
               }
             }
           ]
         );
       } else {
-        onLogin(session);
+        onLogin(session, justSignedUp);
       }
     } catch (e: any) {
       setError(e.message || "Something went wrong. Please try again.");
@@ -230,7 +246,7 @@ export default function LoginScreen({ onLogin }: Props) {
             <View style={s.logoIcon}>
               <Text style={s.logoIconText}>V</Text>
             </View>
-            <Text style={s.logoText}>ValuIQ</Text>
+            <Wordmark style={s.logoText}/>
           </View>
 
           <Text style={s.h2}>{mode === "signup" ? "Create Account" : mode === "forgot" ? "Reset Password" : mode === "reset" ? "Enter Reset Code" : "Welcome Back"}</Text>

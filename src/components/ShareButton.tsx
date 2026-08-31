@@ -22,7 +22,7 @@ interface Props {
   compact?: boolean;
 }
 
-export default function ShareButton({ message, title = "ValuIQ, Find", compact = false }: Props) {
+export default function ShareButton({ message, title = "ValuIQ Find", compact = false }: Props) {
   const [sharing, setSharing] = useState(false);
 
   async function handleShare() {

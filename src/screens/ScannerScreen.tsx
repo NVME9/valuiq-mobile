@@ -10,7 +10,7 @@ import ViewShot from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
-import Coachmark from "../components/Coachmark";
+import Wordmark from "../components/Wordmark";
 import ShareButton from "../components/ShareButton";
 import ShareCard from "../components/ShareCard";
 import { API_BASE, scanImage, scanBarcode , getProfitOracle, shareWin } from "../lib/api";
@@ -36,7 +36,8 @@ interface Props {
   setScansLeft: (n: number | null) => void;
   onNavigate: (s: string, data?: any) => void;
   onLogout: () => void;
-  tourStep?: string|null; advanceTour?: (s: string|null) => void; skipTour?: () => void;
+  firstScanNudge?: boolean;
+  onDismissFirstScanNudge?: () => void;
 }
 
 // Reusable collapsed-by-default section: the hero answers the question
@@ -62,7 +63,7 @@ function CollapsibleSection({ title, expanded, onToggle, children }: { title: st
   );
 }
 
-export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, onNavigate, onLogout, tourStep, advanceTour, skipTour }: Props) {
+export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, onNavigate, onLogout, firstScanNudge, onDismissFirstScanNudge }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>("camera");
@@ -175,7 +176,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       const small = await compressPhoto(photo.base64, photo.width, photo.height, isPrimary ? "primary" : "secondary");
       setPhotos(p => {
         const next = [...p, small].slice(0, MAX_PHOTOS);
-        if (next.length >= MAX_PHOTOS) { setStep("review"); if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("review"); }
+        if (next.length >= MAX_PHOTOS) { setStep("review"); }
         return next;
       });
     }
@@ -201,7 +202,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     if (compressed.length) {
       setPhotos(p => [...p, ...compressed].slice(0, MAX_PHOTOS));
       setStep("review");
-      if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("review");
     }
   }
 
@@ -211,6 +211,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     await analyze(undefined, data);
   }
   async function analyze(customPhotos?: string[], barcode?: string) {
+    if (firstScanNudge) onDismissFirstScanNudge && onDismissFirstScanNudge();
     setStep("loading");
     try {
       let d: any;
@@ -247,12 +248,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         }
       } catch {}
       setStep("result");
-      if ((tourStep === "review" || tourStep === "review-wait" || tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("result");
       if (plan === "free") setScansLeft(n => n !== null ? Math.max(0, n - 1) : null);
     } catch (e: any) {
       setResult({ _error: e.message });
       setStep("result");
-      if ((tourStep === "review" || tourStep === "review-wait" || tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("result");
     }
   }
 
@@ -292,7 +291,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       <View style={s.center}>
         <View style={s.navLogoRow}>
           <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
-          <Text style={s.logoText}>ValuIQ</Text>
+          <Wordmark style={s.logoText}/>
         </View>
         <StagedProgress
           active
@@ -351,7 +350,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         <View style={s.nav}>
           <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
           <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
-          <Text style={s.logoText}>ValuIQ</Text>
+          <Wordmark style={s.logoText}/>
         </View>
         <View style={s.center}>
           <Text style={{ fontSize: 36, marginBottom: 16 }}></Text>
@@ -448,9 +447,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           tier: "skip" as const,
           emoji: "💵",
           label: "REAL DATA",
+          // MEASURED BUG: this text was rendering clipped at the card's
+          // bottom edge on Android - not a numberOfLines cap (there wasn't
+          // one), but ProfitFlexHero's card has overflow:"hidden" (needed to
+          // clip the glow SVG to its rounded corners) paired with a
+          // lineHeight too tight for bold text's real rendered height, which
+          // shaved off the last line's descenders. Fixed at the card level
+          // (see ProfitFlexHero.tsx's skipReason style); shortened here too
+          // since shorter copy needs less room to begin with.
           copy: Number(result.sellPrice) > 0
-            ? `Sells for about $${Math.round(Number(result.sellPrice))}. Enter what you'd pay to see your real profit and verdict.`
-            : "Enter what you'd pay to see your real profit and verdict.",
+            ? `Sells for ~$${Math.round(Number(result.sellPrice))}. Add what you paid to see your profit.`
+            : "Add what you paid to see your profit.",
           accent: C.yellow,
           adjustedROI: 0,
           daysUsed: 0,
@@ -536,16 +543,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     return (
       <SafeAreaView style={s.safe}>
         <StatusBar barStyle="light-content"/>
-        <Coachmark
-          visible={tourStep === "result"}
-          step={4} totalSteps={5}
-          title="Your real numbers"
-          body="True profit after fees, plus a clear BUY or PASS - based on real reseller sales, not guesses. This is what makes ValuIQ different. Your scan also saved automatically."
-          ctaLabel="See where it saved"
-          anchor="center"
-          onNext={() => { advanceTour && advanceTour("history"); onNavigate("history"); }}
-          onSkip={() => skipTour && skipTour()}
-        />
         {/* Off-screen branded card, captured (not displayed) when sharing as an image */}
         <View style={{ position: "absolute", top: 0, left: -9999 }} pointerEvents="none">
           <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1, result: "tmpfile" }}>
@@ -567,7 +564,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             <Text style={s.navBackText}>{"\u2039"}</Text>
           </TouchableOpacity>
           <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
-          <Text style={s.logoText}>ValuIQ</Text>
+          <Wordmark style={s.logoText}/>
           <TouchableOpacity onPress={reset} style={[s.navBtn,{marginLeft:"auto" as any}]}>
             <Text style={s.navBtnText}>New Scan</Text>
           </TouchableOpacity>
@@ -647,6 +644,56 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 skipDetail={skipDetail}
               />
 
+              {/* MEASURED BUG: this used to be TWO stacked elements that did
+                  the exact same thing (a first-scan-only callout sitting on
+                  top of an always-shown "Sold it? Log your flip" button),
+                  AND a completely separate "want a reminder" card ~65 lines
+                  further down, both trapped inside {!isSkip && ...} - which
+                  hid all of it on a no-buy-price scan (isSkip is forced true
+                  whenever no price was entered, see enteredBp above), the
+                  single most common first-ever scan. Untangled into two
+                  clean, adjacent rows, gated only on what each actually
+                  needs (result.id / pendingCheckIn), never on isSkip -
+                  "Sold one before?" for a PAST flip, "Not sold yet?" for
+                  something just bought - no duplication, no tangle. */}
+              {result.id && (
+                <TouchableOpacity style={s.soldRow} activeOpacity={0.85} onPress={() => setShowLogSale(true)}>
+                  <Text style={{fontSize:20}}>{"🏆"}</Text>
+                  <View style={{flex:1}}>
+                    <Text style={s.soldRowTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                      Sold one before?
+                    </Text>
+                    <Text style={s.soldRowSub} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+                      Log it {"→"} get your win card
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+
+              {/* Not sold yet - the deferred (~2 week reminder) path, for
+                  something just bought/decided on, not something already
+                  flipped. Same pendingCheckIn/acceptCheckIn/declineCheckIn
+                  mechanism as before (set in analyze() only on a real BUY
+                  decision) - just relabeled by timing and moved out from
+                  under isSkip so it can actually show on an unpriced BUY. */}
+              {pendingCheckIn && !checkInAsked && (
+                <View style={s.askCard}>
+                  <Text style={s.askTitle}>Not sold yet? We'll remind you</Text>
+                  <Text style={s.askBody}>
+                    We'll check back in about 2 weeks so you can log what this actually sells
+                    for - keeps your stats real and sharpens the Oracle for everyone.
+                  </Text>
+                  <View style={s.askRow}>
+                    <TouchableOpacity style={s.askNo} onPress={declineCheckIn} activeOpacity={0.8}>
+                      <Text style={s.askNoTxt}>Not now</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.askYes} onPress={acceptCheckIn} activeOpacity={0.85}>
+                      <Text style={s.askYesTxt}>Yes, remind me</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
               {/* Everything below is buy-oriented - hidden entirely on a
                   skip verdict, which is shown justified by its one reason
                   in the hero above and stripped of buy-context clutter. */}
@@ -682,55 +729,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     )}
                   </TouchableOpacity>
 
-                  {/* Already sold it? Log it now - the IMMEDIATE path, right
-                      on the result screen. result.id only exists when this
-                      scan was actually saved (lens/route.ts skips saving on
-                      a re-run/thrift-run scan) - gate on it so this never
-                      opens the log flow for a scan with nothing to log
-                      against. */}
-                  {result.id && (
-                    <TouchableOpacity
-                      style={{flexDirection:"row",alignItems:"center",justifyContent:"center",gap:6,backgroundColor:C.surface,borderWidth:1,borderColor:C.green+"40",borderRadius:14,paddingVertical:14,paddingHorizontal:12,marginBottom:12}}
-                      activeOpacity={0.85}
-                      onPress={() => setShowLogSale(true)}
-                    >
-                      <Text style={{fontSize:16}}>{"🏆"}</Text>
-                      {/* MEASURED BUG: "Already sold it? Log your flip →" spilled
-                          off the button edge (arrow clipped) on narrow screens -
-                          no flexShrink/numberOfLines on a Text sized to its own
-                          content inside a row with no width cap. Shortened copy
-                          first, plus the same fit guard as the button above so
-                          it can't spill regardless of device width. */}
-                      <Text
-                        style={{color:C.green,fontSize:14,fontWeight:"800",flexShrink:1}}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.85}
-                      >
-                        Sold it? Log your flip →
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-
-                  {/* SOFT NOTIFICATION ASK - only on a real buy verdict, never on a skip */}
-                  {pendingCheckIn && !checkInAsked && (
-                    <View style={s.askCard}>
-                      <Text style={s.askTitle}>Want a reminder to log what this sells for?</Text>
-                      <Text style={s.askBody}>
-                        We'll check back in about 2 weeks. Logging what actually sold keeps your profit
-                        stats real - and sharpens the Oracle for everyone.
-                      </Text>
-                      <View style={s.askRow}>
-                        <TouchableOpacity style={s.askNo} onPress={declineCheckIn} activeOpacity={0.8}>
-                          <Text style={s.askNoTxt}>Not now</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={s.askYes} onPress={acceptCheckIn} activeOpacity={0.85}>
-                          <Text style={s.askYesTxt}>Yes, remind me</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  )}
-
                   {/* Collapsed by default - the hero above already answers
                       the question; everything else is one tap away. */}
                   {result.platformBreakdown && result.platformBreakdown.length > 0 && (
@@ -741,13 +739,19 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                         const isBest = i === 0 && !isNeg;
                         return (
                         <View key={pb.platform} style={{marginBottom:goDeeper?14:8}}>
-                          <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}}>
-                            <View style={{flexDirection:"row",alignItems:"center",gap:6}}>
+                          <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                            {/* A long platform name (e.g. "Facebook Marketplace")
+                                paired with a profit figure had no flex/shrink
+                                guard on either side - two unbounded-width
+                                siblings in a row could push each other past
+                                the screen edge. flex:1+shrink on the name side,
+                                profit stays fixed-width and fully visible. */}
+                            <View style={{flexDirection:"row",alignItems:"center",gap:6,flex:1,flexShrink:1}}>
                               <View style={{width:3,height:16,borderRadius:2,backgroundColor:isBest?C.green:C.border}}/>
-                              <Text style={{color:i===0?C.text1:C.text3,fontSize:14,fontWeight:i===0?"800":"500"}}>{pb.platform}</Text>
+                              <Text style={{color:i===0?C.text1:C.text3,fontSize:14,fontWeight:i===0?"800":"500",flexShrink:1}} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{pb.platform}</Text>
                               {isBest && <Text style={{color:C.green,fontSize:9,fontWeight:"900"}}>BEST</Text>}
                             </View>
-                            <Text style={{color:isNeg?C.red:(i===0?C.green:C.text2),fontSize:15,fontWeight:"800"}}>
+                            <Text style={{color:isNeg?C.red:(i===0?C.green:C.text2),fontSize:15,fontWeight:"800",flexShrink:0}} numberOfLines={1}>
                               {isNeg ? "-$" + Math.abs(profNum) : "+$" + profNum} profit
                             </Text>
                           </View>
@@ -912,30 +916,25 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   if (step === "review") return (
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" />
-      <Coachmark
-        visible={tourStep === "review"}
-        step={3} totalSteps={5}
-        title="Add details (optional)"
-        body="Enter the price you would pay, plus brand or extra details. All optional, but they sharpen your results. Then tap Analyze below."
-        ctaLabel="Got it"
-        anchor="bottom"
-        onNext={() => advanceTour && advanceTour("review-wait")}
-        onSkip={() => skipTour && skipTour()}
-      />
       <View style={s.nav}>
         {/* result survives here only when this screen was reached via the
             Edit & Rerun pencil - route back to it instead of wiping state
             and dropping to the camera like a fresh scan would. */}
         <TouchableOpacity onPress={() => (result ? setStep("result") : reset())} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
         <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
-        <Text style={s.logoText}>ValuIQ</Text>
+        <Wordmark style={s.logoText}/>
       </View>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
-        <Text style={[s.h2, { marginBottom: 4 }]}>What are you looking at?</Text>
-        <Text style={[s.body, { marginBottom: 16 }]}>More detail = better result. A photo makes the biggest difference.</Text>
+        <Text style={[s.h2, { marginBottom: 4 }]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.85}>
+          What would you pay for this?
+        </Text>
+        <Text style={[s.body, { marginBottom: 18 }]}>
+          Add your price and any details — brand, condition, notes. It's optional, but the
+          more you add, the more accurate your profit and verdict.
+        </Text>
 
         {/* Photos */}
-        <View style={{ flexDirection: "row", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        <View style={{ flexDirection: "row", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
           {photos.map((p, i) => (
             <View key={i}>
               <Image source={{ uri: `data:image/jpeg;base64,${p}` }} style={s.photoThumb} />
@@ -960,10 +959,33 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           )}
         </View>
 
-        {/* Description */}
-        <Text style={[s.caption, { marginBottom: 6 }]}>Brand (optional - greatly improves accuracy)</Text>
+        {/* Buy price - FIRST and most prominent field, not buried under
+            brand/notes. This is the single biggest driver of an accurate
+            profit/verdict (skip enteredBp and the result screen can't give
+            a real BUY/PASS call, only "add a price to see it" - see the
+            enteredBp>0 branch below) - the layout now matches that weight. */}
+        <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+          What you'd pay or price (optional)
+        </Text>
+        <View style={s.priceFieldWrap}>
+          <Text style={s.priceFieldDollar}>$</Text>
+          <TextInput
+            style={s.priceFieldInput}
+            value={buyPrice}
+            onChangeText={setBuyPrice}
+            placeholder="0.00"
+            placeholderTextColor={C.text4}
+            keyboardType="decimal-pad"
+          />
+        </View>
+        <Text style={s.priceFieldHint} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+          The #1 driver of an accurate profit & verdict
+        </Text>
+
+        {/* Brand / notes - clearly secondary, both still optional */}
+        <Text style={[s.caption, { marginBottom: 6, marginTop: 22 }]}>Brand (optional)</Text>
         <TextInput style={s.textInput} value={brandInput} onChangeText={setBrandInput} placeholder="e.g. Coach, Nike, DeWalt" placeholderTextColor={C.text4} />
-        <Text style={[s.caption, { marginBottom: 6, marginTop: 12 }]}>Model or notes (optional)</Text>
+        <Text style={[s.caption, { marginBottom: 6, marginTop: 12 }]}>Condition or notes (optional)</Text>
         <TextInput
           style={s.textInput}
           value={description}
@@ -971,17 +993,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           placeholder="e.g. Nike, Air Force 1, size 10, good condition"
           placeholderTextColor={C.text4}
           multiline numberOfLines={2}
-        />
-
-        {/* Buy price (optional) */}
-        <Text style={[s.caption, { marginBottom: 6, marginTop: 12 }]}>What you'd pay for it (optional - improves BUY/PASS accuracy)</Text>
-        <TextInput
-          style={s.textInput}
-          value={buyPrice}
-          onChangeText={setBuyPrice}
-          placeholder="$0.00"
-          placeholderTextColor={C.text4}
-          keyboardType="decimal-pad"
         />
 
         {/* Scan counter */}
@@ -1007,23 +1018,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   if (step === "camera" && mode === "barcode") return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
       <StatusBar barStyle="light-content" />
-      <Coachmark
-        visible={tourStep === "capture"}
-        step={2} totalSteps={5}
-        title="Snap your first item"
-        body="Point your camera at any item and tap the shutter - or pick a photo from your library. ValuIQ will fetch its real resale value and profit."
-        ctaLabel="Got it"
-        anchor="bottom"
-        onNext={() => advanceTour && advanceTour("scanning")}
-        onSkip={() => skipTour && skipTour()}
-      />
       <CameraView style={{ flex: 1, position: "absolute" as any, top:0, left:0, right:0, bottom:0 }} facing="back"
         barcodeScannerSettings={{ barcodeTypes: ["ean13","ean8","upc_a","upc_e","qr","code128","code39"] }}
         onBarcodeScanned={handleBarcode} />
       <View style={{ flex: 1 }}>
         <View style={{ flex: 1 }}>
           <View style={[s.camTop, { paddingTop: insets.top + 8 }]}>
-            <View style={s.camLogoBadge}><Text style={s.camLogoText}>ValuIQ</Text></View>
+            <View style={s.camLogoBadge}><Wordmark style={s.camLogoText}/></View>
             <TouchableOpacity onPress={() => setMode("photo")} style={s.camModeBtn}>
               <Text style={s.camModeBtnText}> Photo Mode</Text>
             </TouchableOpacity>
@@ -1041,6 +1042,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               ))}
               <View style={s.barcodeLine} />
             </View>
+            {/* Barcode mode auto-scans on detection (no shutter to tap), so
+                the photo-mode coach line doesn't apply here - this existing
+                hint already says the one thing a first-timer needs ("point
+                at any barcode"), so there's nothing to merge/compete with. */}
             <Text style={s.camHint}>Point at any barcode</Text>
           </View>
           <View style={s.camBottomBar}>
@@ -1057,22 +1062,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
       <StatusBar barStyle="light-content" />
-      <Coachmark
-        visible={tourStep === "capture"}
-        step={2} totalSteps={5}
-        title="Snap your first item"
-        body="Point your camera at any item and tap the shutter - or pick a photo from your library. ValuIQ will fetch its real resale value and profit."
-        ctaLabel="Got it"
-        anchor="bottom"
-        onNext={() => advanceTour && advanceTour("scanning")}
-        onSkip={() => skipTour && skipTour()}
-      />
       <CameraView ref={cameraRef} style={{ flex: 1, position: "absolute" as any, top: 0, left: 0, right: 0, bottom: 0 }} facing="back" />
       <View style={{ flex: 1 }}>
         <View style={{ flex: 1 }}>
           {/* Top bar */}
           <View style={[s.camTop, { paddingTop: insets.top + 8 }]}>
-            <View style={s.camLogoBadge}><Text style={s.camLogoText}>ValuIQ</Text></View>
+            <View style={s.camLogoBadge}><Wordmark style={s.camLogoText}/></View>
             {plan === "free" && scansLeft !== null && (
               <View style={[s.camScanBadge, { borderColor: scansLeft === 0 ? C.red : scansLeft <= 1 ? C.yellow : C.green }]}>
                 <Text style={{ color: scansLeft === 0 ? C.red : scansLeft <= 1 ? C.yellow : C.green, fontSize: 11, fontWeight: "700" }}>
@@ -1087,7 +1082,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               <Text style={s.camModeBtnText}> Barcode</Text>
             </TouchableOpacity>
           </View>
-
           {/* Scan frame */}
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
             <View style={{ width: FRAME, height: FRAME, position: "relative" }}>
@@ -1100,21 +1094,71 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 <View key={i} style={[s.corner, pos as any, border as any]} />
               ))}
             </View>
-            <Text style={s.camHint}>Snap 1-5 photos, then tap Done</Text>
+            {/* MEASURED BUG: "Snap 1-5 photos - more angles, better
+                results." still didn't fully fit at narrow widths even with
+                adjustsFontSizeToFit's floor (minimumFontScale 0.8 wasn't
+                low enough to avoid ellipsis on an SE-width screen). Shorter
+                copy first, per the sweep principle - not a smaller floor. */}
+            {firstScanNudge ? (
+              <View style={s.camHintCoachWrap}>
+                <Text style={s.camHintCoachTxt} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                  Snap 1–5 photos — more angles help.
+                </Text>
+              </View>
+            ) : (
+              <Text style={s.camHint} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                Snap 1–5 photos — more angles help.
+              </Text>
+            )}
           </View>
 
-          {/* Controls */}
+          {/* Captured-photo thumbnails - visible proof a shot registered,
+              and confirmation there's still room for more (shutter stays
+              live up to MAX_PHOTOS). Only takes screen space once there's
+              something to show. */}
+          {photos.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={s.camThumbRow}
+              contentContainerStyle={s.camThumbRowContent}
+            >
+              {photos.map((p, i) => (
+                <Image key={i} source={{ uri: `data:image/jpeg;base64,${p}` }} style={s.camThumb} />
+              ))}
+            </ScrollView>
+          )}
+
+          {/* Controls - "Next" now surfaces RIGHT HERE the moment there's at
+              least one photo, where the user's eye already is after tapping
+              the shutter. It routes to Review, NOT straight to analyze()
+              directly - buy price (now the first, most prominent field on
+              Review) is critical moat data and must never be skippable via
+              a shortcut. Before any photo, this slot is an empty
+              placeholder (shutter alone, unchanged). */}
           <View style={s.camControls}>
             <TouchableOpacity style={s.camSecondBtn} onPress={pickLibrary}>
-              <Text numberOfLines={1} style={s.camSecondLabel}>Library</Text>
+              {/* MEASURED BUG: "Library" was clipping to "Libra..." - the
+                  slot had a fixed width (84, tightened from 96 in the prior
+                  pass to make room for the shutter-row action button), which
+                  can't survive a larger device text-size setting. Content-
+                  sized (minWidth only) so the label can never truncate,
+                  regardless of system font scale. */}
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={s.camSecondLabel}>Library</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.shutter} onPress={takePhoto}>
               <View style={s.shutterInner} />
               {photos.length > 0 && <View style={s.shutterBadge}><Text style={s.shutterBadgeTxt}>{photos.length}</Text></View>}
             </TouchableOpacity>
-            <TouchableOpacity style={s.camSecondBtn} onPress={() => { if (photos.length > 0) { setStep("review"); if ((tourStep === "capture" || tourStep === "scanning") && advanceTour) advanceTour("review"); } }} disabled={photos.length === 0}>
-              <Text style={[s.camSecondLabel, { color: photos.length > 0 ? C.green : "rgba(255,255,255,0.3)" }]} numberOfLines={1}>Done</Text>
-            </TouchableOpacity>
+            {photos.length > 0 ? (
+              <TouchableOpacity style={s.camNextBtn} onPress={() => setStep("review")} activeOpacity={0.85}>
+                <Text style={s.camNextBtnText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                  Next {"→"}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={s.camSecondBtn} />
+            )}
           </View>
         </View>
       </View>
@@ -1153,9 +1197,29 @@ const s = StyleSheet.create({
   camModeBtn:     { backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)", borderRadius: 100, paddingHorizontal: 12, paddingVertical: 6 },
   camModeBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   corner:         { position: "absolute", width: 28, height: 28, borderColor: C.green, borderWidth: 3 },
-  camHint:        { color: "rgba(255,255,255,0.6)", fontSize: 13, marginTop: 14, fontWeight: "600" },
-  camSecondBtn: { width: 96, alignItems: "center", justifyContent: "center" },
+  camHint:        { color: "rgba(255,255,255,0.6)", fontSize: 13, marginTop: 14, fontWeight: "600", paddingHorizontal: 24, textAlign: "center" },
+  // Same single instruction line as camHint, just wrapped in a highlighted
+  // pill for a first-timer - the "coaching" is the styling, never a second
+  // string, so it can never compete with the plain version above.
+  camHintCoachWrap: { marginTop: 14, marginHorizontal: 30, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: "rgba(168,230,61,0.14)", borderWidth: 1, borderColor: "rgba(168,230,61,0.4)", borderRadius: 14 },
+  camHintCoachTxt:  { color: C.green, fontSize: 13.5, fontWeight: "700", textAlign: "center" },
+  camThumbRow:        { maxHeight: 60, marginBottom: 6 },
+  camThumbRowContent: { paddingHorizontal: 20, gap: 8, alignItems: "center" },
+  camThumb:           { width: 46, height: 46, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.3)" },
+  // MEASURED BUG: a fixed width (84, tightened from 96 in a prior pass)
+  // clipped "Library" to "Libra..." once system text-size scaling pushed
+  // its rendered width past that cap. minWidth instead of width - the
+  // button still grows to whatever "Library" actually needs; the floor
+  // just keeps the touch target (and the empty placeholder on the other
+  // side of the shutter, before any photo) from collapsing to nothing.
+  camSecondBtn: { minWidth: 64, paddingHorizontal: 8, alignItems: "center", justifyContent: "center" },
   camSecondLabel: { color: "rgba(255,255,255,0.9)", fontSize: 14, fontWeight: "600" },
+  // The obvious next action once >=1 photo exists - lives in the same row
+  // as the shutter (where the user's eye already is right after tapping
+  // it). Routes to Review (buy price is critical moat data and must never
+  // be skippable), not straight to analyze() - "Next", not "Analyze".
+  camNextBtn:     { backgroundColor: C.green, borderRadius: 25, height: 50, paddingHorizontal: 18, alignItems: "center", justifyContent: "center" },
+  camNextBtnText: { color: C.greenDark, fontSize: 15, fontWeight: "900" },
   libIcon: { width: 50, height: 50, borderRadius: 25, borderWidth: 2, borderColor: "rgba(255,255,255,0.6)", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)" },
   libIconTxt: { color: "#fff", fontSize: 24, fontWeight: "400", lineHeight: 28 },
   shutter:        { width: 74, height: 74, borderRadius: 37, borderWidth: 4, borderColor: "#fff", alignItems: "center", justifyContent: "center" },
@@ -1164,7 +1228,11 @@ const s = StyleSheet.create({
   shutterBadgeTxt:{ color: "#000", fontSize: 13, fontWeight: "900" },
   doneBtn: { width: 72, height: 50, borderRadius: 25, backgroundColor: C.green, alignItems: "center", justifyContent: "center" },
   doneBtnTxt: { color: "#000", fontSize: 14, fontWeight: "900" },
-  camControls: { paddingBottom: 48, paddingTop: 20, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 40 },
+  // paddingHorizontal tightened from 40 - the third slot now holds a
+  // variable-width "Analyze (N) ->" button (was a fixed-width "Done"
+  // label), which needs more of the row's width to stay comfortably clear
+  // of the shutter without ever overflowing the screen edge.
+  camControls: { paddingBottom: 48, paddingTop: 20, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 26 },
   camBottomBar:   { paddingBottom: 40, paddingHorizontal: 24 },
 
   // Barcode,
@@ -1178,6 +1246,14 @@ const s = StyleSheet.create({
   addPhotoBtnText:{ color: C.text4, fontSize: 10, marginTop: 4 },
   textInput:      { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 14, color: C.text1, fontSize: 14, minHeight: 72, textAlignVertical: "top" },
   scanBadge:      { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginTop: 12, alignSelf: "flex-start" },
+  // Review's price field - deliberately the loudest input on the screen
+  // (green border, 26pt digits) so it reads as THE primary field, not one
+  // of three equally-weighted optional boxes.
+  priceLabel:      { color: C.text2, fontSize: 13, fontWeight: "800", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 },
+  priceFieldWrap:  { flexDirection: "row", alignItems: "center", backgroundColor: C.greenBg, borderWidth: 1.5, borderColor: C.greenBorder, borderRadius: 14, paddingHorizontal: 16 },
+  priceFieldDollar:{ color: C.green, fontSize: 26, fontWeight: "800", marginRight: 4 },
+  priceFieldInput: { flex: 1, color: C.text1, fontSize: 26, fontWeight: "700", paddingVertical: 14 },
+  priceFieldHint:  { color: C.text4, fontSize: 11.5, fontWeight: "600", marginTop: 6 },
 
   // Result,
   goodBanner:     { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: C.greenBg, borderWidth: 1.5, borderColor: C.greenBorder, borderRadius: 12, padding: 12, marginBottom: 12 },
@@ -1192,6 +1268,12 @@ const s = StyleSheet.create({
   profitAmount:   { fontWeight: "900", letterSpacing: -2, lineHeight: 68, marginBottom: 6 },
   veloBadge: { borderWidth: 1, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16, marginTop: 12, alignItems: "center" },
   veloText: { fontSize: 16, fontWeight: "800" },
+    // "Sold one before?" - the log-a-PAST-flip action, visually a plain
+    // button (not a card) so it reads lighter/less demanding than the
+    // "not sold yet" card directly below it, which asks for a decision.
+    soldRow:      { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: C.surface, borderWidth: 1, borderColor: C.green+"40", borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14, marginBottom: 10 },
+    soldRowTitle: { color: C.text1, fontSize: 14, fontWeight: "800" },
+    soldRowSub:   { color: C.green, fontSize: 12.5, fontWeight: "700", marginTop: 1 },
     askCard:   { backgroundColor: "#101a08", borderColor: C.green + "50", borderWidth: 1, borderRadius: 14, padding: 16, marginBottom: 12 },
   askTitle:  { color: C.text1, fontSize: 15, fontWeight: "800", marginBottom: 6 },
   askBody:   { color: C.text3, fontSize: 13, lineHeight: 18, marginBottom: 14 },

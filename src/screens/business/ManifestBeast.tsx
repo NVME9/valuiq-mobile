@@ -216,14 +216,24 @@ export default function ManifestBeast({ token, onBack }: Props) {
                   </View>
                   {job.result.lot && (
                     <View style={s.lotCard}>
-                      <View style={s.lotVerdictRow}>
-                        <Text style={s.lotVerdictLabel}>LOT VERDICT</Text>
-                        <View style={[s.lotBadge,
+                      {/* MEASURED BUG: neither side of this row had a flex/
+                          shrink guard. The ternary chain only special-cases
+                          STRONG/FAIR/RISKY - any other backend-returned
+                          verdict string rendered raw and unbounded next to
+                          the fixed "LOT VERDICT" label, with nothing to
+                          shrink into if it ran long. */}
+                      <View style={[s.lotVerdictRow, { gap: 8 }]}>
+                        <Text style={[s.lotVerdictLabel, { flexShrink: 0 }]}>LOT VERDICT</Text>
+                        <View style={[s.lotBadge, { flexShrink: 1 },
                           job.result.lot.lotVerdict==="STRONG"?{backgroundColor:"#00d08420"}:
                           job.result.lot.lotVerdict==="FAIR"?{backgroundColor:B.orangeBg}:
                           job.result.lot.lotVerdict==="RISKY"?{backgroundColor:"#ffb02020"}:
                           {backgroundColor:"#ff453a20"}]}>
-                          <Text style={[s.lotBadgeTxt,
+                          <Text
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.75}
+                            style={[s.lotBadgeTxt,
                             job.result.lot.lotVerdict==="STRONG"?{color:B.profit}:
                             job.result.lot.lotVerdict==="FAIR"?{color:B.orange}:
                             job.result.lot.lotVerdict==="RISKY"?{color:"#ffb020"}:
