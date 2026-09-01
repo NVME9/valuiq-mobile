@@ -7,7 +7,8 @@ import {
 import { SafeAreaView as SAV } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
-import { API_BASE, hasProAccess, getCommunityFlips, peekCommunityFlips, CommunityFlip, getWinsSummary, peekProfileData, getScanHistory, peekScanHistory } from "../lib/api";
+import UserAvatar from "../components/UserAvatar";
+import { API_BASE, hasProAccess, getCommunityFlips, peekCommunityFlips, CommunityFlip, getWinsSummary, peekProfileData, peekAvatar, getScanHistory, peekScanHistory } from "../lib/api";
 import { formatTickerItem, formatTickerProfit } from "../lib/flipFormat";
 
 const { width } = Dimensions.get("window");
@@ -115,6 +116,29 @@ export default function DashboardScreen({ token, plan, planLoaded = true, scansL
     const cached = peekProfileData(token);
     return cached?.stats ? { count: Number(cached.stats.soldCount) || 0, total: Number(cached.stats.soldTotal) || 0 } : { count: 0, total: 0 };
   });
+  // Header avatar - reads peekAvatar first, NOT peekProfileData. peekProfileData
+  // is TTL-gated at 30s (see its own comment), and this screen fully
+  // remounts on every tab switch - any revisit more than 30s after the last
+  // /api/profile fetch found peek returning undefined even though the real
+  // avatar was still known, which showed the generic placeholder on every
+  // "stale" remount instead of just the ones with a genuinely cold cache.
+  // peekAvatar is a separate, never-TTL-gated, AsyncStorage-backed cache
+  // (see lib/api.ts) that's always considered current - avatar_url/
+  // avatar_emoji barely ever change, so staleness isn't a correctness
+  // concern here the way it is for stats. Falls back to peekProfileData
+  // only for the rare case peekAvatar hasn't been populated yet at all
+  // (e.g. mid-migration before any getProfileData call has ever run).
+  const [avatar, setAvatar] = useState<{ url: string | null; emoji: string | null }>(() => {
+    const cachedAvatar = peekAvatar(token);
+    const cachedProfile = cachedAvatar ? undefined : peekProfileData(token);
+    const url = cachedAvatar?.avatar_url ?? cachedProfile?.profile?.avatar_url ?? null;
+    const emoji = cachedAvatar?.avatar_emoji ?? cachedProfile?.profile?.avatar_emoji ?? null;
+    // Warm the cache immediately if this mount is the first to see the URL
+    // this session - App.tsx's own refreshAvatar usually beats this, but
+    // this covers a cold-cache/race case rather than assume it always has.
+    if (url) Image.prefetch(url).catch(() => {});
+    return { url, emoji };
+  });
   const [tipIdx, setTipIdx]       = useState(0);
   const [showTools, setShowTools] = useState(true);
   const [showScans, setShowScans] = useState(true);
@@ -171,6 +195,16 @@ export default function DashboardScreen({ token, plan, planLoaded = true, scansL
     // cached data, or the {0,0} initial default) instead of stomping it
     // with a fabricated zero (see getWinsSummary in lib/api.ts).
     if (summaryRes.status === "fulfilled" && summaryRes.value) setWinsSummary(summaryRes.value);
+    // getWinsSummary above calls getProfileData internally, so the full
+    // profile (including avatar fields) is sitting in the shared cache by
+    // now regardless of which branch above ran - re-peek rather than thread
+    // a second value through summaryRes.
+    const freshProfile = peekProfileData(token);
+    if (freshProfile?.profile) {
+      const url = freshProfile.profile.avatar_url ?? null;
+      if (url) Image.prefetch(url).catch(() => {});
+      setAvatar({ url, emoji: freshProfile.profile.avatar_emoji ?? null });
+    }
     setRefresh(false);
   }
 
@@ -207,7 +241,7 @@ export default function DashboardScreen({ token, plan, planLoaded = true, scansL
             <View style={s.scansBadge}><Text style={s.scansBadgeTxt}>{scansLeft}/10</Text></View>
           )}
           <TouchableOpacity onPress={() => onNavigate("profile")}>
-            <Text style={{fontSize:22}}>👤</Text>
+            <UserAvatar photoUrl={avatar.url} emoji={avatar.emoji} size={40} glyphSize={26} borderColor={C.border}/>
           </TouchableOpacity>
         </View>
       </View>

@@ -4,11 +4,13 @@ import {
   StatusBar, ActivityIndicator, TextInput, Linking, Image, Modal, Pressable, Alert, Share } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import * as Clipboard from "expo-clipboard";
 import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
+import UserAvatar from "../components/UserAvatar";
 import { isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric, getBiometricLabel } from "../lib/biometrics";
-import { API_BASE, deleteAccount, getProfileData, peekProfileData, invalidateProfileCache } from "../lib/api";
+import { API_BASE, deleteAccount, getProfileData, peekProfileData, invalidateProfileCache, setCachedAvatar } from "../lib/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Updates from "expo-updates";
 
@@ -19,7 +21,7 @@ import * as Updates from "expo-updates";
 // is the ground truth: if BUILD_TAG on-device doesn't match what you just
 // published, the update didn't land (see App.tsx's init() for the
 // check-and-reload-immediately fix that was missing).
-const BUILD_TAG = "2026-08-31.6";
+const BUILD_TAG = "2026-08-31.17";
 
 // The single owner/dev allowlist for anything real users must never see -
 // dev-only tools (Reset onboarding, Preview new-user flow) and the build
@@ -33,12 +35,10 @@ const OWNER_EMAILS = ["natev9@comcast.net", "nvisionsinc@gmail.com", "nathanruss
 
 const EMOJIS = ["🛍️","💰","🔥","⚡","🏆","👑","💎","🦁","🐉","🎯","🚀","💪","🌟","🦊","😎","🤑","🏅","🌊","🎪","🦅"];
 
-// Deferred feature: real photo-avatar upload has no backend yet (no
-// avatar_photo column, no Supabase Storage bucket, no upload endpoint -
-// pickPhoto() only ever set local component state, nothing persisted).
-// Flip this back to true once that's built; emoji avatars are the launch
-// avatar system in the meantime.
-const SHOW_PHOTO_UPLOAD = false;
+// Photo avatars: pick -> resize to 512x512 -> upload to Supabase Storage
+// ("Avatars" bucket, exact capital-A casing) -> persist the returned public
+// URL to user_profiles.avatar_url. See pickPhoto()/save() below.
+const SHOW_PHOTO_UPLOAD = true;
 
 const PLAN_COLOR: Record<string,string> = { free:C.text4, seller:C.green, pro:C.orange, lifetime:C.yellow, business:"#ff8c42" };
 
@@ -247,6 +247,11 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
   }
 
   function applyProfileData(d: { profile: any; stats: any; badges: any[] }) {
+    // Same warm-the-cache-before-paint reasoning as App.tsx/DashboardScreen's
+    // refreshAvatar - Profile can be the first screen to see a fresh
+    // avatar_url (e.g. a direct deep-link), so it prefetches too rather
+    // than assuming another screen already did.
+    if (d.profile?.avatar_url) Image.prefetch(d.profile.avatar_url).catch(() => {});
     setProfile(d.profile || {});
     setStats(d.stats || {});
     setIsPublic(d.profile?.is_public !== false);
@@ -304,18 +309,68 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
   }
 
   async function pickPhoto() {
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaType.Images,
-      allowsEditing: true, aspect: [1,1], quality: 0.7, base64: true });
-    if (!res.canceled && res.assets[0]?.base64) {
-      setEditPhoto(`data:image/jpeg;base64,${res.assets[0].base64}`);
-      setEditEmoji(null);
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert("Photo access needed", "Enable photo library access in Settings to upload a profile photo.");
+        return;
+      }
+      // "images" as a plain string/array is the current API - the old
+      // ImagePicker.MediaType.Images enum this used to read doesn't exist
+      // on this expo-image-picker version (it's a TS type now, not a
+      // runtime object), so accessing .Images threw synchronously before
+      // the picker could even open, and that throw landed OUTSIDE this
+      // try/catch (it used to wrap only the resize/upload code below) - an
+      // unhandled rejection RN just swallows, i.e. tapping "Upload Photo"
+      // silently did nothing.
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true, aspect: [1,1], quality: 0.7 });
+      if (res.canceled || !res.assets[0]?.uri) return;
+      // Downscale to a real avatar size before it ever touches the network -
+      // the picker's own crop only forces a 1:1 aspect, not a small file;
+      // without this a full phone-photo (several MB) would get base64'd and
+      // uploaded as-is.
+      const context = ImageManipulator.manipulate(res.assets[0].uri);
+      const rendered = await context.resize({ width: 512, height: 512 }).renderAsync();
+      const out = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.7, base64: true });
+      if (out.base64) {
+        setEditPhoto(`data:image/jpeg;base64,${out.base64}`);
+        setEditEmoji(null);
+      }
+    } catch {
+      Alert.alert("Couldn't use that photo", "Try a different image.");
     }
+  }
+
+  // Reverts to an emoji avatar - falls back to the first emoji option since
+  // a saved photo always nulled out avatar_emoji server-side (see save()'s
+  // newAvatarUrl branch), so there's rarely a prior emoji choice to restore.
+  function removePhoto() {
+    setEditPhoto(null);
+    setEditEmoji(currentEmoji || EMOJIS[0]);
   }
 
   async function save() {
     setSaving(true);
     try {
+      // Photo goes through Storage first (upload -> public URL); only once
+      // that succeeds does the URL get persisted to the profile row below.
+      // A failed upload must never look like a successful save.
+      let newAvatarUrl: string | undefined;
+      if (editPhoto) {
+        const upRes = await fetch(`${API_BASE}/api/upload-avatar`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, imageBase64: editPhoto }) });
+        const upJson = await upRes.json().catch(() => null);
+        if (!upRes.ok || !upJson?.success || !upJson?.url) {
+          Alert.alert("Couldn't upload photo", upJson?.error || "Try again.");
+          setSaving(false);
+          return; // editor stays open, nothing persisted - no fake success
+        }
+        newAvatarUrl = upJson.url;
+      }
+
       const r = await fetch(`${API_BASE}/api/profile`, {
         method:"PATCH", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
@@ -323,16 +378,26 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
           updates: {
             display_name: editName,
             bio: editBio,
-            ...(editEmoji ? { avatar_emoji: editEmoji } : {}) } }) });
+            ...(newAvatarUrl ? { avatar_url: newAvatarUrl, avatar_emoji: null } : {}),
+            ...(editEmoji ? { avatar_emoji: editEmoji, avatar_url: null } : {}) } }) });
       const json = await r.json().catch(() => null);
       if (!r.ok || !json?.success) throw new Error();
       invalidateProfileCache(token);
+      // Update the Dashboard header's avatar cache directly rather than
+      // waiting for its next /api/profile fetch to notice - Dashboard reads
+      // this synchronously on mount (see peekAvatar in lib/api.ts), so a
+      // tab switch right after saving a new photo/emoji must see it
+      // immediately, not the old value until some future refetch lands.
+      if (newAvatarUrl) setCachedAvatar(token, newAvatarUrl, null);
+      else if (editEmoji) setCachedAvatar(token, null, editEmoji);
       setProfile((p:any) => ({
         ...p,
         display_name: editName,
         bio: editBio,
-        ...(editPhoto ? { avatar_photo: editPhoto, avatar_emoji: null } : {}),
-        ...(editEmoji ? { avatar_emoji: editEmoji, avatar_photo: null } : {}) }));
+        ...(newAvatarUrl ? { avatar_url: newAvatarUrl, avatar_emoji: null } : {}),
+        ...(editEmoji ? { avatar_emoji: editEmoji, avatar_url: null } : {}) }));
+      setEditPhoto(null);
+      setEditEmoji(null);
       setEditing(false);
     } catch {
       Alert.alert("Couldn't save", "Try again.");
@@ -364,7 +429,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
   const isOwner = OWNER_EMAILS.includes((userEmail || "").toLowerCase());
 
   // Current avatar: photo > emoji > initial
-  const currentPhoto = profile?.avatar_photo;
+  const currentPhoto = profile?.avatar_url;
   const currentEmoji = profile?.avatar_emoji;
 
   // Preview in edit mode
@@ -427,13 +492,14 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
           /* VIEW, MODE */
           <View style={s.profileCard}>
             <View style={s.avatarArea}>
-              {currentPhoto ? (
-                <Image source={{uri:currentPhoto}} style={s.avatarImg}/>
-              ) : currentEmoji ? (
-                <View style={s.avatarEmojiWrap}><Text style={s.avatarEmoji}>{currentEmoji}</Text></View>
-              ) : (
-                <View style={s.avatarDefault}><Text style={s.avatarDefaultText}>{previewInitial}</Text></View>
-              )}
+              <UserAvatar
+                photoUrl={currentPhoto}
+                emoji={currentEmoji}
+                initial={previewInitial}
+                size={80}
+                borderColor={currentPhoto ? C.green : C.border}
+                backgroundColor={C.surfaceHigh}
+              />
             </View>
             <Text style={s.displayName}>{displayName}</Text>
             {profile?.bio ? <Text style={s.bio}>{profile.bio}</Text> : null}
@@ -452,27 +518,18 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
             <View style={s.avatarPickerRow}>
               {/* Preview */}
               <View style={s.avatarPreviewWrap}>
-                {previewPhoto ? (
-                  <Image source={{uri:previewPhoto}} style={s.avatarPreview}/>
-                ) : previewEmoji ? (
-                  <View style={[s.avatarPreview,{alignItems:"center",justifyContent:"center",backgroundColor:C.surfaceHigh}]}>
-                    <Text style={{fontSize:42}}>{previewEmoji}</Text>
-                  </View>
-                ) : (
-                  <View style={[s.avatarPreview,{alignItems:"center",justifyContent:"center",backgroundColor:C.surfaceHigh}]}>
-                    <Text style={{color:C.text1,fontSize:36,fontWeight:"900"}}>{previewInitial}</Text>
-                  </View>
-                )}
+                <UserAvatar
+                  photoUrl={previewPhoto || null}
+                  emoji={previewEmoji || null}
+                  initial={previewInitial}
+                  size={80}
+                  borderColor={C.border}
+                  backgroundColor={C.surfaceHigh}
+                />
               </View>
 
               {/* Options */}
               <View style={{gap:10,flex:1}}>
-                {/* Upload Photo - hidden until photo upload is implemented
-                    (deferred feature: needs a Supabase Storage bucket +
-                    avatar_photo column + upload endpoint, none of which
-                    exist yet - pickPhoto() above only sets local component
-                    state, nothing persists). Code kept in place, not
-                    deleted, so re-enabling later is a one-line flip. */}
                 {SHOW_PHOTO_UPLOAD && (
                   <TouchableOpacity style={s.avatarOptBtn} onPress={pickPhoto}>
                     <Text style={s.avatarOptIcon}>📷</Text>
@@ -483,6 +540,11 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
                   <Text style={s.avatarOptIcon}>😎</Text>
                   <Text style={s.avatarOptText}>Choose Emoji</Text>
                 </TouchableOpacity>
+                {!!previewPhoto && (
+                  <TouchableOpacity style={s.avatarRemoveBtn} onPress={removePhoto}>
+                    <Text style={s.avatarRemoveText}>✕ Remove photo</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
 
@@ -909,11 +971,6 @@ const s = StyleSheet.create({
   // View mode,
   profileCard:       { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:18, padding:20, alignItems:"center", marginBottom:14 },
   avatarArea:        { marginBottom:14 },
-  avatarImg:         { width:80, height:80, borderRadius:40, borderWidth:2, borderColor:C.green },
-  avatarEmojiWrap:   { width:80, height:80, borderRadius:40, backgroundColor:C.surfaceHigh, alignItems:"center", justifyContent:"center", borderWidth:2, borderColor:C.border },
-  avatarEmoji:       { fontSize:40 },
-  avatarDefault:     { width:80, height:80, borderRadius:40, backgroundColor:C.surfaceHigh, alignItems:"center", justifyContent:"center", borderWidth:2, borderColor:C.border },
-  avatarDefaultText: { color:C.text1, fontSize:32, fontWeight:"900" },
   displayName:       { color:C.text1, fontSize:22, fontWeight:"900", letterSpacing:-0.5, marginBottom:4 },
   bio:               { color:C.text3, fontSize:13, textAlign:"center", lineHeight:19 },
   rankLabel:         { fontSize:13, fontWeight:"800", flexShrink:1 },
@@ -924,10 +981,11 @@ const s = StyleSheet.create({
   editTitle:         { color:C.text1, fontSize:18, fontWeight:"900", marginBottom:16 },
   avatarPickerRow:   { flexDirection:"row", gap:16, alignItems:"center", marginBottom:20 },
   avatarPreviewWrap: { },
-  avatarPreview:     { width:80, height:80, borderRadius:40, borderWidth:2, borderColor:C.border, overflow:"hidden" },
   avatarOptBtn:      { flexDirection:"row", alignItems:"center", gap:10, backgroundColor:C.bg, borderWidth:1, borderColor:C.border, borderRadius:11, padding:12 },
   avatarOptIcon:     { fontSize:20 },
   avatarOptText:     { color:C.text2, fontSize:13, fontWeight:"600" },
+  avatarRemoveBtn:   { alignSelf:"flex-start", paddingVertical:4, paddingHorizontal:2 },
+  avatarRemoveText:  { color:C.text4, fontSize:12, fontWeight:"600" },
   editField:         { marginBottom:14 },
   editLabel:         { color:C.text3, fontSize:13, fontWeight:"700", marginBottom:7 },
   editInput:         { backgroundColor:C.bg, borderWidth:1, borderColor:C.border, borderRadius:11, padding:13, color:C.text1, fontSize:14 },

@@ -4,7 +4,7 @@ import {
   ActivityIndicator, TouchableOpacity, Animated, Dimensions, AppState
 } from "react-native";
 import { C } from "./src/lib/theme";
-import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess } from "./src/lib/api";
+import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache } from "./src/lib/api";
 import { supabase } from "./src/lib/supabase";
 import * as Updates from "expo-updates";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -360,6 +360,12 @@ export default function App() {
         // session itself is known - loadUserData resolves in the background
         // and updates plan/scansLeft in place once it lands (or times out).
         loadUserData(refreshed.access_token);
+        // Also not awaited - warms the synchronous avatar mirror from disk
+        // so Dashboard's very first mount this session (before any
+        // /api/profile fetch has landed) can still show a real avatar
+        // instead of the generic placeholder. See peekAvatar/
+        // hydrateAvatarCache in lib/api.ts.
+        hydrateAvatarCache(refreshed.access_token);
       } catch (e) { console.log("[DIAG init] refresh FAILED -> clearSession. error=", String(e)); await clearSession(); }
     }
     setAppReady(true);
@@ -578,6 +584,11 @@ export default function App() {
                       } : undefined}
                       activeOpacity={0.7}
                     >
+                      {/* Nav bar Profile tab is ALWAYS the generic icon -
+                          never the user's photo. The photo shows only in
+                          the Dashboard header and the Profile card; putting
+                          it here too was what broke the tab bar's
+                          uniformity in the first place. */}
                       <Text style={s.tabIcon}>{t.icon}</Text>
                       <Text style={[s.tabLabel, active && {color:C.green, fontWeight:"700"}]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                         {t.label}

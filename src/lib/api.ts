@@ -476,6 +476,59 @@ async function fetchWithTimeout(url: string, options?: RequestInit, timeoutMs: n
 export interface ProfileData { profile: any; stats: any; badges: any[] }
 const PROFILE_TTL = 30000;
 
+// MEASURED BUG (2026-08-31): the Dashboard header read the avatar off
+// peekProfileData, which is TTL-gated at PROFILE_TTL (30s) - a screen that
+// fully unmounts/remounts on every tab switch (see ProfileScreen's `load()`
+// comment) re-ran its useState initializer on every single remount, and any
+// revisit more than 30s after the last /api/profile fetch found peek
+// returning undefined even though the real value was still sitting in
+// `_cache`, just past the freshness window. The header rendered the
+// generic placeholder for that gap every time, then popped in the real
+// avatar once a fresh fetch landed. avatar_url/avatar_emoji barely ever
+// change - unlike stats, there's no correctness reason to ever treat a
+// last-known avatar as "unknown" just because it's stale. This is a
+// separate, never-TTL-gated, AsyncStorage-backed cache used ONLY for the
+// avatar fields, so a remount is instant regardless of how long it's been
+// since the last fetch. AsyncStorage.getItem has no synchronous form, so
+// the durable copy is mirrored into `_avatarMem` (a plain in-memory Map)
+// which IS readable synchronously - hydrateAvatarCache() fills that mirror
+// from disk once at boot; every fetch after that keeps it current in RAM.
+const _avatarMem = new Map<string, { avatar_url: string | null; avatar_emoji: string | null }>();
+const AVATAR_STORAGE_PREFIX = "@valuiq_avatar:";
+
+// Exported so a screen that just changed the avatar (ProfileScreen's save())
+// can update this cache directly the moment the PATCH succeeds, instead of
+// waiting on the next getProfileData fetch to notice - the point of the
+// cache is that Dashboard is instant on the VERY NEXT mount, including one
+// that happens seconds after an edit, before any refetch would happen.
+export function setCachedAvatar(token: string, avatar_url: string | null, avatar_emoji: string | null) {
+  const userId = stableIdFromToken(token);
+  _avatarMem.set(userId, { avatar_url, avatar_emoji });
+  AsyncStorage.setItem(AVATAR_STORAGE_PREFIX + userId, JSON.stringify({ avatar_url, avatar_emoji })).catch(() => {});
+}
+
+// Synchronous - reads the in-memory mirror only, never touches disk. Never
+// TTL-gated: the last avatar this session (or, once hydrateAvatarCache has
+// run, the last one from a previous session) is always considered current
+// enough - see the MEASURED BUG note above for why.
+export function peekAvatar(token: string): { avatar_url: string | null; avatar_emoji: string | null } | undefined {
+  return _avatarMem.get(stableIdFromToken(token));
+}
+
+// Fire-and-forget, called once at boot (App.tsx's init(), right after a
+// session is restored) so a COLD start - where nothing has been fetched
+// this session yet and _avatarMem is empty - can still have a real avatar
+// ready in the mirror by the time Dashboard first mounts, instead of only
+// warming up after the first /api/profile round trip.
+export async function hydrateAvatarCache(token: string): Promise<void> {
+  const userId = stableIdFromToken(token);
+  if (_avatarMem.has(userId)) return;
+  try {
+    const raw = await AsyncStorage.getItem(AVATAR_STORAGE_PREFIX + userId);
+    if (raw) _avatarMem.set(userId, JSON.parse(raw));
+  } catch {}
+}
+
 // THE single source of truth for both the full profile payload AND "money
 // made" - Dashboard, Profile, and History all read through this one cached
 // fetcher instead of each independently hitting /api/profile, so their
@@ -491,6 +544,7 @@ export async function getProfileData(token: string): Promise<ProfileData | null>
     if (d?.success) {
       const data: ProfileData = { profile: d.profile || {}, stats: d.stats || {}, badges: d.badges || [] };
       cacheSet(key, data);
+      setCachedAvatar(token, data.profile?.avatar_url ?? null, data.profile?.avatar_emoji ?? null);
       return data;
     }
   } catch {}

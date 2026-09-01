@@ -1,8 +1,9 @@
 import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity, StatusBar, Dimensions } from "react-native";
-import Svg, { Path, G, Line } from "react-native-svg";
+import Svg, { G, Line, Path } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import ValuIQLogo from "../components/ValuIQLogo";
 
 interface Props { onComplete: () => void; }
 
@@ -10,14 +11,6 @@ interface Props { onComplete: () => void; }
 // NOT C.bg (#111009): the task calls for a distinct, deeper dark (#0a0f0a)
 // so this one screen reads as its own moment, not just another app screen.
 const BG = "#0a0f0a";
-
-function ValuIQLogo({ accent, size = 48 }: { accent: string; size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 120 120">
-      <Path d="M 32 36 L 60 92 L 88 36" fill="none" stroke={accent} strokeWidth={13} strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
-}
 
 // Faint full-screen scope background (grid + corner brackets).
 function ScopeBackground({ accent }: { accent: string }) {
