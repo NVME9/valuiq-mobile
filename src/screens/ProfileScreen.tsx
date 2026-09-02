@@ -21,7 +21,7 @@ import * as Updates from "expo-updates";
 // is the ground truth: if BUILD_TAG on-device doesn't match what you just
 // published, the update didn't land (see App.tsx's init() for the
 // check-and-reload-immediately fix that was missing).
-const BUILD_TAG = "2026-09-02.2";
+const BUILD_TAG = "2026-09-02.6";
 
 // The single owner/dev allowlist for anything real users must never see -
 // dev-only tools (Reset onboarding, Preview new-user flow) and the build

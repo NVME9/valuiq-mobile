@@ -4,6 +4,8 @@ import {
   ActivityIndicator, TouchableOpacity, Animated, Dimensions, AppState
 } from "react-native";
 import { C } from "./src/lib/theme";
+import LogoBadge from "./src/components/LogoBadge";
+import ScopeBackground from "./src/components/ScopeBackground";
 import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache } from "./src/lib/api";
 import { supabase } from "./src/lib/supabase";
 import * as Updates from "expo-updates";
@@ -134,58 +136,51 @@ function SplashScreen({ onDone }: { onDone:()=>void }) {
 
   return (
     <Animated.View style={[ss.splash, { opacity }]}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle="light-content" backgroundColor={C.bgDeep} />
+      <ScopeBackground accent={C.green} botInset={70} />
 
-      {/* Logo block */}
-      <Animated.View style={{ alignItems:"center", transform:[{ scale }] }}>
-        <View style={{ width:120, height:120, alignItems:"center", justifyContent:"center", marginBottom:6 }}>
-          {/* scope corners */}
-          <View style={{ position:"absolute", top:0, left:0, width:22, height:22, borderTopWidth:3, borderLeftWidth:3, borderColor:C.green }}/>
-          <View style={{ position:"absolute", top:0, right:0, width:22, height:22, borderTopWidth:3, borderRightWidth:3, borderColor:C.green }}/>
-          <View style={{ position:"absolute", bottom:0, left:0, width:22, height:22, borderBottomWidth:3, borderLeftWidth:3, borderColor:C.green }}/>
-          <View style={{ position:"absolute", bottom:0, right:0, width:22, height:22, borderBottomWidth:3, borderRightWidth:3, borderColor:C.green }}/>
-          <View style={ss.logoBox}>
-            <Text style={ss.logoV}>V</Text>
-          </View>
-        </View>
-        <Text style={ss.logoName}>ValuIQ</Text>
-      </Animated.View>
+      <View style={ss.content}>
+        {/* Logo block */}
+        <Animated.View style={{ alignItems:"center", transform:[{ scale }] }}>
+          <LogoBadge accent={C.green} style={{ marginBottom:6 }}/>
+          <Text style={ss.logoName}>ValuIQ</Text>
+        </Animated.View>
 
-      {/* Tagline */}
-      <Animated.Text style={[ss.tagline, { opacity: fade2 }]}>
-        Point. Shoot. Profit.
-      </Animated.Text>
-      <Animated.Text style={[ss.tagSub, { opacity: fade2 }]}>
-        The unfair advantage every reseller needs,
-      </Animated.Text>
+        {/* Tagline */}
+        <Animated.Text style={[ss.tagline, { opacity: fade2 }]}>
+          Point. Shoot. Profit.
+        </Animated.Text>
+        <Animated.Text style={[ss.tagSub, { opacity: fade2 }]}>
+          Real sold prices from actual resellers — not guesses.
+        </Animated.Text>
 
-      {/* Three feature lines - NOT buttons */}
-      <Animated.View style={[ss.pills, { opacity: fade3 }]}>
-        {[
-          { icon:"📷", text:"Scan any item — photo, barcode, or text" },
-          { icon:"💰", text:"Profit after every fee on every platform" },
-          { icon:"⚡", text:"Beat everyone to the best deals" },
-        ].map((item,i)=>(
-          <View key={i} style={ss.pill}>
-            <Text style={ss.pillIcon}>{item.icon}</Text>
-            <Text style={ss.pillText}>{item.text}</Text>
-          </View>
-        ))}
-      </Animated.View>
+        {/* Three feature lines - NOT buttons */}
+        <Animated.View style={[ss.pills, { opacity: fade3 }]}>
+          {[
+            { icon:"📷", text:"Scan any item — photo, barcode, or text" },
+            { icon:"💰", text:"Profit after every fee on every platform" },
+            { icon:"⚡", text:"Beat everyone to the best deals" },
+          ].map((item,i)=>(
+            <View key={i} style={ss.pill}>
+              <Text style={ss.pillIcon}>{item.icon}</Text>
+              <Text style={ss.pillText}>{item.text}</Text>
+            </View>
+          ))}
+        </Animated.View>
+      </View>
     </Animated.View>
   );
 }
 
 const ss = StyleSheet.create({
-  splash:   { position:"absolute" as any, top:0, left:0, right:0, bottom:0, zIndex:100, backgroundColor:C.bg, alignItems:"center", justifyContent:"center", paddingHorizontal:32 },
-  logoBox:  { width:86, height:86, backgroundColor:C.green, borderRadius:22, alignItems:"center", justifyContent:"center", marginBottom:14, shadowColor:C.green, shadowOpacity:0.45, shadowRadius:22, shadowOffset:{width:0,height:0}, elevation:10 },
-  logoV:    { color:C.greenDark, fontSize:50, fontWeight:"900", lineHeight:54 },
+  splash:   { position:"absolute" as any, top:0, left:0, right:0, bottom:0, zIndex:100, backgroundColor:C.bgDeep },
+  content:  { flex:1, alignItems:"center", justifyContent:"center", paddingHorizontal:32 },
   logoName: { color:C.text1, fontSize:38, fontWeight:"900", letterSpacing:-2, marginBottom:18 },
   tagline:  { color:C.text1, fontSize:22, fontWeight:"800", textAlign:"center", marginBottom:6 },
   tagSub:   { color:C.text3, fontSize:14, textAlign:"center", marginBottom:36 },
   pills:    { gap:14, width:"100%" },
   pill:     { flexDirection:"row", alignItems:"center", gap:12 },
-  pillIcon: { fontSize:22, width:30, textAlign:"center" as any },
+  pillIcon: { fontSize:22, width:34, lineHeight:28, textAlign:"center" as any },
   pillText: { color:C.text2, fontSize:14, lineHeight:20, flex:1 },
 });
 

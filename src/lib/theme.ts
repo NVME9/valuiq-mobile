@@ -1,6 +1,7 @@
 // Exact colors from web app page.tsx
 export const C = {
   bg:          "#111009",
+  bgDeep:      "#0a0f0a",
   surface:     "#1c1a17",
   surfaceHigh: "#242220",
   border:      "#302e2a",
