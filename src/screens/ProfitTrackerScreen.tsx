@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import ScannerMark from "../components/ScannerMark";
 import { API_BASE } from "../lib/api";
 
 interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void; }
@@ -33,7 +34,7 @@ export default function ProfitTrackerScreen({ token, plan, onNavigate, onBack }:
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
       <View style={s.nav}>
         <TouchableOpacity onPress={()=>onBack?.()} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
-        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Text style={s.logoText}>Profit Tracker</Text></View>
+        <View style={s.logoRow}><ScannerMark size={42}/><Text style={s.logoText}>Profit Tracker</Text></View>
       </View>
       <ScrollView contentContainerStyle={{padding:20,paddingBottom:60}} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>}>
         <Text style={s.h1}>📊 Profit Tracker</Text>
@@ -142,8 +143,6 @@ const s = StyleSheet.create({
   safe:{flex:1,backgroundColor:C.bg},nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingTop: 16, paddingBottom: 10,gap:8},
   navBack:{padding:4},navBackText:{color:C.text3,fontSize:24,lineHeight:24},
   logoRow:{flexDirection:"row",alignItems:"center",gap:8},
-  logoIcon:{width:26,height:26,backgroundColor:C.green,borderRadius:7,alignItems:"center",justifyContent:"center"},
-  logoIconText:{color:C.greenDark,fontSize:13,fontWeight:"900"},
   logoText:{color:C.text1,fontSize:16,fontWeight:"800",letterSpacing:-0.5},
   h1:{color:C.text1,fontSize:24,fontWeight:"900",letterSpacing:-0.5,marginBottom:4},
   body:{color:C.text2,fontSize:14,lineHeight:21},

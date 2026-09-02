@@ -6,7 +6,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
-import Wordmark from "../components/Wordmark";
+import HeaderLogo from "../components/HeaderLogo";
 import {
   isBiometricAvailable, isBiometricEnabled, enableBiometric,
   authenticateWithBiometrics, getBiometricEmail, getBiometricLabel,
@@ -243,10 +243,7 @@ export default function LoginScreen({ onLogin }: Props) {
 
           {/* Logo */}
           <View style={s.logoRow}>
-            <View style={s.logoIcon}>
-              <Text style={s.logoIconText}>V</Text>
-            </View>
-            <Wordmark style={s.logoText}/>
+            <HeaderLogo textStyle={s.logoText}/>
           </View>
 
           <Text style={s.h2}>{mode === "signup" ? "Create Account" : mode === "forgot" ? "Reset Password" : mode === "reset" ? "Enter Reset Code" : "Welcome Back"}</Text>
@@ -409,8 +406,6 @@ const s = StyleSheet.create({
   scroll:        { flexGrow: 1, padding: 24, paddingTop: 40 },
   center:        { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   logoRow:       { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 32 },
-  logoIcon:      { width: 40, height: 40, borderRadius: 12, backgroundColor: C.green, alignItems: "center", justifyContent: "center" },
-  logoIconText:  { color: C.greenDark, fontSize: 22, fontWeight: "900" },
   logoText:      { color: C.text1, fontSize: 22, fontWeight: "900", letterSpacing: -0.5 },
   h2:            { color: C.text1, fontSize: 24, fontWeight: "900", letterSpacing: -0.5, marginBottom: 6 },
   sub:           { color: C.text3, fontSize: 14, lineHeight: 20, marginBottom: 20 },

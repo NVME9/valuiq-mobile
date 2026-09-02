@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, RefreshControl, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import ScannerMark from "../components/ScannerMark";
 import { getCommunityFlips, peekCommunityFlips, CommunityFlip, reportWin } from "../lib/api";
 import { formatFeedDetail, avatarForFlip } from "../lib/flipFormat";
 import FlexRevealCard from "../components/FlexRevealCard";
@@ -94,7 +95,7 @@ export default function CommunityScreen({ token, onNavigate, onBack, navData }: 
           <Text style={s.backTxt}>←</Text>
         </TouchableOpacity>
         <View style={s.logoRow}>
-          <View style={s.logoIcon}><Text style={s.logoIconTxt}>V</Text></View>
+          <ScannerMark size={42}/>
           <Text style={s.logoTxt}>Community</Text>
         </View>
         <View style={{ width:36 }}/>
@@ -287,8 +288,6 @@ const s = StyleSheet.create({
   backBtn:        { width:36, height:36, justifyContent:"center" },
   backTxt:        { color:C.text3, fontSize:22 },
   logoRow:        { flexDirection:"row", alignItems:"center", gap:8 },
-  logoIcon:       { width:28, height:28, backgroundColor:C.green, borderRadius:8, alignItems:"center", justifyContent:"center" },
-  logoIconTxt:    { color:C.greenDark, fontSize:14, fontWeight:"900" },
   logoTxt:        { color:C.text1, fontSize:17, fontWeight:"800" },
   statsBanner:    { flexDirection:"row", backgroundColor:C.surface, paddingTop: 16, paddingBottom: 10 },
   statItem:       { flex:1, alignItems:"center" },

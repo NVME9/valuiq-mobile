@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
-import Wordmark from "../components/Wordmark";
+import HeaderLogo from "../components/HeaderLogo";
 import { API_BASE } from "../lib/api";
 
 interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void; }
@@ -37,7 +37,7 @@ export default function ArbitrageScreen({ token, plan, onNavigate, onBack }: Pro
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
       <View style={s.nav}>
         <TouchableOpacity onPress={()=>onBack?.()} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
-        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
+        <View style={s.logoRow}><HeaderLogo textStyle={s.logoText}/></View>
         {results.length>0&&<TouchableOpacity onPress={()=>{setResults([]);setSummary("");}} style={[s.navBtn,{marginLeft:"auto" as any}]}><Text style={s.navBtnText}>New Search</Text></TouchableOpacity>}
       </View>
 
@@ -90,8 +90,6 @@ const s = StyleSheet.create({
   nav:{flexDirection:"row",alignItems:"center",paddingHorizontal:20,paddingTop: 16, paddingBottom: 10,gap:8},
   navBack:{padding:4},navBackText:{color:C.text3,fontSize:24,lineHeight:24},
   logoRow:{flexDirection:"row",alignItems:"center",gap:8},
-  logoIcon:{width:26,height:26,backgroundColor:C.green,borderRadius:7,alignItems:"center",justifyContent:"center"},
-  logoIconText:{color:C.greenDark,fontSize:13,fontWeight:"900"},
   logoText:{color:C.text1,fontSize:16,fontWeight:"800",letterSpacing:-0.5},
   navBtn:{borderWidth:1,borderColor:C.border,borderRadius:7,paddingHorizontal:10,paddingVertical:5},
   navBtnText:{color:C.text3,fontSize:12,fontWeight:"600"},

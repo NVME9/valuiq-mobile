@@ -6,7 +6,7 @@ if (require("react-native").Platform.OS !== "web") { try { const c = require("ex
 import * as ImagePicker from "expo-image-picker";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
-import Wordmark from "../components/Wordmark";
+import HeaderLogo from "../components/HeaderLogo";
 import ShareButton from "../components/ShareButton";
 import { API_BASE } from "../lib/api";
 
@@ -125,7 +125,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <View style={s.nav}>
         <TouchableOpacity onPress={()=>onBack?.()} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
-        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
+        <View style={s.logoRow}><HeaderLogo textStyle={s.logoText}/></View>
       </View>
       <ScrollView contentContainerStyle={{ padding:24, paddingBottom:60, alignItems:"center" }}>
         <Text style={{ fontSize:64, marginBottom:16 }}>🛍️</Text>
@@ -171,7 +171,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
   if (phase==="done") return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
-        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
+        <View style={s.logoRow}><HeaderLogo textStyle={s.logoText}/></View>
         <TouchableOpacity onPress={newRun} style={[s.navBtn,{marginLeft:"auto" as any}]}><Text style={s.navBtnText}>New Run</Text></TouchableOpacity>
       </View>
       <ScrollView contentContainerStyle={{ padding:20, paddingBottom:60 }}>
@@ -340,8 +340,6 @@ const s = StyleSheet.create({
   navBack:          { padding:4 },
   navBackText:      { color:C.text3, fontSize:24, lineHeight:24 },
   logoRow:          { flexDirection:"row", alignItems:"center", gap:8 },
-  logoIcon:         { width:26, height:26, backgroundColor:C.green, borderRadius:7, alignItems:"center", justifyContent:"center" },
-  logoIconText:     { color:C.greenDark, fontSize:13, fontWeight:"900" },
   logoText:         { color:C.text1, fontSize:16, fontWeight:"800", letterSpacing:-0.5 },
   navBtn:           { borderWidth:1, borderColor:C.border, borderRadius:7, paddingHorizontal:10, paddingVertical:5 },
   navBtnText:       { color:C.text3, fontSize:12, fontWeight:"600" },

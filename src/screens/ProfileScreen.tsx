@@ -7,7 +7,7 @@ import * as ImagePicker from "expo-image-picker";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import * as Clipboard from "expo-clipboard";
 import { C } from "../lib/theme";
-import Wordmark from "../components/Wordmark";
+import HeaderLogo from "../components/HeaderLogo";
 import UserAvatar from "../components/UserAvatar";
 import { isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric, getBiometricLabel } from "../lib/biometrics";
 import { API_BASE, deleteAccount, getProfileData, peekProfileData, invalidateProfileCache, setCachedAvatar } from "../lib/api";
@@ -21,7 +21,7 @@ import * as Updates from "expo-updates";
 // is the ground truth: if BUILD_TAG on-device doesn't match what you just
 // published, the update didn't land (see App.tsx's init() for the
 // check-and-reload-immediately fix that was missing).
-const BUILD_TAG = "2026-08-31.17";
+const BUILD_TAG = "2026-09-02.2";
 
 // The single owner/dev allowlist for anything real users must never see -
 // dev-only tools (Reset onboarding, Preview new-user flow) and the build
@@ -472,8 +472,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
         {/* Nav */}
         <View style={s.nav}>
           <View style={s.logoRow}>
-            <View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View>
-            <Wordmark style={s.logoText}/>
+            <HeaderLogo textStyle={s.logoText}/>
           </View>
           <View style={{flexDirection:"row",gap:12,alignItems:"center"}}>
             {!editing && (
@@ -960,8 +959,6 @@ const s = StyleSheet.create({
   container:         { padding:20, paddingBottom:60 },
   nav:               { flexDirection:"row", justifyContent:"space-between", alignItems:"center", marginBottom:20 },
   logoRow:           { flexDirection:"row", alignItems:"center", gap:8 },
-  logoIcon:          { width:30, height:30, backgroundColor:C.green, borderRadius:8, alignItems:"center", justifyContent:"center" },
-  logoIconText:      { color:C.greenDark, fontSize:15, fontWeight:"900" },
   logoText:          { color:C.text1, fontSize:17, fontWeight:"800", letterSpacing:-0.5 },
   logoutNavBtn: { backgroundColor: "#1a0505", borderWidth: 1, borderColor: "#ff5a5a40", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 },
   logoutNavText: { color: C.red, fontSize: 13, fontWeight: "700" as any },

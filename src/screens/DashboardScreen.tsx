@@ -6,7 +6,7 @@ import {
 } from "react-native";
 import { SafeAreaView as SAV } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
-import Wordmark from "../components/Wordmark";
+import HeaderLogo from "../components/HeaderLogo";
 import UserAvatar from "../components/UserAvatar";
 import { API_BASE, hasProAccess, getCommunityFlips, peekCommunityFlips, CommunityFlip, getWinsSummary, peekProfileData, peekAvatar, getScanHistory, peekScanHistory } from "../lib/api";
 import { formatTickerItem, formatTickerProfit } from "../lib/flipFormat";
@@ -221,8 +221,7 @@ export default function DashboardScreen({ token, plan, planLoaded = true, scansL
       {/* Nav */}
       <View style={s.nav}>
         <View style={s.logoRow}>
-          <View style={s.logoBox}><Text style={s.logoV}>V</Text></View>
-          <Wordmark style={s.logoTxt}/>
+          <HeaderLogo textStyle={s.logoTxt}/>
         </View>
         <View style={s.navRight}>
           {/* Neutral placeholder pill (same size, no text/color) until
@@ -494,8 +493,6 @@ const s = StyleSheet.create({
   safe:          { flex:1, backgroundColor:C.bg },
   nav:           { flexDirection:"row", justifyContent:"space-between", alignItems:"center", paddingHorizontal:20, paddingTop: 16, paddingBottom: 10, borderBottomWidth:1, borderBottomColor:C.border },
   logoRow:       { flexDirection:"row", alignItems:"center", gap:8 },
-  logoBox:       { width:32, height:32, borderRadius:9, backgroundColor:C.green, alignItems:"center", justifyContent:"center" },
-  logoV:         { color:C.greenDark, fontSize:18, fontWeight:"900" },
   logoTxt:       { color:C.text1, fontSize:19, fontWeight:"900", letterSpacing:-0.5 },
   navRight:      { flexDirection:"row", alignItems:"center", gap:8 },
   planBadge:     { borderRadius:100, borderWidth:1, paddingHorizontal:10, paddingVertical:4 },

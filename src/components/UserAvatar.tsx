@@ -1,7 +1,10 @@
 import { useState, useEffect } from "react";
 import { View, Text, Image } from "react-native";
 import { C } from "../lib/theme";
-import ValuIQLogo from "./ValuIQLogo";
+
+// The real brand icon PNG - not an SVG recreation. Same asset HeaderLogo
+// renders (see HeaderLogo.tsx) - identical pixels, not a lookalike.
+const BRAND_ICON = require("../../assets/icon.png");
 
 type Props = {
   photoUrl?: string | null;
@@ -22,8 +25,8 @@ type Props = {
 // Single source of truth for how the current user's own avatar renders,
 // anywhere it appears (Profile, Dashboard header, bottom tab bar, ...):
 // real uploaded photo > chosen emoji > initial letter > the real ValuIQ
-// brand mark (the same SVG used on the onboarding/intro screen - see
-// ValuIQLogo.tsx - not a typed letter).
+// brand icon PNG (BRAND_ICON above - not a typed letter, not a hand-drawn
+// SVG recreation).
 //
 // MEASURED (2026-08-31): the generic person-silhouette glyph (Unicode 👤)
 // used to be the last-resort fallback here, and on a cold app start it's
@@ -31,10 +34,10 @@ type Props = {
 // hydrating from AsyncStorage - a jarring "blue icon" flash for a user who
 // actually has a real avatar set. A flat typed "V" replaced it briefly but
 // read as cheap/placeholder-ish next to the app's actual polished mark -
-// ValuIQLogo (the onboarding screen's checkmark glyph) is the real fallback
-// now, sized to fit the avatar circle. Never wrong to show (it's not
-// pretending to be a specific person) and matches the brand everywhere else
-// it appears.
+// the real brand icon PNG is the fallback now, filling the avatar circle.
+// Never wrong to show (it's not pretending to be a specific person) and
+// matches the brand everywhere else it appears (identical to the header
+// logo - see HeaderLogo.tsx).
 //
 // Always renders the SAME size x size box regardless of whether a photo is
 // set or has finished loading - the emoji/initial/brand-mark is a base
@@ -67,10 +70,7 @@ export default function UserAvatar({ photoUrl, emoji, initial, size, glyphSize, 
       {glyph ? (
         <Text style={{ fontSize: glyphSize ?? size * 0.5, fontWeight: "900", color: C.text1 }}>{glyph}</Text>
       ) : (
-        // ~0.5x the box, same proportion the emoji/initial glyph uses -
-        // reads as a centered mark, not an oversized logo cramped into a
-        // small circle.
-        <ValuIQLogo accent={C.green} size={glyphSize ?? size * 0.5} />
+        <Image source={BRAND_ICON} resizeMode="cover" style={{ width: size, height: size }} />
       )}
       {photoUrl && (
         <Image

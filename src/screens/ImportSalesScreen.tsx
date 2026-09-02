@@ -4,7 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import { C } from "../lib/theme";
-import Wordmark from "../components/Wordmark";
+import HeaderLogo from "../components/HeaderLogo";
 import { analyzeSales } from "../lib/api";
 
 interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string, data?:any)=>void; onBack?:()=>void; onLogout:()=>void; navData?:any; }
@@ -67,7 +67,7 @@ export default function ImportSalesScreen({ token, onNavigate, onBack }: Props) 
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={s.nav}>
           <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
-          <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
+          <View style={s.logoRow}><HeaderLogo textStyle={s.logoText}/></View>
           <TouchableOpacity onPress={reset} style={[s.navBtn, { marginLeft: "auto" as any }]}><Text style={s.navBtnText}>New File</Text></TouchableOpacity>
         </View>
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 80 }}>
@@ -174,7 +174,7 @@ export default function ImportSalesScreen({ token, onNavigate, onBack }: Props) 
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <View style={s.nav}>
         <TouchableOpacity onPress={() => onBack?.()} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
-        <View style={s.logoRow}><View style={s.logoIcon}><Text style={s.logoIconText}>V</Text></View><Wordmark style={s.logoText}/></View>
+        <View style={s.logoRow}><HeaderLogo textStyle={s.logoText}/></View>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
         <Text style={s.h1}>📊 Import Sales</Text>
@@ -208,8 +208,6 @@ const s = StyleSheet.create({
   navBtn: { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
   navBtnText: { color: C.text2, fontSize: 13, fontWeight: "700" as any },
   logoRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  logoIcon: { width: 26, height: 26, borderRadius: 7, backgroundColor: C.green, alignItems: "center", justifyContent: "center" },
-  logoIconText: { color: C.greenDark, fontWeight: "900" as any, fontSize: 13 },
   logoText: { color: C.text1, fontWeight: "800" as any, fontSize: 16 },
   h1: { color: C.text1, fontSize: 24, fontWeight: "900" as any, marginBottom: 6 },
   body: { color: C.text3, fontSize: 14, lineHeight: 20 },
