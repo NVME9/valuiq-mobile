@@ -109,10 +109,11 @@ const FAQS = [
         q: "Is my data safe?",
         a: "Yes. Scan results are stored securely in Supabase with row-level security. We never sell your data. Scan images are not stored — only the analysis results."
       },
-      {
-        q: "What is the referral program?",
-        a: "Paid subscribers get a personal referral link. When someone subscribes using your link, you earn 20% of their first payment — $3.80 for Seller, $9.80 for Pro monthly, or $39.40 for Lifetime. Referred users get 30 days free on any paid plan."
-      },
+      // TODO: re-enable when referral program is live
+      // {
+      //   q: "What is the referral program?",
+      //   a: "Paid subscribers get a personal referral link. When someone subscribes using your link, you earn 20% of their first payment — $3.80 for Seller, $9.80 for Pro monthly, or $39.40 for Lifetime. Referred users get 30 days free on any paid plan."
+      // },
     ]
   },
   {

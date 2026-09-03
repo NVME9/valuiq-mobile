@@ -32,10 +32,11 @@ const FAQS = [
     q: "Can I use ValuIQ for liquidation buying?",
     a: "Yes - Manifest Beast (Pro) lets you upload a liquidation lot manifest (photo or spreadsheet) and scores items with an AI-estimated value, then projects the lot and suggests a max bid. Many Pro users evaluate $1,000-$10,000+ lots with it before buying — always verify estimates before bidding.",
   },
-  {
-    q: "How does the referral program work?",
-    a: "Paid subscribers get a personal referral link in their Profile. When someone subscribes using your link, you earn 20% of their first payment — $3.80 for Seller, $9.80 for Pro monthly, or $39.40 for Lifetime. Earnings are paid out after the 30-day refund window closes.",
-  },
+  // TODO: re-enable when referral program is live
+  // {
+  //   q: "How does the referral program work?",
+  //   a: "Paid subscribers get a personal referral link in their Profile. When someone subscribes using your link, you earn 20% of their first payment — $3.80 for Seller, $9.80 for Pro monthly, or $39.40 for Lifetime. Earnings are paid out after the 30-day refund window closes.",
+  // },
   {
     q: "What platforms does ValuIQ cover?",
     a: "Selling platforms: eBay, Poshmark, Mercari, Depop, Etsy, Whatnot, Facebook Marketplace, OfferUp, Craigslist, StockX, GOAT, and Amazon.",
