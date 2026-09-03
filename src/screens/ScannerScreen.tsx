@@ -8,6 +8,7 @@ import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-ca
 import * as ImagePicker from "expo-image-picker";
 import ViewShot from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
@@ -27,6 +28,12 @@ import { toPendingScan } from "../lib/saleCapture";
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
 const MAX_PHOTOS = 5;
+// Gates the soft in-app notification ask to once EVER per install, not once
+// per mount - local `checkInAsked` state alone reset on every screen
+// remount, so the same user got re-asked on every subsequent BUY scan.
+// Declining is respected permanently; SaleCapturePrompt (the dashboard
+// banner) is the permission-free fallback for anyone who declines/is denied.
+const CHECKIN_ASKED_KEY = "@valuiq_checkin_asked";
 
 type Step = "camera" | "barcode" | "review" | "loading" | "result" | "upgrade";
 
@@ -242,8 +249,15 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             if (status === "granted") {
               scheduleSaleCheckIn(String(sid), nm);
             } else if (status !== "denied") {
-              // Not yet asked â€” show our own ask, in context, after they see the win.
-              setPendingCheckIn({ scanId: String(sid), itemName: nm });
+              // Not yet asked (OS-wise) — but only show OUR soft ask once
+              // ever per install, not once per scan. AsyncStorage (not just
+              // local `checkInAsked` state) so a decline sticks across
+              // remounts/relaunches instead of re-nagging next BUY scan.
+              const asked = await AsyncStorage.getItem(CHECKIN_ASKED_KEY);
+              if (asked !== "true") {
+                setPendingCheckIn({ scanId: String(sid), itemName: nm });
+                AsyncStorage.setItem(CHECKIN_ASKED_KEY, "true").catch(() => {});
+              }
             }
           }
         }

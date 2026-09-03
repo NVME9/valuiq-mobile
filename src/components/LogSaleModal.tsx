@@ -41,9 +41,20 @@ interface Props {
   scan: PendingScan | null;
   onClose: () => void;
   onLeaderboard?: () => void;
+  // Fires once, the instant a "sold" save actually succeeds (mirrors
+  // SaleCaptureCard's onReveal, which only fires on success) - callers use
+  // this to drop the item from whatever list they're driving (the banner's
+  // pending queue, HistoryScreen's scans) and invalidate caches. Deliberately
+  // separate from onClose: this Modal keeps itself mounted to show the
+  // reveal after a save, so a caller must NOT clear its `scan` prop here -
+  // clearing `scan` while `visible` is still true unmounts the whole Modal
+  // (see the `if (!scan) return null` guard below) mid-reveal, the exact
+  // "two things racing to control one Modal" bug this file's comments
+  // describe. Only onClose should ever null out the caller's scan state.
+  onSaved?: (scanId: string) => void;
 }
 
-export default function LogSaleModal({ visible, token, scan, onClose, onLeaderboard }: Props) {
+export default function LogSaleModal({ visible, token, scan, onClose, onLeaderboard, onSaved }: Props) {
   // stat starts null: SaleCaptureCard's onReveal opens this shell the
   // instant the sale save succeeds, before the crowd-comparison fetch
   // resolves - onRevealStat fills stat in afterward via the ref below.
@@ -91,6 +102,7 @@ export default function LogSaleModal({ visible, token, scan, onClose, onLeaderbo
                 onReveal={(itemName, brand, loadingSubStat, netProfit) => {
                   justRevealedRef.current = true;
                   setReveal({ stat: null, itemName, brand, loadingSubStat, netProfit });
+                  onSaved?.(scan.id);
                 }}
                 onRevealStat={(stat) => {
                   setReveal((prev) => (prev ? { ...prev, stat } : prev));

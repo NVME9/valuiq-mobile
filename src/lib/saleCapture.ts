@@ -72,7 +72,7 @@ export async function recordSaleOutcome(
   token: string,
   scanId: string,
   outcome: SaleOutcome,
-  channel: "push" | "in_app",
+  channel: "push" | "in_app" | "banner",
   createdAt?: string,
   actualPrice?: number,
   daysOverride?: number
@@ -110,6 +110,29 @@ export async function recordSaleOutcome(
     return { success: !!j.success, scan: j.scan || null };
   } catch {
     return { success: false, scan: null };
+  }
+}
+
+// User said "not yet" - still listed, not resolved either way. Stamps
+// capture_prompted_at ONLY; sold_status is deliberately left untouched so the
+// row still matches scan-history's type=pending_sale filter (sold_status
+// "pending" or unset) and can resurface later. The caller (SaleCapturePrompt)
+// is what decides how long "later" is, by filtering on this timestamp - this
+// function doesn't know or care about cooldown length.
+export async function snoozeCapture(token: string, scanId: string): Promise<boolean> {
+  try {
+    const r = await fetch(
+      `${API_BASE}/api/scan-history?token=${encodeURIComponent(token)}&id=${encodeURIComponent(scanId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ capture_prompted_at: new Date().toISOString(), capture_channel: "banner" }),
+      }
+    );
+    const j = await r.json().catch(() => ({}));
+    return !!j.success;
+  } catch {
+    return false;
   }
 }
 

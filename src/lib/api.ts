@@ -626,6 +626,20 @@ export function invalidateScanHistoryCache(token: string) {
   }
 }
 
+// Fetch one scan by id, regardless of type/age - used to resolve a
+// notification tap's scanId into the full row LogSaleModal needs. Not cached
+// (a single-row lookup on a rare event, no reason to occupy the list-cache
+// keyspace above).
+export async function getScanById(token: string, id: string): Promise<any | null> {
+  try {
+    const r = await fetchWithTimeout(`${API_BASE}/api/scan-history?token=${encodeURIComponent(token)}&id=${encodeURIComponent(id)}`, undefined, DATA_FETCH_TIMEOUT_MS);
+    const d = await r.json();
+    return Array.isArray(d) && d[0] ? d[0] : null;
+  } catch {
+    return null;
+  }
+}
+
 // MEASURED BUG: HistoryScreen's loadData() used to fetch this with a plain,
 // un-timed, un-cached fetch() sitting inside the same Promise.allSettled as
 // the (properly timed+cached) scan/specialty/profile calls - allSettled

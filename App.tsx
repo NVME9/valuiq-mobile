@@ -6,8 +6,11 @@ import {
 import { C } from "./src/lib/theme";
 import LogoBadge from "./src/components/LogoBadge";
 import ScopeBackground from "./src/components/ScopeBackground";
-import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache } from "./src/lib/api";
+import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache, getScanById, invalidateScanHistoryCache } from "./src/lib/api";
 import { supabase } from "./src/lib/supabase";
+import { addSaleCheckInTapListener } from "./src/lib/notifications";
+import LogSaleModal from "./src/components/LogSaleModal";
+import { toPendingScan } from "./src/lib/saleCapture";
 import * as Updates from "expo-updates";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { isBiometricEnabled, saveBiometricRefreshToken } from "./src/lib/biometrics";
@@ -401,6 +404,22 @@ export default function App() {
 
   const token = session?.access_token || "";
 
+  // SALE-CAPTURE MOAT: the notification-tap half of the loop. Registered
+  // once at app root (matches the AppState listener above) so a tap routes
+  // to the capture form no matter which screen is currently active - the
+  // scan-history row is fetched fresh (not read off any screen's local
+  // state) since the tapped notification can be up to ~12 days old and the
+  // app may have been killed and relaunched since it fired.
+  const [tapScan, setTapScan] = useState<any|null>(null);
+  useEffect(() => {
+    const sub = addSaleCheckInTapListener(async (scanId) => {
+      if (!token) return;
+      const row = await getScanById(token, scanId);
+      if (row) setTapScan(row);
+    });
+    return () => sub.remove();
+  }, [token]);
+
   // First scan (shutter press, barcode capture, or Analyze) has happened -
   // retire the nudge for good so it never shows again on this install.
   // In preview mode this must NOT touch the real @valuiq_tour_done flag -
@@ -594,6 +613,19 @@ export default function App() {
                 })}
               </View>
             </SafeAreaView>
+            {/* Global: a tapped "Did it sell?" notification opens straight to
+                the capture form for that scan, regardless of which tab is
+                active underneath. onSaved only clears caches - onClose is
+                the sole place `tapScan` is nulled (see LogSaleModal's own
+                comment on why: clearing `scan` mid-reveal would unmount the
+                Modal underneath the reveal it just opened). */}
+            <LogSaleModal
+              visible={!!tapScan}
+              token={token}
+              scan={tapScan ? toPendingScan(tapScan) : null}
+              onClose={() => setTapScan(null)}
+              onSaved={() => invalidateScanHistoryCache(token)}
+            />
           </View>
         )}
       </Animated.View>

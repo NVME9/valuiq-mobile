@@ -8,6 +8,7 @@ import { SafeAreaView as SAV } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import HeaderLogo from "../components/HeaderLogo";
 import UserAvatar from "../components/UserAvatar";
+import SaleCapturePrompt from "../components/SaleCapturePrompt";
 import { API_BASE, hasProAccess, getCommunityFlips, peekCommunityFlips, CommunityFlip, getWinsSummary, peekProfileData, peekAvatar, getScanHistory, peekScanHistory } from "../lib/api";
 import { formatTickerItem, formatTickerProfit } from "../lib/flipFormat";
 
@@ -251,6 +252,9 @@ export default function DashboardScreen({ token, plan, planLoaded = true, scansL
         refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.green}
           onRefresh={() => { setRefresh(true); loadData(); }}/>}
       >
+
+        {/* SALE-CAPTURE MOAT: passive nudge for aging BUY scans still needing an outcome */}
+        <SaleCapturePrompt token={token} onNavigate={onNavigate} />
 
         {/* HERO SCAN BUTTON */}
         <Animated.View style={{transform:[{scale:scanPulse}]}}>
