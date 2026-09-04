@@ -58,5 +58,5 @@ export function formatFeedDetail(flip: CommunityFlip): string {
   if (hasBuySell) parts.push(`Bought $${flip.buy_price} → sold $${flip.sell_price}`);
   else if (hasDays) parts.push(`Sold in ${dayWord(flip.days_to_sale!)}`);
   if (flip.platform) parts.push(flip.platform);
-  return parts.length ? parts.join(" · ") : "Real community flip";
+  return parts.length ? parts.join(" · ") : "Real reseller flip";
 }

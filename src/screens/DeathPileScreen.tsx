@@ -231,7 +231,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
                 </View>
                 {result.marketData?.hasCrowd ? (
                   <View style={s.marketRow}>
-                    <Text style={s.marketLbl}>📊 ValuIQ community data: {result.marketData.soldCount} real sales · Median ${result.marketData.medianSold}{result.marketData.maxSold > 0 ? ` · Range $${result.marketData.minSold}-$${result.marketData.maxSold}` : ""}</Text>
+                    <Text style={s.marketLbl}>📊 Real reseller data: {result.marketData.soldCount} real sales · Median ${result.marketData.medianSold}{result.marketData.maxSold > 0 ? ` · Range $${result.marketData.minSold}-$${result.marketData.maxSold}` : ""}</Text>
                   </View>
                 ) : result.marketData?.medianSold > 0 ? (
                   <View style={s.marketRow}>

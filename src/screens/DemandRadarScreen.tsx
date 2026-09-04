@@ -44,7 +44,7 @@ export default function DemandRadarScreen({ token, onNavigate, onBack }: Props) 
   }
 
   const modeBadge =
-    dataMode === "crowd-led" ? { txt: "● COMMUNITY SIGNAL", color: C.green } :
+    dataMode === "crowd-led" ? { txt: "● RESELLER SIGNAL", color: C.green } :
     dataMode === "early-signal" ? { txt: "● EARLY SIGNAL", color: C.yellow } :
     { txt: "● BUILDING DATA", color: C.text4 };
 

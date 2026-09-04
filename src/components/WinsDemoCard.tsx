@@ -2,7 +2,7 @@
 // logged wins, show what a win looks like using a REAL resolved sale from
 // the ValuIQ moat (see /api/moat-demo-flip) instead of a sad empty state.
 // Never fabricated numbers, never presented as the viewer's own - clearly
-// labeled "Example from the ValuIQ community" on the card AND inside the
+// labeled "Example from real reseller sales" on the card AND inside the
 // reveal it opens (via FlexRevealCard's eyebrow/footer overrides).
 import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
@@ -49,7 +49,7 @@ export default function WinsDemoCard({ onScanNow }: Props) {
         </View>
         {/* MEASURED BUG: 48 chars at numberOfLines={1} with no fit guard -
             fits on a standard-width phone but ellipsizes on an SE-width one. */}
-        <Text style={s.tag} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>Example from the ValuIQ community · tap to see</Text>
+        <Text style={s.tag} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>Example from real reseller sales · tap to see</Text>
       </TouchableOpacity>
 
       <FlexRevealCard
@@ -58,7 +58,7 @@ export default function WinsDemoCard({ onScanNow }: Props) {
         itemName={flip.itemName}
         brand={flip.brand}
         eyebrowOverride="EXAMPLE FLIP"
-        footerOverride="Real sold data from the ValuIQ community."
+        footerOverride="Real sold data from real resellers."
         primaryLabelOverride="Scan your first item →"
         onShare={() => { setRevealOpen(false); onScanNow(); }}
         onClose={() => setRevealOpen(false)}

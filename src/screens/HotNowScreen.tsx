@@ -93,7 +93,7 @@ export default function HotNowScreen({ token, onNavigate, onBack }: Props) {
         {hasRealData && real.length > 0 && (
           <>
             <View style={s.sectionHead}>
-              <Text style={s.sectionTitle}>What your community is finding</Text>
+              <Text style={s.sectionTitle}>What resellers are finding</Text>
               <View style={s.liveDot}><Text style={s.liveDotText}>● LIVE</Text></View>
             </View>
             <Text style={s.sectionSub}>Real BUY flags from ValuIQ resellers this week</Text>
@@ -183,7 +183,7 @@ export default function HotNowScreen({ token, onNavigate, onBack }: Props) {
             <Text style={s.emptyText}>
               {error
                 ? "Couldn't load Hot Now right now. Pull to refresh."
-                : "Hot Now sharpens as the community scans and sells. Check back soon."}
+                : "Hot Now sharpens as more resellers scan and sell. Check back soon."}
             </Text>
           </View>
         )}

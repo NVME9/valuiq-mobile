@@ -545,7 +545,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const footNote =
       dataTier === "solid" ? "From real reseller outcomes."
       : dataTier === "early" ? "From real reseller outcomes — small sample, treat as a rough signal."
-      : "Market estimate. Sharpens as the community logs real sales.";
+      : "Market estimate. Sharpens as more resellers log real sales.";
     const secondaryStats = [
       { label: "sell price", value: result.sellPrice != null ? "$" + Math.round(result.sellPrice) : "—" },
       { label: "ROI", value: heroRoi ? heroRoi + "%" : "—" },

@@ -96,7 +96,7 @@ export default function CommunityScreen({ token, onNavigate, onBack, navData }: 
         </TouchableOpacity>
         <View style={s.logoRow}>
           <ScannerMark size={42}/>
-          <Text style={s.logoTxt}>Community</Text>
+          <Text style={s.logoTxt}>Real Reseller Wins</Text>
         </View>
         <View style={{ width:36 }}/>
       </View>
@@ -129,7 +129,7 @@ export default function CommunityScreen({ token, onNavigate, onBack, navData }: 
       {/* Tab switcher */}
       <View style={s.tabRow}>
         <TouchableOpacity style={[s.tabBtn, tab==="wins"&&s.tabBtnActive]} onPress={()=>setTab("wins")}>
-          <Text style={[s.tabTxt, tab==="wins"&&s.tabTxtActive]}>🔥 Community Wins</Text>
+          <Text style={[s.tabTxt, tab==="wins"&&s.tabTxtActive]}>🔥 Real Reseller Wins</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[s.tabBtn, tab==="leaderboard"&&s.tabBtnActive]} onPress={()=>setTab("leaderboard")}>
           <Text style={[s.tabTxt, tab==="leaderboard"&&s.tabTxtActive]}>🏆 Top Flips</Text>
@@ -151,7 +151,7 @@ export default function CommunityScreen({ token, onNavigate, onBack, navData }: 
             {wins.length === 0 ? (
               <View style={s.emptyWrap}>
                 <Text style={s.emptyTitle}>Be the first this week</Text>
-                <Text style={s.emptySub}>Real community flips will show up here as resellers scan and sell.</Text>
+                <Text style={s.emptySub}>Real reseller flips will show up here.</Text>
               </View>
             ) : (
               <>
@@ -271,8 +271,8 @@ export default function CommunityScreen({ token, onNavigate, onBack, navData }: 
         stat={revealWin ? communityStat(revealWin) : null}
         itemName={revealWin?.item_name}
         brand={revealWin?.brand}
-        eyebrowOverride="COMMUNITY FLIP"
-        footerOverride="A real flip from the ValuIQ community."
+        eyebrowOverride="RESELLER FLIP"
+        footerOverride="A real flip from a reseller."
         primaryLabelOverride="Scan similar →"
         onShare={() => { setRevealWin(null); onNavigate("scanner"); }}
         hideLeaderboardButton

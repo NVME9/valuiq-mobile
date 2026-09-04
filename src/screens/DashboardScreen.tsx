@@ -295,7 +295,7 @@ export default function DashboardScreen({ token, plan, planLoaded = true, scansL
           <Text style={s.winsBarChevron}>{"›"}</Text>
         </TouchableOpacity>
 
-        {/* LIVE FEED - real community wins. Item and profit are two
+        {/* LIVE FEED - real reseller wins. Item and profit are two
             separate Text nodes, not one joined string: the item can be
             arbitrarily long (real item names), so IT is what ellipsizes
             (numberOfLines=1, flexShrink) - the "+$X" profit is the hook

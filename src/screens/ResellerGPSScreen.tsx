@@ -41,7 +41,7 @@ export default function ResellerGPSScreen({ token, onBack }: Props) {
 
   const modeBadge =
     dataMode === "crowd-led"
-      ? { txt: "● COMMUNITY SIGNAL", color: C.green }
+      ? { txt: "● RESELLER SIGNAL", color: C.green }
       : { txt: "● EVERGREEN + eBay", color: C.orange };
 
   if (loading) {
