@@ -493,34 +493,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       ? `${result.category}${result.condition ? " - " + result.condition : ""}`
       : null;
 
-    // CALIBRATED TO ONE HONEST TIER (2026-08-24): every "how real is this
-    // data" signal on this screen - badge, footnote, reasoning text, AND the
-    // banner below - now derives from this ONE tier, itself derived from the
-    // SAME two backend-computed signals dataQuality was calibrated from
-    // (crowdConfidence + isLowConfidenceId, see lens/route.ts). Previously
-    // three separate fields (oraclePred.medianProfitIsReal, oracle.dataMode,
-    // priceData.isRealData) each read their own threshold - none of them the
-    // one dataQuality actually used - which is what let the badge say
-    // "REAL DATA" while the banner said "Estimated" for the same 22-row
-    // sample. Deriving from dataQuality itself makes disagreement structurally
-    // impossible: the badge's bucket can only get MORE specific than the
-    // banner's, never contradict it.
-    const dataTier: "solid" | "early" | "estimate" | "none" =
-      result.dataQuality === "strong" ? "solid"
-      : result.dataQuality === "limited" && result.crowdConfidence === "early" ? "early"
-      : result.dataQuality === "limited" ? "estimate"
-      : "none";
-
-    // Max-buy ALWAYS ships with the reasoning that makes it trustworthy -
-    // cites the real comp count when we have one, and judges the actual
-    // purchase when a price was entered, instead of appearing as a bare
-    // number asking for trust.
-    const compCount = result.priceData?.count || 0;
-    const dataPhrase =
-      dataTier === "solid" && compCount ? `Based on ${compCount} real sale${compCount === 1 ? "" : "s"}`
-      : dataTier === "early" && compCount ? `Based on ${compCount} real sale${compCount === 1 ? "" : "s"} — small sample, verify`
-      : dataTier === "estimate" && compCount ? `Based on ${compCount} active listing${compCount === 1 ? "" : "s"} — estimate, not a sold price`
-      : "Based on market estimate";
+    // AGREEMENT-ANCHOR MODEL (Part 3/5): every "how real is this data"
+    // signal on this screen - badge, footnote, reasoning text, AND the
+    // banner below - now derives from result.agreementBadge, the one honest
+    // label lib/profitOracle.ts computed (buildBadge, keyed on
+    // agreeingCount). Never re-derived from dataQuality/crowdConfidence
+    // tiers here, so this screen can't drift from what the web scanner or
+    // ShareCard say about the identical scan.
+    const dataPhrase = result.agreementBadge || "Based on market estimate";
     // The claim must match the number: maxBuy is now the price where this
     // clears a genuine ~$10 profit floor (lib/profitMath.ts's computeMaxBuy,
     // fixed to solve for the verdict's own worth-it floor, not just an ROI%
@@ -534,17 +514,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         : `${dataPhrase}. Pay $${maxBuy} or less to make this a real flip (≥$10 profit after fees).`
     );
 
-    const dataTag =
-      dataTier === "solid" ? "● REAL DATA"
-      : dataTier === "early" ? "● REAL DATA · SMALL SAMPLE"
+    const dataTag = result.confirmedByMoat
+      ? (result.agreeingCount >= 30 ? "● REAL DATA" : "● REAL DATA · SMALL SAMPLE")
       : "● ESTIMATE";
-    const dataTagColor =
-      dataTier === "solid" ? C.green
-      : dataTier === "early" ? C.yellow
+    const dataTagColor = result.confirmedByMoat
+      ? (result.agreeingCount >= 30 ? C.green : C.yellow)
       : C.text4;
-    const footNote =
-      dataTier === "solid" ? "From real reseller outcomes."
-      : dataTier === "early" ? "From real reseller outcomes — small sample, treat as a rough signal."
+    const footNote = result.confirmedByMoat
+      ? (result.agreeingCount >= 30 ? "From real reseller outcomes." : "From real reseller outcomes — small sample, treat as a rough signal.")
       : "Market estimate. Sharpens as more resellers log real sales.";
     const secondaryStats = [
       { label: "sell price", value: result.sellPrice != null ? "$" + Math.round(result.sellPrice) : "—" },
@@ -602,26 +579,36 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             <>
               {/* Data confidence - shown in both BUY and SKIP layouts; backs
                   the max-buy reasoning (and the skip reason) either way.
-                  Driven by the SAME dataTier the badge/footnote/reasoning
-                  above use, so this can never contradict them. */}
-              {dataTier === "solid" && result.priceData && result.priceData.isRealData ? (
+                  Driven by the SAME agreementBadge the badge/footnote/
+                  reasoning above use, so this can never contradict them. */}
+              {result.confirmedByMoat && result.priceData ? (
                 <TouchableOpacity style={s.goodBanner} onPress={()=>Linking.openURL(result.priceData.ebaySearchUrl)}>
                   <Text></Text>
                   <View style={{flex:1}}>
-                    <Text style={s.goodBannerTitle}>{result.priceData.count} real sales</Text>
+                    <Text style={s.goodBannerTitle}>{result.agreementBadge}</Text>
                     <Text style={s.goodBannerSub}>avg ${result.priceData.avgPrice} · range ${result.priceData.minPrice}–${result.priceData.maxPrice}</Text>
                   </View>
                   <Text style={{color:C.green}}>{'>'}</Text>
                 </TouchableOpacity>
-              ) : dataTier === "early" ? (
+              ) : (
                 <View style={s.limitedBanner}>
                   <Text></Text>
-                  <Text style={s.limitedText}>Real data — {result.priceData?.count || 0} sales, small sample. Numbers may vary, verify before buying.</Text>
+                  <Text style={s.limitedText}>{result.agreementBadge} — verify before buying.</Text>
                 </View>
-              ) : dataTier === "estimate" ? (
-                <View style={s.limitedBanner}>
+              )}
+
+              {/* Part 1/5: identify's retail-arbitrage read - only shown
+                  when the scan actually had a price to compare against the
+                  resale range, never invented. */}
+              {result.isGoodDeal != null ? (
+                <View style={result.isGoodDeal ? s.goodBanner : s.limitedBanner}>
                   <Text></Text>
-                  <Text style={s.limitedText}>Estimated — limited data, numbers may vary. Verify before buying.</Text>
+                  <View style={{flex:1}}>
+                    <Text style={result.isGoodDeal ? s.goodBannerTitle : s.limitedText}>
+                      {result.isGoodDeal ? "💰 Good deal" : "⚠️ Thin margin"}
+                    </Text>
+                    <Text style={s.goodBannerSub}>{result.dealReasoning}</Text>
+                  </View>
                 </View>
               ) : null}
 

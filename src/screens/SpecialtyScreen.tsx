@@ -225,7 +225,17 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
     const enteredBp = Number(buyPriceInput) || 0;
     const heroProfit = Number(result.netProfit) || 0;
     const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
-    const maxBuy = result.buyTarget != null ? Number(result.buyTarget) : null;
+
+    // AGREEMENT-ANCHOR MODEL (2026-09-07): the old notAFlipItem/thinData
+    // suppression patchwork is gone (see lib/profitOracle.ts) - identify now
+    // reasons a resale-value anchor for every item it can identify at all,
+    // so specialty/route.ts always returns a real, honestly-badged price.
+    // `suppressed` now means only the one remaining honest decline: genuine
+    // non-identification (specialty/route.ts's honestNote is only ever set
+    // for that case now - see its POST handler).
+    const suppressed = !!result.honestNote;
+    const suppressedHeadline = "Couldn't identify this item";
+    const maxBuy = suppressed ? null : (result.buyTarget != null ? Number(result.buyTarget) : null);
 
     // Outcome tier - THE single source of truth for the verdict, the exact
     // same classifyOutcome() ScannerScreen.tsx calls. Weighs ROI, dollar
@@ -240,7 +250,17 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
     // "SKIP - only $X profit" off the max-buy ceiling. Reuses the skip
     // TIER'S LAYOUT (no big profit hero; Max Buy always ships) without
     // claiming a verdict this screen can't back up.
-    const outcome = enteredBp > 0
+    const outcome = suppressed
+      ? {
+          tier: "skip" as const,
+          emoji: "🔍",
+          label: "NO VERDICT",
+          copy: suppressedHeadline,
+          accent: C.text3,
+          adjustedROI: 0,
+          daysUsed: 0,
+        }
+      : enteredBp > 0
       ? classifyOutcome({
           decision: result.decision,
           netProfit: heroProfit,
@@ -267,30 +287,23 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
 
     // WHICH PLATFORM (2026-08-25): same fix as ScannerScreen.tsx - bestPlatform
     // drives the actual netProfit/roi shown above but never reached this card.
-    // Only prepended when a real price was entered.
-    const heroOutcome = (enteredBp > 0 && result.bestPlatform)
+    // Only prepended when a real price was entered. Never prepended for a
+    // suppressed item: specialty/route.ts's bestPlatform falls back to the
+    // literal string "eBay" even with zero real platformBreakdown entries
+    // (sellPrice===0 filters every candidate out) - "On eBay — Not enough
+    // data..." would falsely imply an eBay-specific claim that was never made.
+    const heroOutcome = (!suppressed && enteredBp > 0 && result.bestPlatform)
       ? { ...outcome, copy: `On ${result.bestPlatform} — ${outcome.copy}` }
       : outcome;
 
     const categoryLine = `${selectedCat.label}${result.confidence ? " - " + result.confidence + " confidence" : ""}`;
 
-    // CALIBRATED TO ONE HONEST TIER (2026-08-24): same fix as
-    // ScannerScreen.tsx - badge/reasoning/banner all derive from ONE tier,
-    // itself derived from the SAME two backend signals dataQuality was
-    // calibrated from (crowdConfidence + isLowConfidenceId), so they can't
-    // disagree the way a badge keyed off "any real data" and a banner keyed
-    // off "solid data only" used to.
-    const dataTier: "solid" | "early" | "estimate" | "none" =
-      result.dataQuality === "strong" ? "solid"
-      : result.dataQuality === "limited" && result.crowdConfidence === "early" ? "early"
-      : result.dataQuality === "limited" ? "estimate"
-      : "none";
-    const compCount = result.priceData?.count || 0;
-    const dataPhrase =
-      dataTier === "solid" && compCount ? `Based on ${compCount} real sale${compCount === 1 ? "" : "s"}`
-      : dataTier === "early" && compCount ? `Based on ${compCount} real sale${compCount === 1 ? "" : "s"} — small sample, verify`
-      : dataTier === "estimate" && compCount ? `Based on ${compCount} active listing${compCount === 1 ? "" : "s"} — estimate, not a sold price`
-      : "Based on market estimate";
+    // AGREEMENT-ANCHOR MODEL (Part 3/5): dataPhrase is result.agreementBadge
+    // verbatim - the one honest label lib/profitOracle.ts computed
+    // (buildBadge, keyed on agreeingCount) - never re-derived from
+    // dataQuality/crowdConfidence tiers here, so this screen can't drift
+    // from what the web scanner or ShareCard say about the identical scan.
+    const dataPhrase = result.agreementBadge || "Based on market estimate";
     // The claim must match the number: maxBuy is now the price where this
     // clears a genuine ~$10 profit floor (lib/profitMath.ts's computeMaxBuy)
     // - same fix as ScannerScreen.tsx.
@@ -301,13 +314,15 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
             : `${dataPhrase}. You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
         : `${dataPhrase}. Pay $${maxBuy} or less to make this a real flip (≥$10 profit after fees).`
     );
-    const dataTag =
-      dataTier === "solid" ? "● REAL DATA"
-      : dataTier === "early" ? "● REAL DATA · SMALL SAMPLE"
+    // Suppressed items get no tag at all - real for anything else now,
+    // since confirmedByMoat/agreeingCount is the actual honesty signal
+    // (never dataQuality tiers, which only describe identification
+    // confidence, not moat agreement).
+    const dataTag = suppressed ? undefined :
+      result.confirmedByMoat ? (result.agreeingCount >= 30 ? "● REAL DATA" : "● REAL DATA · SMALL SAMPLE")
       : "● ESTIMATE";
-    const dataTagColor =
-      dataTier === "solid" ? C.green
-      : dataTier === "early" ? C.yellow
+    const dataTagColor = suppressed ? undefined :
+      result.confirmedByMoat ? (result.agreeingCount >= 30 ? C.green : C.yellow)
       : C.text4;
     const secondaryStats = [
       { label: "sell price", value: result.sellPrice != null ? "$" + Math.round(result.sellPrice) : "—" },
@@ -329,24 +344,32 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
           <Text style={s.catBadgeText}>{selectedCat.label}</Text>
         </View>
 
-        {/* Data confidence - same prominent banner ScannerScreen.tsx shows,
-            driven by the SAME dataTier the badge/reasoning above use, so
-            this can never contradict them. */}
-        {dataTier === "solid" && result.priceData && result.priceData.isRealData ? (
+        {/* Data confidence - driven by the SAME agreementBadge the
+            badge/reasoning above use, so this can never contradict them. */}
+        {!suppressed && result.confirmedByMoat && result.priceData ? (
           <TouchableOpacity style={s.goodBanner} onPress={() => result.priceData.ebaySearchUrl && Linking.openURL(result.priceData.ebaySearchUrl)}>
             <View style={{flex:1}}>
-              <Text style={s.goodBannerTitle}>{result.priceData.count} real sales</Text>
+              <Text style={s.goodBannerTitle}>{result.agreementBadge}</Text>
               <Text style={s.goodBannerSub}>avg ${Math.round(result.priceData.avgPrice)} · range ${result.priceData.minPrice}–${result.priceData.maxPrice}</Text>
             </View>
             <Text style={{color:C.green}}>{'>'}</Text>
           </TouchableOpacity>
-        ) : dataTier === "early" ? (
+        ) : !suppressed ? (
           <View style={s.limitedBanner}>
-            <Text style={s.limitedText}>Real data — {result.priceData?.count || 0} sales, small sample. Numbers may vary, verify before buying.</Text>
+            <Text style={s.limitedText}>{result.agreementBadge} — verify before buying.</Text>
           </View>
-        ) : dataTier === "estimate" ? (
-          <View style={s.limitedBanner}>
-            <Text style={s.limitedText}>Estimated — limited data, numbers may vary. Verify before buying.</Text>
+        ) : null}
+
+        {/* Part 1/5: identify's retail-arbitrage read - only shown when the
+            scan actually had a price to compare against the resale range. */}
+        {result.isGoodDeal != null ? (
+          <View style={result.isGoodDeal ? s.goodBanner : s.limitedBanner}>
+            <View style={{flex:1}}>
+              <Text style={result.isGoodDeal ? s.goodBannerTitle : s.limitedText}>
+                {result.isGoodDeal ? "💰 Good deal" : "⚠️ Thin margin"}
+              </Text>
+              <Text style={s.goodBannerSub}>{result.dealReasoning}</Text>
+            </View>
           </View>
         ) : null}
 

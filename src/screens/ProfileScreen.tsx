@@ -21,7 +21,7 @@ import * as Updates from "expo-updates";
 // is the ground truth: if BUILD_TAG on-device doesn't match what you just
 // published, the update didn't land (see App.tsx's init() for the
 // check-and-reload-immediately fix that was missing).
-const BUILD_TAG = "2026-09-03.1";
+const BUILD_TAG = "2026-09-07.2";
 
 // The single owner/dev allowlist for anything real users must never see -
 // dev-only tools (Reset onboarding, Preview new-user flow) and the build
@@ -120,7 +120,13 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
   function confirmDeleteAccount() {
     Alert.alert(
       "Delete Account?",
-      "This permanently deletes your account and all your scans, history, and data. This cannot be undone.",
+      // The backend now cancels an active Stripe subscription as part of
+      // this (see app/api/delete-account/route.ts) - but Apple/Google own
+      // App Store/Play Store billing directly, so this call can delete
+      // everything ValuIQ holds without ever being able to touch a
+      // store-billed subscription. Telling the user that here is the only
+      // way they'd know to go cancel it themselves.
+      "This permanently deletes your account and all your scans, history, and data. This cannot be undone.\n\nIf you subscribe through Stripe, that subscription is cancelled automatically. If you subscribe through the App Store or Google Play, you must cancel it separately in that store — deleting your account here can't stop store-billed subscriptions.",
       [
         { text: "Cancel", style: "cancel" },
         { text: "Delete Forever", style: "destructive", onPress: async () => {

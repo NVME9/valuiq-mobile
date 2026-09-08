@@ -22,6 +22,21 @@ function fmtMoney(n: any): string | null {
 }
 
 export default function ShareCard({ result, oracle, photoBase64 }: ShareCardProps) {
+  // AGREEMENT-ANCHOR MODEL (2026-09-07): the old notAFlipItem/thinData
+  // suppression patchwork is gone (see lib/profitOracle.ts) - identify now
+  // reasons a resale-value anchor for every item it can identify at all, so
+  // there is always a real, honestly-badged price. dataQuality:"none" is
+  // the ONE remaining honest decline: genuine non-identification (see
+  // lens/route.ts's one remaining early-return) - never a priced-but-
+  // suppressed verdict.
+  const suppressed = result?.dataQuality === "none";
+  const suppressReason = result?.reasoning || "Could not identify this item confidently enough to price it.";
+  // The one honest, ready-to-render label lib/profitOracle.ts computed
+  // (buildBadge, keyed on agreeingCount) - shown verbatim, same as every
+  // other surface, so the card never claims a different story than the
+  // scan screen it was shared from.
+  const agreementBadge: string | null = result?.agreementBadge || oracle?.badge || null;
+
   const decision = result?.decision || "PASS";
   const verdictColor = decision === "BUY" ? C.green : decision === "WATCH" ? C.yellow : C.red;
   const verdictLabel = decision === "BUY" ? "BUY IT" : decision === "WATCH" ? "WATCH IT" : "PASS";
@@ -53,47 +68,61 @@ export default function ShareCard({ result, oracle, photoBase64 }: ShareCardProp
         <Text style={s.itemName} numberOfLines={2}>{itemName}</Text>
         {brand ? <Text style={s.brand}>{brand}</Text> : null}
 
-        <View style={[s.verdictBadge, { backgroundColor: verdictColor + "20", borderColor: verdictColor }]}>
-          <Text style={[s.verdictText, { color: verdictColor }]}>{verdictLabel}</Text>
-        </View>
-
-        <View style={s.hero}>
-          {profit != null ? (
-            <View style={s.heroStat}>
-              <Text style={s.heroValue} numberOfLines={1}>{profit}</Text>
-              <Text style={s.heroLabel}>net profit</Text>
-            </View>
-          ) : null}
-          {days != null ? (
-            <View style={s.heroStat}>
-              <Text style={[s.heroValue, s.heroValueSecondary]} numberOfLines={1}>{days}d</Text>
-              <Text style={s.heroLabel}>to sell</Text>
-            </View>
-          ) : null}
-        </View>
-
-        {hasSecondaryRow ? (
-          <View style={s.secondaryRow}>
-            {resale ? (
-              <View style={s.secondaryStat}>
-                <Text style={s.secondaryValue} numberOfLines={1}>{resale}</Text>
-                <Text style={s.secondaryLabel}>resale value</Text>
-              </View>
-            ) : null}
-            {bestPlatform ? (
-              <View style={s.secondaryStat}>
-                <Text style={s.secondaryValue} numberOfLines={1}>{bestPlatform}</Text>
-                <Text style={s.secondaryLabel}>best platform</Text>
-              </View>
-            ) : null}
-            {roi ? (
-              <View style={s.secondaryStat}>
-                <Text style={s.secondaryValue} numberOfLines={1}>{roi}</Text>
-                <Text style={s.secondaryLabel}>ROI</Text>
-              </View>
-            ) : null}
+        {suppressed ? (
+          // Same honest-decline shape app/preview/page.tsx's NoIdCard renders
+          // on the web for this exact case (genuine non-identification only,
+          // see the comment above) - no verdict badge, no dollar hero, no
+          // stat row.
+          <View style={s.honestBlock}>
+            <Text style={s.honestEyebrow}>Couldn't identify this item</Text>
+            <Text style={s.honestReason}>{suppressReason}</Text>
           </View>
-        ) : null}
+        ) : (
+          <>
+            <View style={[s.verdictBadge, { backgroundColor: verdictColor + "20", borderColor: verdictColor }]}>
+              <Text style={[s.verdictText, { color: verdictColor }]}>{verdictLabel}</Text>
+            </View>
+            {agreementBadge ? <Text style={s.agreementBadge}>{agreementBadge}</Text> : null}
+
+            <View style={s.hero}>
+              {profit != null ? (
+                <View style={s.heroStat}>
+                  <Text style={s.heroValue} numberOfLines={1}>{profit}</Text>
+                  <Text style={s.heroLabel}>net profit</Text>
+                </View>
+              ) : null}
+              {days != null ? (
+                <View style={s.heroStat}>
+                  <Text style={[s.heroValue, s.heroValueSecondary]} numberOfLines={1}>{days}d</Text>
+                  <Text style={s.heroLabel}>to sell</Text>
+                </View>
+              ) : null}
+            </View>
+
+            {hasSecondaryRow ? (
+              <View style={s.secondaryRow}>
+                {resale ? (
+                  <View style={s.secondaryStat}>
+                    <Text style={s.secondaryValue} numberOfLines={1}>{resale}</Text>
+                    <Text style={s.secondaryLabel}>resale value</Text>
+                  </View>
+                ) : null}
+                {bestPlatform ? (
+                  <View style={s.secondaryStat}>
+                    <Text style={s.secondaryValue} numberOfLines={1}>{bestPlatform}</Text>
+                    <Text style={s.secondaryLabel}>best platform</Text>
+                  </View>
+                ) : null}
+                {roi ? (
+                  <View style={s.secondaryStat}>
+                    <Text style={s.secondaryValue} numberOfLines={1}>{roi}</Text>
+                    <Text style={s.secondaryLabel}>ROI</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+          </>
+        )}
       </View>
 
       <View style={s.footer}>
@@ -151,6 +180,25 @@ const s = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 14,
   },
+  honestBlock: {
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  honestEyebrow: {
+    color: C.text3,
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  honestReason: {
+    color: C.text2,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+  },
   verdictBadge: {
     borderWidth: 1.5,
     borderRadius: 100,
@@ -162,6 +210,14 @@ const s = StyleSheet.create({
     fontSize: 14,
     fontWeight: "900",
     letterSpacing: 1,
+  },
+  agreementBadge: {
+    color: C.text4,
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "center",
+    marginTop: -10,
+    marginBottom: 18,
   },
   hero: {
     flexDirection: "row",
