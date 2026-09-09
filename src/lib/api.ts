@@ -6,7 +6,16 @@ import * as ImageManipulator from "expo-image-manipulator";
 
 export const SUPABASE_URL = "https://tylrcmczbvcvxkbuwnhf.supabase.co";
 export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR5bHJjbWN6YnZjdnhrYnV3bmhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4OTMxMDgsImV4cCI6MjA5MDQ2OTEwOH0.RkllmmOBfdfhzC9s_3PyKrhFre9QpvzFVC-aY2xhsN4";
-export const API_BASE = "https://www.getvaluiq.com";
+// RETAIL-SPINE (2026-09-09): was hardcoded to prod with no way for a device
+// build to hit anything else, including a preview backend meant to
+// validate a branch before merge. EXPO_PUBLIC_* vars are inlined into the
+// JS bundle at build/bundle time (Expo/Metro convention) - unset (every
+// existing build/channel, unchanged) still resolves to the exact same prod
+// literal as before. Reversible in one line: delete/comment the
+// EXPO_PUBLIC_API_BASE line wherever it's set (a local .env.local, or an
+// EAS build profile's env block) and reload - no code change needed to
+// flip back.
+export const API_BASE = process.env.EXPO_PUBLIC_API_BASE || "https://www.getvaluiq.com";
 // Full Titan-suite access: paid Titan, founder Lifetime, or comped VIP.
 export const hasTitanAccess = (plan: string): boolean => ["titan","lifetime","vip"].includes(plan);
 export const hasProAccess = (plan: string): boolean => ["pro","titan","lifetime","vip"].includes(plan);
