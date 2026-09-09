@@ -16,6 +16,26 @@ export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiO
 // EAS build profile's env block) and reload - no code change needed to
 // flip back.
 export const API_BASE = process.env.EXPO_PUBLIC_API_BASE || "https://www.getvaluiq.com";
+// RETAIL-SPINE: a non-prod API_BASE (Vercel Preview) sits behind Vercel's
+// SSO Deployment Protection - a bare fetch gets redirected to a login page
+// instead of JSON. EXPO_PUBLIC_VERCEL_BYPASS carries the project's
+// "Protection Bypass for Automation" secret for that case. Patching global
+// fetch ONCE here (rather than touching this file's ~25 individual fetch
+// call sites) and gating the header to requests actually targeting
+// API_BASE keeps this inert on prod (both env vars unset there) and never
+// leaks the secret to a different host (Supabase, etc). Reversible the
+// same way as API_BASE above: unset the env var, no code change needed.
+const VERCEL_BYPASS_SECRET = process.env.EXPO_PUBLIC_VERCEL_BYPASS;
+if (VERCEL_BYPASS_SECRET) {
+  const _rawFetch = global.fetch;
+  global.fetch = ((input: RequestInfo, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : (input as Request)?.url;
+    if (url && url.startsWith(API_BASE)) {
+      init = { ...(init || {}), headers: { ...(init?.headers || {}), "x-vercel-protection-bypass": VERCEL_BYPASS_SECRET } };
+    }
+    return _rawFetch(input, init);
+  }) as typeof fetch;
+}
 // Full Titan-suite access: paid Titan, founder Lifetime, or comped VIP.
 export const hasTitanAccess = (plan: string): boolean => ["titan","lifetime","vip"].includes(plan);
 export const hasProAccess = (plan: string): boolean => ["pro","titan","lifetime","vip"].includes(plan);
