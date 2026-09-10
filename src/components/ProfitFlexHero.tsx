@@ -109,7 +109,13 @@ export default function ProfitFlexHero({
         ) : (
           <Text style={[st.badge, { color: outcome.accent }]} numberOfLines={1}>{outcome.emoji} {outcome.label}</Text>
         )}
-        {dataTag ? <Text style={[st.tag, { color: dataTagColor }]} numberOfLines={1}>{dataTag}</Text> : null}
+        {/* MEASURED BUG (2026-09-10): "● REAL DATA · SMALL SAMPLE" clipped
+            mid-word ("SAMP…") - `top` was a single non-wrapping row with
+            justifyContent:"space-between", so a long badge label left the
+            tag too little width before its own numberOfLines={1} ellipsized
+            it. flexWrap lets the tag drop to its own full-width line
+            instead of fighting the badge for room on one line. */}
+        {dataTag ? <Text style={[st.tag, { color: dataTagColor }]}>{dataTag}</Text> : null}
       </View>
 
       <TouchableOpacity onPress={() => setTitleExpanded(v => !v)} activeOpacity={0.7}>
@@ -172,7 +178,7 @@ const st = StyleSheet.create({
   editBtn: { position: "absolute", top: 14, right: 14, width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(0,0,0,0.35)", borderWidth: 1, borderColor: C.border, alignItems: "center", justifyContent: "center", zIndex: 2 },
   editBtnIcon: { fontSize: 16 },
   photo: { width: "100%", height: 150, borderRadius: 10, marginBottom: 12 },
-  top: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
+  top: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: 2, marginBottom: 8 },
   badge: { fontSize: 15, fontWeight: "900", letterSpacing: 0.5 },
   tag: { fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
   itemName: { color: C.text1, fontSize: 16, fontWeight: "700", marginBottom: 2 },

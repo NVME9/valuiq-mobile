@@ -84,9 +84,28 @@ const CATEGORY_KEYWORDS: Record<string,string[]> = {
   handbags: ["handbag", "purse", "tote bag", "clutch"],
   watches: ["watch", "timepiece", "rolex", "omega"],
   wine: ["wine", "bordeaux", "champagne", "cabernet"],
-  spirits: ["whiskey", "whisky", "bourbon", "scotch", "spirit"],
+  // AUDIT (2026-09-10): "scotch" and bare "spirit" removed - see the
+  // CATEGORY GATE comment below. "scotch" alone false-matches Scotch tape,
+  // Scotch-Brite, Scotch plaid, Scotch terrier (a dog breed - the exact
+  // shape of the original heel/Heeler bug); bare "spirit" is even broader
+  // (Spirit Airlines, Spirit Halloween, "team spirit," Ford/Plymouth
+  // Spirit). Tightened to a compound phrase that still catches genuine
+  // scans ("Macallan 18 scotch whisky" style itemNames) without matching
+  // either false-positive family. whiskey/whisky/bourbon are specific
+  // enough on their own to keep as-is.
+  spirits: ["whiskey", "whisky", "bourbon", "scotch whisky", "scotch whiskey"],
   cards: ["trading card", "sports card", "pokemon", "tcg", "rookie card"],
   vintage_clothing: ["vintage clothing", "streetwear", "vintage tee", "band tee"],
+  // AUDIT (2026-09-10): bare "jersey" is a genuine residual risk - "jersey
+  // knit" is a common FABRIC descriptor ("jersey knit dress/top"), and
+  // unlike heel/Heeler or scotch/Scotch-tape, a jersey-knit clothing item
+  // and a real sports jersey share the SAME identify category (Clothing),
+  // so the CATEGORY GATE below cannot separate them the way it does the
+  // other landmines found in this audit - tightening or dropping the
+  // keyword risks false-negativing the extremely common "[Player] [Team]
+  // Jersey" itemName pattern, which contains neither "sports" nor "team"
+  // adjacent to "jersey". Left as-is and flagged rather than guess-fixed;
+  // see the retail-spine branch notes for this audit's full findings.
   jerseys: ["jersey", "memorabilia", "autographed", "game-worn"],
   instruments: ["guitar", "instrument", "amplifier", "synth"],
   video_games: ["video game", "console", "cartridge", "cib"],
@@ -101,10 +120,68 @@ const CATEGORY_KEYWORDS: Record<string,string[]> = {
   tools: ["power tool", "hand tool", "snap-on", "machinist"],
 };
 
-export function matchSpecialtyCategory(...texts: (string|undefined|null)[]): typeof CATS[0] | null {
-  const haystack = texts.filter(Boolean).join(" ").toLowerCase();
+// CATEGORY GATE (2026-09-10, MEASURED, AUDITED FOR FULL COVERAGE): a "Bluey
+// Heeler Family Home Magnetic Tile Set" (identify's own category: "Toys")
+// matched designer_shoes - "heel" (one of designer_shoes's OWN keywords,
+// meant for "high heels") is also a plain substring of "Heeler", the dog
+// breed the whole Bluey franchise is named for. That's not a bad default
+// anywhere in this file - there isn't one - it's pure substring matching
+// over free text having no idea what a match is a substring OF. A word-
+// boundary regex doesn't fix this either: "heel" needs to keep matching
+// "heels"/"heeled" (word chars follow in both "heels" and "heeler"), so
+// tightening the regex can't tell the real case apart from the false one
+// using the keyword text alone. What CAN tell them apart is identify's own
+// structured category ("Toys" is never plausibly "Designer Shoes,"
+// regardless of what the item is named) - so keyword text is now only
+// trusted to confirm a specialty identify's category already made
+// plausible, never to single-handedly promote an unrelated category into
+// one.
+//
+// AUDITED (2026-09-10): every one of this file's 20 specialty categories
+// now has an entry below - the previous version of this gate covered only
+// the 13 categories with an obvious 1:1 enum mapping and left the other 7
+// (wine, spirits, instruments, coins, art, antiques, cameras) ungated on
+// the assumption their keyword lists were low-collision. Re-checking found
+// that assumption wrong for at least one: "champagne" (wine's own keyword,
+// meant for the drink) is also a common FASHION COLOR NAME ("champagne
+// dress," "champagne heels") - a Clothing/Jewelry item described that way
+// would have false-matched Fine Wine before this fix, the exact same shape
+// of bug as heel/Heeler. Gating wine to Other/Home (identify has no
+// dedicated wine category) excludes it. The remaining additions
+// (instruments/coins/art/antiques/cameras) close the same class of risk
+// even where no live false-positive was caught yet - "lens" (cameras) can
+// mean a contact lens, "coin" (coins) can mean a coin purse, "console"
+// (video_games) can mean a console table, etc. - all excluded once the
+// category itself has to be plausible first.
+const CATEGORY_ALLOWED_AI_CATEGORIES: Record<string, string[]> = {
+  sneakers: ["Shoes"],
+  designer_shoes: ["Shoes"],
+  handbags: ["Handbags"],
+  watches: ["Jewelry", "Electronics"],
+  wine: ["Other", "Home"],
+  spirits: ["Other", "Home"],
+  cards: ["Collectibles"],
+  vintage_clothing: ["Clothing"],
+  jerseys: ["Clothing", "Sports", "Collectibles"],
+  instruments: ["Other"],
+  video_games: ["Electronics", "Collectibles"],
+  lego: ["Toys", "Collectibles"],
+  funko: ["Toys", "Collectibles"],
+  coins: ["Collectibles", "Other"],
+  jewelry: ["Jewelry"],
+  art: ["Antiques", "Collectibles", "Other"],
+  antiques: ["Antiques", "Collectibles", "Home"],
+  cameras: ["Electronics"],
+  vintage_toys: ["Toys", "Collectibles"],
+  tools: ["Tools"],
+};
+
+export function matchSpecialtyCategory(aiCategory: string|undefined|null, ...texts: (string|undefined|null)[]): typeof CATS[0] | null {
+  const haystack = [aiCategory, ...texts].filter(Boolean).join(" ").toLowerCase();
   if (!haystack) return null;
   for (const cat of CATS) {
+    const allowed = CATEGORY_ALLOWED_AI_CATEGORIES[cat.id];
+    if (allowed && aiCategory && !allowed.includes(aiCategory)) continue;
     const keywords = CATEGORY_KEYWORDS[cat.id] || [];
     if (keywords.some(k => haystack.includes(k))) return cat;
   }

@@ -21,7 +21,11 @@
 //     bar at a lower raw ROI and a slow mover needs a higher one
 import { C } from "./theme";
 
-export type OutcomeTier = "hot" | "solid" | "skip";
+// "estimate" is never returned by classifyOutcome() itself - it's a 5th
+// state ScannerScreen.tsx constructs directly for "no price entered yet"
+// (see its results-page price flow), included here so that literal object
+// still satisfies OutcomeTierInfo's type instead of needing an `any` cast.
+export type OutcomeTier = "hot" | "solid" | "thin" | "skip" | "estimate";
 
 export interface OutcomeTierInput {
   decision: string | null | undefined;   // scan's own BUY/WATCH/PASS/UNKNOWN - only used as a hard PASS override, never to gate the ROI math
@@ -57,6 +61,18 @@ const VELOCITY_ADJUSTED_HOT_MIN = 70;   // the sqrt-dampened score must clear th
 const PROFIT_FLOOR = 10;            // $, the "worth handling" line - required for HOT, and sub-floor profit leans SKIP
 const EXCEPTIONAL_ROI_ESCAPE = 400; // sub-$10 profit needs a velocity-adjusted score at least this high to avoid SKIP - 300% (a real worked example) does NOT clear this on purpose
 
+// MIDDLE BAND (2026-09-10, MEASURED): a hard cutoff right at RAW_ROI_FLOOR/
+// VELOCITY_ADJUSTED_SOLID_MIN let ordinary resale-estimate variance alone
+// flip a marginal item's verdict between BUY and SKIP on back-to-back scans
+// of the SAME item - a few points of ROI swing from nothing but LLM-
+// generation noise (see the resale-wobble investigation on this branch: 32
+// vs 38 on an identical item, identical retail, identical photos). These
+// are starting widths, same as every other threshold in this file - widen
+// or narrow against real outcome data over time, not treated as precision-
+// calibrated.
+const THIN_MARGIN_ROI_BAND = 5;       // +/- percentage points around RAW_ROI_FLOOR
+const THIN_MARGIN_VELOCITY_BAND = 5;  // +/- around VELOCITY_ADJUSTED_SOLID_MIN, same units as adjustedROI
+
 function money(n: number): string {
   return (n < 0 ? "-$" : "$") + Math.round(Math.abs(n)).toLocaleString();
 }
@@ -78,22 +94,44 @@ export function classifyOutcome(input: OutcomeTierInput): OutcomeTierInfo {
   const adjustedROI = velocityAdjustedROI(roi, daysToSell);
   const roiRounded = Math.max(0, Math.round(roi));
 
-  // SKIP — checked in order of what actually killed the deal, so the copy
-  // can name the real reason instead of a generic "margin too thin".
+  // HARD SKIP — categorical failures, not "near a line" cases the middle
+  // band below applies to. A real loss or trivially-small dollars (even at
+  // a fine ROI%) aren't marginal calls estimate noise could flip either
+  // way - checked first, unbanded, same as before.
   const isRealLoss = netProfit <= 0;
   const isTrivialDollars = !isRealLoss && netProfit < PROFIT_FLOOR && adjustedROI < EXCEPTIONAL_ROI_ESCAPE;
-  const isThinMargin = !isRealLoss && !isTrivialDollars && roi < RAW_ROI_FLOOR;
-  const isTooSlow = !isRealLoss && !isTrivialDollars && !isThinMargin && adjustedROI < VELOCITY_ADJUSTED_SOLID_MIN;
   const isHardPass = decision === "PASS";
 
-  if (isHardPass || isRealLoss || isTrivialDollars || isThinMargin || isTooSlow) {
+  if (isHardPass || isRealLoss || isTrivialDollars) {
     let copy: string;
     if (isRealLoss) copy = `You'd lose ${money(netProfit)}. Skip it.`;
     else if (isTrivialDollars) copy = `Only ${money(netProfit)} profit — too small to be worth it, even at ${roiRounded}% ROI.`;
-    else if (isThinMargin) copy = `${roiRounded}% ROI — margin too thin regardless of how fast it sells.`;
-    else if (isTooSlow) copy = `${roiRounded}% ROI, but ~${days} days to sell ties up capital too long.`;
     else copy = `${roiRounded}% ROI. Below the ~30% line.`;
     return { tier: "skip", emoji: "❌", label: "SKIP", copy, accent: C.red, adjustedROI: Math.round(adjustedROI), daysUsed: days };
+  }
+
+  // MIDDLE BAND — see THIN_MARGIN_ROI_BAND/THIN_MARGIN_VELOCITY_BAND above.
+  // Clearly below either floor (even after backing off by the band) is
+  // still a real, confident skip - checked first. Inside the band on
+  // EITHER axis is the new case: not confidently either side.
+  const roiBandLow = RAW_ROI_FLOOR - THIN_MARGIN_ROI_BAND;
+  const roiBandHigh = RAW_ROI_FLOOR + THIN_MARGIN_ROI_BAND;
+  const velBandLow = VELOCITY_ADJUSTED_SOLID_MIN - THIN_MARGIN_VELOCITY_BAND;
+  const velBandHigh = VELOCITY_ADJUSTED_SOLID_MIN + THIN_MARGIN_VELOCITY_BAND;
+
+  if (roi < roiBandLow || adjustedROI < velBandLow) {
+    const copy = roi < roiBandLow
+      ? `${roiRounded}% ROI — margin too thin regardless of how fast it sells.`
+      : `${roiRounded}% ROI, but ~${days} days to sell ties up capital too long.`;
+    return { tier: "skip", emoji: "❌", label: "SKIP", copy, accent: C.red, adjustedROI: Math.round(adjustedROI), daysUsed: days };
+  }
+
+  if (roi < roiBandHigh || adjustedROI < velBandHigh) {
+    return {
+      tier: "thin", emoji: "⚖️", label: "THIN MARGIN",
+      copy: `${roiRounded}% ROI, right at the line — thin margin, judgment call. A small change in price or sell time could tip this either way.`,
+      accent: C.yellow, adjustedROI: Math.round(adjustedROI), daysUsed: days,
+    };
   }
 
   // HOT BUY — clears all three: strong velocity-adjusted score, real

@@ -35,6 +35,36 @@ const MAX_PHOTOS = 5;
 // banner) is the permission-free fallback for anyone who declines/is denied.
 const CHECKIN_ASKED_KEY = "@valuiq_checkin_asked";
 
+// CONDITION MULTIPLIER (2026-09-10, items 5/9) - MUST MATCH
+// lib/profitOracle.ts's CONDITION_MULTIPLIER exactly, or the condition
+// dropdown's local recompute produces a different number than the backend
+// would have for the same selection. Duplicated (not shared - separate
+// repos, no shared package between this app and the backend) rather than
+// fetched, since the whole point of the dropdown is an instant, offline
+// recompute with no network round trip.
+//
+// KNOWN DRIFT RISK, logged not fixed (2026-09-10): two hand-maintained
+// copies of the same table (here and lib/profitOracle.ts's
+// CONDITION_MULTIPLIER in deal-ai-pro) WILL disagree the first time either
+// gets tuned without the other - values match today, nothing enforces they
+// keep matching. Consolidate later: server sends the multiplier table (or
+// the specific factor it used) in the scan response, client reads it
+// instead of hardcoding its own copy. Not worth the wiring for this
+// change; worth doing before these numbers get tuned for real.
+const CONDITION_MULTIPLIER: Record<string, number> = {
+  "new-in-box": 1.00,
+  "new-no-tags": 0.85,
+  "used-good": 0.55,
+  "used-heavy": 0.30,
+};
+const DEFAULT_CONDITION_MULTIPLIER = 0.70;
+const CONDITION_OPTIONS: { value: string; label: string }[] = [
+  { value: "new-in-box", label: "New / Sealed" },
+  { value: "new-no-tags", label: "New, No Tags" },
+  { value: "used-good", label: "Used - Good" },
+  { value: "used-heavy", label: "Used - Heavy Wear" },
+];
+
 type Step = "camera" | "barcode" | "review" | "loading" | "result" | "upgrade";
 
 interface Props {
@@ -90,7 +120,19 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [brandInput, setBrandInput] = useState("");
   const [goDeeper, setGoDeeper] = useState(false);
   const [description, setDescription] = useState("");
+  // PRICE-ON-RESULTS (2026-09-10, item 8): buyPrice now lives on the RESULTS
+  // step, not the pre-scan review step - the scan itself is what reads the
+  // price tag (retailPriceRead), so the price can't meaningfully precede it.
+  // Cleared at the start of every analyze() call (including an Edit & Rerun,
+  // which deliberately does NOT reset() - see analyze()) and re-seeded from
+  // the NEW result's retailPriceRead once it comes back, so a stale price
+  // from a previous scan can never leak into a new one's request or display.
   const [buyPrice, setBuyPrice] = useState("");
+  // CONDITION DROPDOWN (2026-09-10, item 9): same lifecycle as buyPrice -
+  // cleared per analyze() call, seeded from the new result's
+  // conditionAssessment. Drives the SAME local recompute path as price
+  // edits (see the results-step render below).
+  const [resultCondition, setResultCondition] = useState("");
   const [result, setResult] = useState<any>(null);
   const [oracle, setOracle] = useState<any>(null);
   // Soft notification ask (never fire Apple's cold prompt un-primed)
@@ -167,6 +209,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setDescription("");
     setBrandInput("");
     setBuyPrice("");
+    setResultCondition("");
     setBarcodeScanned(false);
     setMode("photo");
   }
@@ -221,6 +264,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   async function analyze(customPhotos?: string[], barcode?: string) {
     if (firstScanNudge) onDismissFirstScanNudge && onDismissFirstScanNudge();
     setStep("loading");
+    // PRICE-ON-RESULTS (item 8): clear BEFORE the request, not after - an
+    // Edit & Rerun deliberately keeps `result` around (see onEdit below) but
+    // must never let last scan's price/condition leak into this NEW request
+    // or sit stale on screen while the new one is in flight.
+    setBuyPrice("");
+    setResultCondition("");
     try {
       let d: any;
       if (barcode) {
@@ -230,7 +279,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         if (!p.length && !description && !brandInput) {
           setStep("review"); return;
         }
-        d = await scanImage(token, p, (brandInput ? "Brand: " + brandInput + ". " : "") + description, buyPrice ? parseFloat(buyPrice) : undefined);
+        // No price is ever collected pre-scan any more - the scan itself is
+        // what reads the price tag (retailPriceRead). See the results step
+        // below for where a price is now entered/edited.
+        d = await scanImage(token, p, (brandInput ? "Brand: " + brandInput + ". " : "") + description, undefined);
       }
       if (d.error === "scan_limit_reached") {
         onNavigate("upgrade");
@@ -238,6 +290,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       }
       if (!d.success) throw new Error(d.error || "Analysis failed");
       setResult(d);
+      // PRICE-ON-RESULTS / CONDITION DROPDOWN (items 8/9): seed both from
+      // what THIS scan actually found - a detected tag price, and the
+      // model's own condition read - editable from here, never re-collected
+      // before a scan again.
+      setBuyPrice(Number(d.retailPriceRead) > 0 ? String(d.retailPriceRead) : "");
+      setResultCondition(d.conditionAssessment || "");
       // SALE-CAPTURE MOAT: on a BUY, either schedule (if already allowed) or
       // surface the soft in-app ask. Never fire Apple's cold prompt directly.
       try {
@@ -392,8 +450,71 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // in ~540 days" from one query next to "not enough data yet" from the
     // other). `oracle` is kept only for ShareCard's share-image rendering
     // below - it must NOT feed anything the on-screen card shows.
-    const heroProfit = Number(result.netProfit) || 0;
+    // CONDITION-ADJUSTED RESALE (2026-09-10, items 5/9): resaleFromModel/
+    // resaleModelLow/resaleModelHigh (lens/route.ts's FIX 5 instrumentation)
+    // are the model's PRE-condition-multiplier range - re-multiplying THESE
+    // by whichever conditionAssessment is currently selected (the scan's
+    // own read, or the dropdown below) reproduces exactly what the backend
+    // would compute for that selection, entirely locally - no new LLM call,
+    // no network round trip. Falls back to the server's already-computed
+    // estimatedResaleValue/Range as-is when there's no raw model number to
+    // recompute from (a path that skipped identify entirely - barcode/
+    // description-only - never had a model resale judgment to begin with;
+    // the condition dropdown is a display-only no-op there).
+    const hasRawModelResale = Number(result.resaleFromModel) > 0;
+    const conditionFactor = CONDITION_MULTIPLIER[resultCondition] ?? DEFAULT_CONDITION_MULTIPLIER;
+    const adjustedResaleValue = hasRawModelResale
+      ? Math.round(Number(result.resaleFromModel) * conditionFactor)
+      : (Number(result.estimatedResaleValue) || Number(result.sellPrice) || 0);
+    const adjustedResaleLow = hasRawModelResale && Number(result.resaleModelLow) > 0
+      ? Math.round(Number(result.resaleModelLow) * conditionFactor)
+      : (Number(result.estimatedResaleRange?.low) || null);
+    const adjustedResaleHigh = hasRawModelResale && Number(result.resaleModelHigh) > 0
+      ? Math.round(Number(result.resaleModelHigh) * conditionFactor)
+      : (Number(result.estimatedResaleRange?.high) || null);
+
+    // FEE RATE - parsed from the best platform's own breakdown (already
+    // computed server-side, e.g. "13.3%") rather than duplicating a second
+    // fee table here that could drift from lib/profitMath.ts's FEES.
+    const feeRateStr = result.platformBreakdown?.[0]?.feeRate;
+    const feeRate = feeRateStr ? parseFloat(feeRateStr) / 100 : 0.13;
+
     const enteredBp = Number(buyPrice) || 0;
+
+    // GOOD DEAL RECOMPUTE (2026-09-10): mirrors lens/route.ts's
+    // isGoodDeal/dealReasoning exactly (dealCompareValue < dealRangeLow),
+    // fed by the SAME locally-edited price/condition-adjusted range as
+    // heroProfit/outcome below - REPLACES reading result.isGoodDeal/
+    // result.dealReasoning directly. Those were frozen at the tag price
+    // the scan detected; without this, editing price or condition here
+    // recomputes the hero to (say) "thin margin" while this banner kept
+    // showing "Good deal" off the stale original number - the exact
+    // banner-vs-verdict contradiction fix 3 exists to prevent, just
+    // reintroduced by a different, newer field. dealCompareValue prefers
+    // the entered/edited price, falling back to the detected tag price
+    // only when nothing's been entered - same precedence the server used.
+    const dealCompareValue = enteredBp > 0
+      ? enteredBp
+      : (Number(result.retailPriceRead) > 0 ? Number(result.retailPriceRead) : null);
+    const isGoodDeal = dealCompareValue != null && adjustedResaleLow != null
+      ? dealCompareValue < adjustedResaleLow
+      : null;
+    const dealReasoning = isGoodDeal == null ? ""
+      : isGoodDeal
+      ? `At $${dealCompareValue}, this sits below the estimated $${adjustedResaleLow}-$${adjustedResaleHigh} resale range - real margin.`
+      : `At $${dealCompareValue}, this is at or above the estimated $${adjustedResaleLow}-$${adjustedResaleHigh} resale range - thin or no margin.`;
+
+    const sellPriceForProfit = adjustedResaleValue || Number(result.sellPrice) || 0;
+    // LOCAL RECOMPUTE (2026-09-10, items 8/9): mirrors lib/profitMath.ts's
+    // computeProfit exactly - fees = round(sp*feeRate*100)/100, netProfit =
+    // round((sp-fees-cost)*100)/100 - so editing price or condition here
+    // reproduces exactly what a fresh scan at those values would have
+    // shown, without a network round trip. REPLACES reading
+    // result.netProfit directly - that was computed against whatever price
+    // existed AT SCAN TIME, almost always none now that price lives here
+    // instead of before the scan.
+    const localFees = Math.round(sellPriceForProfit * feeRate * 100) / 100;
+    const heroProfit = enteredBp > 0 ? Math.round((sellPriceForProfit - localFees - enteredBp) * 100) / 100 : 0;
     const maxBuy = Number(result.buyTarget) || null;
     const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
 
@@ -407,7 +528,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const actualCostBasis = enteredBp > 0 ? enteredBp : (maxBuy || 0);
     const heroRoi = actualCostBasis > 0
       ? Math.round((heroProfit / actualCostBasis) * 100)
-      : (Number(result.roi) || 0);
+      : 0;
 
     // ONE ORACLE SOURCE: both the stat-block text and the verdict's raw
     // number now read result.velocity.estDaysToSale exclusively (lens's own
@@ -446,36 +567,49 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // are the only honest things to lead with until a price is entered.
     const outcome = enteredBp > 0
       ? classifyOutcome({
-          decision: result.decision,
+          decision: result.noFlipMargin ? "PASS" : (result.decision || null),
           netProfit: heroProfit,
           roi: heroRoi,
           daysToSell,
           velocityTier: result.velocity?.tier,
           sellThrough: result.velocity?.sellThrough,
           dataQuality: result.dataQuality,
-          sellPrice: Number(result.sellPrice) || null,
+          sellPrice: sellPriceForProfit || null,
           sellTimeLabel,
         })
       : {
-          tier: "skip" as const,
-          emoji: "💵",
-          label: "REAL DATA",
-          // MEASURED BUG: this text was rendering clipped at the card's
-          // bottom edge on Android - not a numberOfLines cap (there wasn't
-          // one), but ProfitFlexHero's card has overflow:"hidden" (needed to
-          // clip the glow SVG to its rounded corners) paired with a
-          // lineHeight too tight for bold text's real rendered height, which
-          // shaved off the last line's descenders. Fixed at the card level
-          // (see ProfitFlexHero.tsx's skipReason style); shortened here too
-          // since shorter copy needs less room to begin with.
-          copy: Number(result.sellPrice) > 0
-            ? `Sells for ~$${Math.round(Number(result.sellPrice))}. Add what you paid to see your profit.`
-            : "Add what you paid to see your profit.",
+          // NO PRICE ENTERED (2026-09-10, item 8): the OLD "ADD PRICE" skip-
+          // styled dead-end is gone - price now lives on THIS screen (see
+          // above), so having none yet is the common, honest starting
+          // state, not a degraded one. tier:"estimate" (not "skip") means
+          // this renders through the SAME buy-style hero layout as a real
+          // verdict (isSkip stays false below), showing the estimate +
+          // range as the hero number instead of a profit figure - see
+          // heroDisplayValue below and its ProfitFlexHero prop.
+          tier: "estimate" as const,
+          emoji: "🏷️",
+          label: "ESTIMATE",
+          copy: adjustedResaleLow != null && adjustedResaleHigh != null
+            ? `Sells for about $${adjustedResaleValue} (range $${adjustedResaleLow}-$${adjustedResaleHigh}). Enter what you paid above for your real profit and verdict.`
+            : `Sells for about $${adjustedResaleValue}. Enter what you paid above for your real profit and verdict.`,
           accent: C.yellow,
           adjustedROI: 0,
           daysUsed: 0,
         };
     const isSkip = outcome.tier === "skip";
+    // MIDDLE BAND (2026-09-10): a "thin margin — judgment call" verdict
+    // (outcomeTier.ts's new "thin" tier) is explicitly NOT a confident
+    // verdict - it exists specifically for the case where the app itself
+    // isn't sure. isSkip alone (used everywhere else on this screen for
+    // skip-vs-buy LAYOUT - a thin verdict still gets the buy-oriented
+    // layout, share/log-sale actions, etc.) doesn't capture that; this is
+    // ONLY for the hedge-banner gate below, which cares about confidence,
+    // not layout.
+    const isConfidentVerdict = outcome.tier === "hot" || outcome.tier === "solid";
+    // Hero number: real profit once a price exists, the estimate itself
+    // before that - ProfitFlexHero just renders whatever it's handed under
+    // `profitLabel`, no component change needed for this to work.
+    const heroDisplayValue = enteredBp > 0 ? heroProfit : adjustedResaleValue;
 
     // WHICH PLATFORM (2026-08-25): bestPlatform drives the actual netProfit/
     // roi shown above (lens/route.ts picks the platform with the lowest fee,
@@ -489,8 +623,15 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       ? { ...outcome, copy: `On ${result.bestPlatform} — ${outcome.copy}` }
       : outcome;
 
+    // CONDITION CONCEPT (2026-09-10, item 9): reads resultCondition
+    // (conditionAssessment - editable via the dropdown below, the ONE
+    // condition concept actually wired to price) instead of the old
+    // cosmetic result.condition (Like New/Good/Fair/Poor) - a separate,
+    // non-editable field that duplicated the same idea under different
+    // vocabulary and never affected any number on this screen.
+    const conditionLabel = CONDITION_OPTIONS.find(o => o.value === resultCondition)?.label || null;
     const categoryLine = result.category
-      ? `${result.category}${result.condition ? " - " + result.condition : ""}`
+      ? `${result.category}${conditionLabel ? " - " + conditionLabel : ""}`
       : null;
 
     // AGREEMENT-ANCHOR MODEL (Part 3/5): every "how real is this data"
@@ -523,8 +664,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const footNote = result.confirmedByMoat
       ? (result.agreeingCount >= 30 ? "From real reseller outcomes." : "From real reseller outcomes — small sample, treat as a rough signal.")
       : "Market estimate. Sharpens as more resellers log real sales.";
+    // sell price reads sellPriceForProfit (condition-adjusted), NOT
+    // result.sellPrice directly - it sits right next to ROI in this same
+    // row, and ROI is already computed off the adjusted number (see
+    // heroRoi above). Showing the stale original next to the adjusted ROI
+    // would be exactly the "two numbers disagree" bug this app has fixed
+    // elsewhere - a condition edit must move both together.
     const secondaryStats = [
-      { label: "sell price", value: result.sellPrice != null ? "$" + Math.round(result.sellPrice) : "—" },
+      { label: "sell price", value: sellPriceForProfit > 0 ? "$" + Math.round(sellPriceForProfit) : "—" },
       { label: "ROI", value: heroRoi ? heroRoi + "%" : "—" },
       { label: "to sell", value: oracleDaysTxt },
     ];
@@ -591,26 +738,106 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   <Text style={{color:C.green}}>{'>'}</Text>
                 </TouchableOpacity>
               ) : (
-                <View style={s.limitedBanner}>
-                  <Text></Text>
-                  <Text style={s.limitedText}>{result.agreementBadge} — verify before buying.</Text>
-                </View>
+                // BANNER VS VERDICT (2026-09-10, MEASURED): this hedge used
+                // to render unconditionally whenever confirmedByMoat/
+                // priceData weren't both present - independent of `outcome`,
+                // the SAME verdict object (outcomeTier.ts's classifyOutcome,
+                // "THE single source of truth for the verdict") the tier
+                // badge/hero/copy below all read. Confirmed live: a HOT BUY
+                // (outcome.tier==="hot" - strong ROI + velocity + real
+                // dollar profit) rendered with "Market estimate — verify
+                // before buying" sitting right above it, because that
+                // verdict can be reached off a pure LLM anchor with zero
+                // agreeing real sold rows (confirmedByMoat===false) - a
+                // legitimate, honestly-labeled state that has nothing to do
+                // with whether classifyOutcome's OWN math trusts the number
+                // enough to call it a real profit. The hedge is only
+                // informative when there's no confident verdict to hedge
+                // against - gated on isConfidentVerdict (hot/solid only;
+                // MIDDLE BAND's new "thin" tier is explicitly NOT confident,
+                // so it keeps showing the hedge same as skip does), not a
+                // second, independently-computed confidence check.
+                !isConfidentVerdict && (
+                  <View style={s.limitedBanner}>
+                    <Text></Text>
+                    <Text style={s.limitedText}>{result.agreementBadge} — verify before buying.</Text>
+                  </View>
+                )
               )}
 
               {/* Part 1/5: identify's retail-arbitrage read - only shown
-                  when the scan actually had a price to compare against the
-                  resale range, never invented. */}
-              {result.isGoodDeal != null ? (
-                <View style={result.isGoodDeal ? s.goodBanner : s.limitedBanner}>
+                  when there's a price to compare against the resale range,
+                  never invented. isGoodDeal/dealReasoning are the LOCAL
+                  recompute above (2026-09-10), not result.isGoodDeal/
+                  result.dealReasoning - see that comment for why reading
+                  the server's frozen-at-scan-time values here would
+                  reintroduce a banner-vs-verdict contradiction after a
+                  price/condition edit. */}
+              {isGoodDeal != null ? (
+                <View style={isGoodDeal ? s.goodBanner : s.limitedBanner}>
                   <Text></Text>
                   <View style={{flex:1}}>
-                    <Text style={result.isGoodDeal ? s.goodBannerTitle : s.limitedText}>
-                      {result.isGoodDeal ? "💰 Good deal" : "⚠️ Thin margin"}
+                    <Text style={isGoodDeal ? s.goodBannerTitle : s.limitedText}>
+                      {isGoodDeal ? "💰 Good deal" : "⚠️ Thin margin"}
                     </Text>
-                    <Text style={s.goodBannerSub}>{result.dealReasoning}</Text>
+                    <Text style={s.goodBannerSub}>{dealReasoning}</Text>
                   </View>
                 </View>
               ) : null}
+
+              {/* PRICE-ON-RESULTS (2026-09-10, item 8): price now lives
+                  here, populated the instant the scan returns - the scan is
+                  what reads any price tag, so it genuinely can't precede
+                  it. Editing re-runs the verdict LOCALLY (see the
+                  adjustedResale / heroProfit / outcome computation above)
+                  - no new LLM call, no network round trip, instant. */}
+              <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                {Number(result.retailPriceRead) > 0 ? "Price (from a detected tag)" : "What you paid (optional)"}
+              </Text>
+              <View style={s.priceFieldWrap}>
+                <Text style={s.priceFieldDollar}>$</Text>
+                <TextInput
+                  style={s.priceFieldInput}
+                  value={buyPrice}
+                  onChangeText={setBuyPrice}
+                  placeholder="0.00"
+                  placeholderTextColor={C.text4}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <Text style={s.priceFieldHint} numberOfLines={2}>
+                {Number(result.retailPriceRead) > 0
+                  ? "Read off a price tag in your photo — edit if it's wrong."
+                  : "No price tag detected — enter what you paid to see your real profit and verdict."}
+              </Text>
+
+              {/* CONDITION DROPDOWN (2026-09-10, item 9): pre-filled from
+                  the scan's own read (conditionAssessment); changing it
+                  applies the SAME fixed multiplier the backend uses (item
+                  5) to the model's raw resale range, locally - same instant
+                  recompute path as the price edit above. This is now the
+                  ONE condition concept on this screen - see categoryLine
+                  above, which reads resultCondition, not the old cosmetic
+                  result.condition field. */}
+              <Text style={[s.priceLabel, { marginTop: 16 }]} numberOfLines={1}>Condition</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
+                {CONDITION_OPTIONS.map((opt) => {
+                  const selected = resultCondition === opt.value;
+                  return (
+                    <TouchableOpacity
+                      key={opt.value}
+                      onPress={() => setResultCondition(opt.value)}
+                      style={{
+                        paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10,
+                        borderWidth: 1.5, borderColor: selected ? C.green : C.border,
+                        backgroundColor: selected ? C.greenBg : "transparent",
+                      }}
+                    >
+                      <Text style={{ color: selected ? C.green : C.text3, fontSize: 12, fontWeight: "700" }}>{opt.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
 
               {/* THE hero: verdict + profit + max-buy (with reasoning) + key
                   stats, reconciled into one card instead of a separate
@@ -632,8 +859,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   setStep("review");
                 }}
                 isSkip={isSkip}
-                heroProfit={heroProfit}
-                profitLabel={profitLabel}
+                heroProfit={heroDisplayValue}
+                profitLabel={enteredBp > 0 ? profitLabel : "estimated sell price"}
                 maxBuy={maxBuy}
                 maxBuyReasoning={maxBuyReasoning}
                 dataTag={dataTag}
@@ -924,11 +1151,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       </View>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
         <Text style={[s.h2, { marginBottom: 4 }]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.85}>
-          What would you pay for this?
+          Add any details
         </Text>
         <Text style={[s.body, { marginBottom: 18 }]}>
-          Add your price and any details — brand, condition, notes. It's optional, but the
-          more you add, the more accurate your profit and verdict.
+          Brand, condition, notes — all optional, but the more you add, the more accurate
+          your identification. You'll enter price on the results screen, right where the
+          scan reads any price tag it finds.
         </Text>
 
         {/* Photos */}
@@ -957,31 +1185,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           )}
         </View>
 
-        {/* Buy price - FIRST and most prominent field, not buried under
-            brand/notes. This is the single biggest driver of an accurate
-            profit/verdict (skip enteredBp and the result screen can't give
-            a real BUY/PASS call, only "add a price to see it" - see the
-            enteredBp>0 branch below) - the layout now matches that weight. */}
-        <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
-          What you'd pay or price (optional)
-        </Text>
-        <View style={s.priceFieldWrap}>
-          <Text style={s.priceFieldDollar}>$</Text>
-          <TextInput
-            style={s.priceFieldInput}
-            value={buyPrice}
-            onChangeText={setBuyPrice}
-            placeholder="0.00"
-            placeholderTextColor={C.text4}
-            keyboardType="decimal-pad"
-          />
-        </View>
-        <Text style={s.priceFieldHint} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
-          The #1 driver of an accurate profit & verdict
-        </Text>
+        {/* PRICE-ON-RESULTS (2026-09-10, item 8): the price field that used
+            to be here moved to the results step - the scan itself reads any
+            price tag (retailPriceRead), so asking for price before the scan
+            even runs meant either asking blind or asking twice. See the
+            results step below for where it's entered/edited now. */}
 
-        {/* Brand / notes - clearly secondary, both still optional */}
-        <Text style={[s.caption, { marginBottom: 6, marginTop: 22 }]}>Brand (optional)</Text>
+        {/* Brand / notes - both optional */}
+        <Text style={[s.caption, { marginBottom: 6, marginTop: 4 }]}>Brand (optional)</Text>
         <TextInput style={s.textInput} value={brandInput} onChangeText={setBrandInput} placeholder="e.g. Coach, Nike, DeWalt" placeholderTextColor={C.text4} />
         <Text style={[s.caption, { marginBottom: 6, marginTop: 12 }]}>Condition or notes (optional)</Text>
         <TextInput
