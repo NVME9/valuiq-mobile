@@ -339,7 +339,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
         }
       : enteredBp > 0
       ? classifyOutcome({
-          decision: result.decision,
+          noFlipMargin: !!result.noFlipMargin,
           netProfit: heroProfit,
           roi: Number(result.roi) || 0,
           daysToSell: result.velocity?.estDaysToSale ?? null,

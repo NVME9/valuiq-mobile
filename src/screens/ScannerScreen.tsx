@@ -21,7 +21,7 @@ import StagedProgress from "../components/StagedProgress";
 import * as Notifications from "expo-notifications";
 import { matchSpecialtyCategory } from "./SpecialtyScreen";
 import ProfitFlexHero from "../components/ProfitFlexHero";
-import { classifyOutcome } from "../lib/outcomeTier";
+import { classifyOutcome, ROI_BUY_MIN, PROFIT_JUDGMENT_FLOOR } from "../lib/outcomeTier";
 import LogSaleModal from "../components/LogSaleModal";
 import { toPendingScan } from "../lib/saleCapture";
 
@@ -481,28 +481,24 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
     const enteredBp = Number(buyPrice) || 0;
 
-    // GOOD DEAL RECOMPUTE (2026-09-10): mirrors lens/route.ts's
-    // isGoodDeal/dealReasoning exactly (dealCompareValue < dealRangeLow),
-    // fed by the SAME locally-edited price/condition-adjusted range as
-    // heroProfit/outcome below - REPLACES reading result.isGoodDeal/
-    // result.dealReasoning directly. Those were frozen at the tag price
-    // the scan detected; without this, editing price or condition here
-    // recomputes the hero to (say) "thin margin" while this banner kept
-    // showing "Good deal" off the stale original number - the exact
-    // banner-vs-verdict contradiction fix 3 exists to prevent, just
-    // reintroduced by a different, newer field. dealCompareValue prefers
-    // the entered/edited price, falling back to the detected tag price
-    // only when nothing's been entered - same precedence the server used.
+    // RANGE-CARD VALUE (2026-09-10): dealCompareValue prefers the
+    // entered/edited price, falling back to the detected tag price only
+    // when nothing's been entered - same precedence the server used.
+    // ONE VERDICT SOURCE (Fix 3): this used to also compute its own
+    // independent isGoodDeal (dealCompareValue < adjustedResaleLow) and
+    // color/label the range card off THAT - a second, separately-computed
+    // verdict that could (and did, on the Fisher-Price scan) say "good
+    // deal" in green while outcome/classifyOutcome below said SKIP for the
+    // same item, because range-position and dollar-profit-floor are
+    // different questions with different answers. isGoodDeal/dealReasoning
+    // are gone; the range card below reads outcome.tier/label/accent
+    // directly (computed further down) so it is now structurally
+    // impossible for the two cards to disagree - they render off the same
+    // OutcomeTierInfo object. This value is now used ONLY to display the
+    // range numbers, never to independently decide good/bad framing.
     const dealCompareValue = enteredBp > 0
       ? enteredBp
       : (Number(result.retailPriceRead) > 0 ? Number(result.retailPriceRead) : null);
-    const isGoodDeal = dealCompareValue != null && adjustedResaleLow != null
-      ? dealCompareValue < adjustedResaleLow
-      : null;
-    const dealReasoning = isGoodDeal == null ? ""
-      : isGoodDeal
-      ? `At $${dealCompareValue}, this sits below the estimated $${adjustedResaleLow}-$${adjustedResaleHigh} resale range - real margin.`
-      : `At $${dealCompareValue}, this is at or above the estimated $${adjustedResaleLow}-$${adjustedResaleHigh} resale range - thin or no margin.`;
 
     const sellPriceForProfit = adjustedResaleValue || Number(result.sellPrice) || 0;
     // LOCAL RECOMPUTE (2026-09-10, items 8/9): mirrors lib/profitMath.ts's
@@ -515,7 +511,30 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // instead of before the scan.
     const localFees = Math.round(sellPriceForProfit * feeRate * 100) / 100;
     const heroProfit = enteredBp > 0 ? Math.round((sellPriceForProfit - localFees - enteredBp) * 100) / 100 : 0;
-    const maxBuy = Number(result.buyTarget) || null;
+
+    // MAX-BUY LOCAL RECOMPUTE (2026-09-10, Fix 1): mirrors deal-ai-pro/
+    // lib/profitMath.ts's computeMaxBuy, but driven by adjustedResaleValue
+    // (the CURRENT condition-adjusted resale, same input heroProfit above
+    // uses) instead of the frozen result.buyTarget the server computed once
+    // at scan time. REPLACES reading result.buyTarget directly - that froze
+    // the ceiling at whatever condition/price existed AT SCAN TIME, so
+    // editing price or condition here moved the hero/ROI/profit but left
+    // "Max buy" and its reasoning text stuck on stale numbers. ROI_BUY_MIN/
+    // PROFIT_JUDGMENT_FLOOR are imported directly from outcomeTier.ts (not
+    // re-declared here) so this ceiling can never drift from the verdict's
+    // own BUY threshold - paying at or under max-buy now guarantees the
+    // verdict can't call it a judgment call on ROI grounds.
+    // Definition: the highest buy price that still clears BOTH of the
+    // verdict's BUY-tier floors (ROI_BUY_MIN% after-fees ROI, AND the
+    // PROFIT_JUDGMENT_FLOOR dollar floor) against the current resale -
+    // whichever constraint is tighter wins, same dual-constraint shape as
+    // computeMaxBuy.
+    const netAfterFeesAtCeiling = adjustedResaleValue * (1 - feeRate);
+    const roiCeilingBuy = netAfterFeesAtCeiling / (1 + ROI_BUY_MIN / 100);
+    const profitFloorBuy = netAfterFeesAtCeiling - PROFIT_JUDGMENT_FLOOR;
+    const maxBuy = adjustedResaleValue > 0
+      ? Math.max(1, Math.floor(Math.min(roiCeilingBuy, profitFloorBuy)))
+      : null;
     const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
 
     // ROI MUST be computed against the SAME cost basis as heroProfit - the
@@ -567,7 +586,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // are the only honest things to lead with until a price is entered.
     const outcome = enteredBp > 0
       ? classifyOutcome({
-          decision: result.noFlipMargin ? "PASS" : (result.decision || null),
+          noFlipMargin: !!result.noFlipMargin,
           netProfit: heroProfit,
           roi: heroRoi,
           daysToSell,
@@ -642,17 +661,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // tiers here, so this screen can't drift from what the web scanner or
     // ShareCard say about the identical scan.
     const dataPhrase = result.agreementBadge || "Based on market estimate";
-    // The claim must match the number: maxBuy is now the price where this
-    // clears a genuine ~$10 profit floor (lib/profitMath.ts's computeMaxBuy,
-    // fixed to solve for the verdict's own worth-it floor, not just an ROI%
-    // that could still net trivial dollars) - so it's honest to say what
-    // paying it actually gets you, not just "keep a healthy margin."
+    // The claim must match the number: maxBuy (recomputed above off the
+    // CURRENT condition-adjusted resale, not a frozen scan-time value) is
+    // the price where this clears the verdict's own BUY floor - so it's
+    // honest to say what paying it actually gets you, and it stays honest
+    // across a condition/price edit instead of quietly going stale.
     const maxBuyReasoning = maxBuy == null ? "" : (
       enteredBp > 0
         ? (enteredBp <= maxBuy
             ? `${dataPhrase}. You paid $${enteredBp} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
             : `${dataPhrase}. You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
-        : `${dataPhrase}. Pay $${maxBuy} or less to make this a real flip (≥$10 profit after fees).`
+        : `${dataPhrase}. Pay $${maxBuy} or less to make this a real flip (≥${ROI_BUY_MIN}% ROI, ≥$${PROFIT_JUDGMENT_FLOOR} profit after fees).`
     );
 
     const dataTag = result.confirmedByMoat
@@ -724,66 +743,44 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           {/* - PROFIT (only when we have data) - */}
           {!hasNoData && (
             <>
-              {/* Data confidence - shown in both BUY and SKIP layouts; backs
-                  the max-buy reasoning (and the skip reason) either way.
-                  Driven by the SAME agreementBadge the badge/footnote/
-                  reasoning above use, so this can never contradict them. */}
-              {result.confirmedByMoat && result.priceData ? (
-                <TouchableOpacity style={s.goodBanner} onPress={()=>Linking.openURL(result.priceData.ebaySearchUrl)}>
-                  <Text></Text>
-                  <View style={{flex:1}}>
-                    <Text style={s.goodBannerTitle}>{result.agreementBadge}</Text>
-                    <Text style={s.goodBannerSub}>avg ${result.priceData.avgPrice} · range ${result.priceData.minPrice}–${result.priceData.maxPrice}</Text>
-                  </View>
-                  <Text style={{color:C.green}}>{'>'}</Text>
-                </TouchableOpacity>
-              ) : (
-                // BANNER VS VERDICT (2026-09-10, MEASURED): this hedge used
-                // to render unconditionally whenever confirmedByMoat/
-                // priceData weren't both present - independent of `outcome`,
-                // the SAME verdict object (outcomeTier.ts's classifyOutcome,
-                // "THE single source of truth for the verdict") the tier
-                // badge/hero/copy below all read. Confirmed live: a HOT BUY
-                // (outcome.tier==="hot" - strong ROI + velocity + real
-                // dollar profit) rendered with "Market estimate — verify
-                // before buying" sitting right above it, because that
-                // verdict can be reached off a pure LLM anchor with zero
-                // agreeing real sold rows (confirmedByMoat===false) - a
-                // legitimate, honestly-labeled state that has nothing to do
-                // with whether classifyOutcome's OWN math trusts the number
-                // enough to call it a real profit. The hedge is only
-                // informative when there's no confident verdict to hedge
-                // against - gated on isConfidentVerdict (hot/solid only;
-                // MIDDLE BAND's new "thin" tier is explicitly NOT confident,
-                // so it keeps showing the hedge same as skip does), not a
-                // second, independently-computed confidence check.
-                !isConfidentVerdict && (
-                  <View style={s.limitedBanner}>
-                    <Text></Text>
-                    <Text style={s.limitedText}>{result.agreementBadge} — verify before buying.</Text>
-                  </View>
-                )
-              )}
-
-              {/* Part 1/5: identify's retail-arbitrage read - only shown
-                  when there's a price to compare against the resale range,
-                  never invented. isGoodDeal/dealReasoning are the LOCAL
-                  recompute above (2026-09-10), not result.isGoodDeal/
-                  result.dealReasoning - see that comment for why reading
-                  the server's frozen-at-scan-time values here would
-                  reintroduce a banner-vs-verdict contradiction after a
-                  price/condition edit. */}
-              {isGoodDeal != null ? (
-                <View style={isGoodDeal ? s.goodBanner : s.limitedBanner}>
-                  <Text></Text>
-                  <View style={{flex:1}}>
-                    <Text style={isGoodDeal ? s.goodBannerTitle : s.limitedText}>
-                      {isGoodDeal ? "💰 Good deal" : "⚠️ Thin margin"}
-                    </Text>
-                    <Text style={s.goodBannerSub}>{dealReasoning}</Text>
-                  </View>
-                </View>
-              ) : null}
+              {/* FIX 4 (2026-09-10): reorder so the verdict/result card and
+                  the price field are the HEROES - top of the page, above
+                  the fold, visible without scrolling. This used to sit
+                  below the estimate banner and the price/condition inputs,
+                  burying the actual answer under the inputs that produce
+                  it. Order is now: verdict/result card, price field,
+                  condition, then everything else (data-confidence banner,
+                  range card, sold/reminder rows). THE hero: verdict +
+                  profit + max-buy (with reasoning) + key stats, reconciled
+                  into one card instead of a separate verdict card stacked
+                  on a separate Profit Oracle card. outcome (classifyOutcome)
+                  is the single source of truth for buy-vs-skip - nothing
+                  else on this screen computes or shows a different
+                  verdict. */}
+              <ProfitFlexHero
+                outcome={heroOutcome}
+                itemName={result.itemName || result.item_name || "Unknown Item"}
+                categoryLine={categoryLine}
+                photoBase64={photos[0]}
+                onEdit={()=>{
+                  // Deliberately NOT clearing result here - the review screen
+                  // never reads it, and keeping it around is what lets that
+                  // screen's back button tell "editing an existing result"
+                  // apart from "starting a fresh scan" and return to it.
+                  setDescription(result.itemName||"");
+                  setStep("review");
+                }}
+                isSkip={isSkip}
+                heroProfit={heroDisplayValue}
+                profitLabel={enteredBp > 0 ? profitLabel : "estimated sell price"}
+                maxBuy={maxBuy}
+                maxBuyReasoning={maxBuyReasoning}
+                dataTag={dataTag}
+                dataTagColor={dataTagColor}
+                secondaryStats={secondaryStats}
+                footNote={footNote}
+                skipDetail={skipDetail}
+              />
 
               {/* PRICE-ON-RESULTS (2026-09-10, item 8): price now lives
                   here, populated the instant the scan returns - the scan is
@@ -791,7 +788,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   it. Editing re-runs the verdict LOCALLY (see the
                   adjustedResale / heroProfit / outcome computation above)
                   - no new LLM call, no network round trip, instant. */}
-              <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+              <Text style={[s.priceLabel, { marginTop: 16 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
                 {Number(result.retailPriceRead) > 0 ? "Price (from a detected tag)" : "What you paid (optional)"}
               </Text>
               <View style={s.priceFieldWrap}>
@@ -839,36 +836,72 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 })}
               </View>
 
-              {/* THE hero: verdict + profit + max-buy (with reasoning) + key
-                  stats, reconciled into one card instead of a separate
-                  verdict card stacked on a separate Profit Oracle card.
-                  outcome (classifyOutcome) is the single source of truth for
-                  buy-vs-skip - nothing else on this screen computes or shows
-                  a different verdict. */}
-              <ProfitFlexHero
-                outcome={heroOutcome}
-                itemName={result.itemName || result.item_name || "Unknown Item"}
-                categoryLine={categoryLine}
-                photoBase64={photos[0]}
-                onEdit={()=>{
-                  // Deliberately NOT clearing result here - the review screen
-                  // never reads it, and keeping it around is what lets that
-                  // screen's back button tell "editing an existing result"
-                  // apart from "starting a fresh scan" and return to it.
-                  setDescription(result.itemName||"");
-                  setStep("review");
-                }}
-                isSkip={isSkip}
-                heroProfit={heroDisplayValue}
-                profitLabel={enteredBp > 0 ? profitLabel : "estimated sell price"}
-                maxBuy={maxBuy}
-                maxBuyReasoning={maxBuyReasoning}
-                dataTag={dataTag}
-                dataTagColor={dataTagColor}
-                secondaryStats={secondaryStats}
-                footNote={footNote}
-                skipDetail={skipDetail}
-              />
+              {/* Data confidence - shown in both BUY and SKIP layouts; backs
+                  the max-buy reasoning (and the skip reason) either way.
+                  Driven by the SAME agreementBadge the badge/footnote/
+                  reasoning above use, so this can never contradict them. */}
+              {result.confirmedByMoat && result.priceData ? (
+                <TouchableOpacity style={[s.goodBanner, { marginTop: 16 }]} onPress={()=>Linking.openURL(result.priceData.ebaySearchUrl)}>
+                  <Text></Text>
+                  <View style={{flex:1}}>
+                    <Text style={s.goodBannerTitle}>{result.agreementBadge}</Text>
+                    <Text style={s.goodBannerSub}>avg ${result.priceData.avgPrice} · range ${result.priceData.minPrice}–${result.priceData.maxPrice}</Text>
+                  </View>
+                  <Text style={{color:C.green}}>{'>'}</Text>
+                </TouchableOpacity>
+              ) : (
+                // BANNER VS VERDICT (2026-09-10, MEASURED): this hedge used
+                // to render unconditionally whenever confirmedByMoat/
+                // priceData weren't both present - independent of `outcome`,
+                // the SAME verdict object (outcomeTier.ts's classifyOutcome,
+                // "THE single source of truth for the verdict") the tier
+                // badge/hero/copy below all read. Confirmed live: a HOT BUY
+                // (outcome.tier==="hot" - strong ROI + velocity + real
+                // dollar profit) rendered with "Market estimate — verify
+                // before buying" sitting right above it, because that
+                // verdict can be reached off a pure LLM anchor with zero
+                // agreeing real sold rows (confirmedByMoat===false) - a
+                // legitimate, honestly-labeled state that has nothing to do
+                // with whether classifyOutcome's OWN math trusts the number
+                // enough to call it a real profit. The hedge is only
+                // informative when there's no confident verdict to hedge
+                // against - gated on isConfidentVerdict (hot/solid only;
+                // "thin" (JUDGMENT CALL) is explicitly NOT confident, so it
+                // keeps showing the hedge same as skip does), not a second,
+                // independently-computed confidence check.
+                !isConfidentVerdict && (
+                  <View style={[s.limitedBanner, { marginTop: 16 }]}>
+                    <Text></Text>
+                    <Text style={s.limitedText}>{result.agreementBadge} — verify before buying.</Text>
+                  </View>
+                )
+              )}
+
+              {/* Part 1/5: identify's retail-arbitrage read - only shown
+                  when there's a price to compare against the resale range,
+                  never invented. FIX 3 (2026-09-10, ONE VERDICT SOURCE):
+                  this used to compute and color itself off its own
+                  independent isGoodDeal comparison - a SECOND, separately-
+                  computed verdict that could (and did, on the Fisher-Price
+                  scan) say "good deal" in green while outcome below said
+                  SKIP for the identical item, because range-position and
+                  dollar-profit-floor are different questions that can
+                  disagree. It now reads outcome.tier/label/emoji/accent
+                  directly - the SAME OutcomeTierInfo the verdict card
+                  renders - so this card and the verdict card render off one
+                  shared source and can no longer contradict each other. It
+                  still shows the range NUMBERS (dealCompareValue vs
+                  adjustedResaleLow/High); only the framing/color/label now
+                  follows the verdict instead of an independent check. */}
+              {dealCompareValue != null && adjustedResaleLow != null ? (
+                <View style={[s.rangeBanner, { backgroundColor: outcome.accent + "1a", borderColor: outcome.accent + "55" }]}>
+                  <Text></Text>
+                  <View style={{flex:1}}>
+                    <Text style={[s.rangeBannerTitle, { color: outcome.accent }]}>{outcome.emoji} {outcome.label}</Text>
+                    <Text style={s.rangeBannerSub}>{`At $${dealCompareValue}, resale range is $${adjustedResaleLow}-$${adjustedResaleHigh}.`}</Text>
+                  </View>
+                </View>
+              ) : null}
 
               {/* MEASURED BUG: this used to be TWO stacked elements that did
                   the exact same thing (a first-scan-only callout sitting on
@@ -1468,6 +1501,12 @@ const s = StyleSheet.create({
   goodBannerSub:  { color: C.text3, fontSize: 12 },
   limitedBanner:  { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#1a1508", borderWidth: 1, borderColor: C.yellow + "40", borderRadius: 12, padding: 12, marginBottom: 12 },
   limitedText:    { color: C.yellow, fontSize: 13, fontWeight: "700", flex: 1 },
+  // Fix 3 (2026-09-10): color/border set inline per-render from
+  // outcome.accent (hot/solid=green, thin=yellow, skip=red, estimate=
+  // yellow) - this base style only carries the fixed layout.
+  rangeBanner:      { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1.5, borderRadius: 12, padding: 12, marginBottom: 12 },
+  rangeBannerTitle: { fontSize: 13, fontWeight: "800", marginBottom: 2 },
+  rangeBannerSub:   { color: C.text3, fontSize: 12 },
   noDataBanner:   { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#1a0808", borderWidth: 1, borderColor: C.red + "30", borderRadius: 12, padding: 12, marginBottom: 12 },
   noDataText:     { color: C.red, fontSize: 13, fontWeight: "700", flex: 1 },
   profitCard:     { backgroundColor: "rgba(0,0,0,0.35)", borderWidth: 2, borderRadius: 20, padding: 20, marginBottom: 10, alignItems: "center" },
