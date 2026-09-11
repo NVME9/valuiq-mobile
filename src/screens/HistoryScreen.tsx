@@ -319,14 +319,35 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
       getScanHistory(token, "specialty", 50),
       getWinsSummary(token),
     ]);
-    setScans(scanRes.status === "fulfilled" && Array.isArray(scanRes.value) ? scanRes.value : []);
+    let scanList = scanRes.status === "fulfilled" && Array.isArray(scanRes.value) ? scanRes.value : [];
+    const summary = summaryRes.status === "fulfilled" ? summaryRes.value : null;
+    // AUTH-RACE RETRY (2026-09-11, MEASURED): /api/scan-history returns 200
+    // + [] on a missing/invalid token (see its route.ts) - IDENTICAL to a
+    // real empty account, unlike /api/profile which correctly 401s. A token
+    // that's mid-refresh when this screen mounts (e.g. App.tsx's foreground-
+    // resume handler awaits refreshToken/saveSession/syncBiometricToken
+    // before calling setSession - any fetch that fires in that window still
+    // has the old token) silently looks like "zero scans" instead of a
+    // failure. getWinsSummary succeeding with a REAL nonzero count from this
+    // SAME batch/token is proof this account has real history - a
+    // legitimately empty account can never produce that combination, so
+    // it's a safe, specific trigger for exactly one silent retry (no
+    // spinner change, no user action) instead of asking the user to
+    // discover "navigate away and back" fixes it themselves.
+    if (scanList.length === 0 && summary && summary.count > 0) {
+      invalidateScanHistoryCache(token);
+      await new Promise((r) => setTimeout(r, 900));
+      const retried = await getScanHistory(token, "scan", 50);
+      if (retried.length > 0) scanList = retried;
+    }
+    setScans(scanList);
     setThriftRuns(thriftRes.status === "fulfilled" && Array.isArray(thriftRes.value) ? thriftRes.value : []);
     setSpecialtyScans(specRes.status === "fulfilled" && Array.isArray(specRes.value) ? specRes.value : []);
     // summaryRes.value is null when the fetch failed AND there was nothing
     // cached to fall back to - keep whatever winsSummary already had (real
     // cached data, or the {0,0} initial default) instead of stomping it
     // with a fabricated zero (see getWinsSummary in lib/api.ts).
-    if (summaryRes.status === "fulfilled" && summaryRes.value) setWinsSummary(summaryRes.value);
+    if (summary) setWinsSummary(summary);
     setLoading(false);
     setRefreshing(false);
   }, [token]);
