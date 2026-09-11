@@ -634,9 +634,19 @@ export async function getScanHistory(token: string, type: string, limit: number)
   try {
     const r = await fetchWithTimeout(`${API_BASE}/api/scan-history?token=${encodeURIComponent(token)}&type=${type}&limit=${limit}`, undefined, DATA_FETCH_TIMEOUT_MS);
     const d = await r.json();
-    const list = Array.isArray(d) ? d : [];
-    cacheSet(key, list);
-    return list;
+    // CACHE-POISONING FIX (2026-09-11): a response that parses as JSON but
+    // ISN'T an array (an error body, an auth failure, any malformed shape)
+    // used to be silently coerced to [] and then cached as if it were a
+    // real empty result - poisoning this key for the full TTL. Retry called
+    // invalidateScanHistoryCache first, so it always forced a genuine
+    // re-fetch, but a still-malformed response just got re-cached as []
+    // again, making retry look like a no-op even though a real network call
+    // fired every time. Throwing here routes this through the SAME
+    // stale-fallback path a thrown network error already uses below -
+    // never cached, never mistaken for a legitimate empty account.
+    if (!Array.isArray(d)) throw new Error("Malformed scan-history response (not an array)");
+    cacheSet(key, d);
+    return d;
   } catch {
     // MEASURED BUG: this used to return [] unconditionally on a timeout,
     // which every caller (HistoryScreen's stat bar/empty state) renders as
