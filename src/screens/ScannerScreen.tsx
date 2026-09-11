@@ -195,6 +195,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   }, [result, buyPrice]);
   const [barcodeScanned, setBarcodeScanned] = useState(false);
   const cameraRef        = useRef<any>(null);
+  // CLIENT TIMING INSTRUMENTATION (2026-09-11): real, measured time spent
+  // inside compressPhoto() across every photo in THIS scan (reset in
+  // reset()) - the exact "how long does compression actually take" number
+  // the identifyMs/upload latency investigation couldn't answer without
+  // guessing. Sent to the server in the scan request body (see api.ts's
+  // scanImage) so it shows up in [lens timing] logs alongside photosSent/
+  // imagePayloadBytes instead of living only on-device.
+  const compressMsTotalRef = useRef(0);
   const [showAnalysis,   setShowAnalysis]   = useState(false);
   const [showShare,      setShowShare]      = useState(false);
   const [showPlatforms,  setShowPlatforms]  = useState(false);
@@ -212,6 +220,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setResultCondition("");
     setBarcodeScanned(false);
     setMode("photo");
+    compressMsTotalRef.current = 0;
   }
 
   async function takePhoto() {
@@ -224,7 +233,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       // compressed harder to cut upload payload without losing the
       // legibility fix on whichever shot matters most.
       const isPrimary = photos.length === 0;
+      const _ct0 = Date.now();
       const small = await compressPhoto(photo.base64, photo.width, photo.height, isPrimary ? "primary" : "secondary");
+      compressMsTotalRef.current += Date.now() - _ct0;
       setPhotos(p => {
         const next = [...p, small].slice(0, MAX_PHOTOS);
         if (next.length >= MAX_PHOTOS) { setStep("review"); }
@@ -247,9 +258,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // PARALLEL (was a sequential for-await loop) - no reason to make the
     // user wait for each image to compress one at a time.
     const startIndex = photos.length;
+    const _ct0 = Date.now();
     const compressed = (await Promise.all(
       picked.map((a, i) => a.base64 ? compressPhoto(a.base64, a.width, a.height, startIndex + i === 0 ? "primary" : "secondary") : Promise.resolve(null))
     )).filter((c): c is string => !!c);
+    // Wall-clock time of the whole concurrent batch (not summed per-photo -
+    // these run in parallel via Promise.all, so summing would overcount vs.
+    // what the user actually waited).
+    compressMsTotalRef.current += Date.now() - _ct0;
     if (compressed.length) {
       setPhotos(p => [...p, ...compressed].slice(0, MAX_PHOTOS));
       setStep("review");
@@ -282,7 +298,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         // No price is ever collected pre-scan any more - the scan itself is
         // what reads the price tag (retailPriceRead). See the results step
         // below for where a price is now entered/edited.
-        d = await scanImage(token, p, (brandInput ? "Brand: " + brandInput + ". " : "") + description, undefined);
+        d = await scanImage(token, p, (brandInput ? "Brand: " + brandInput + ". " : "") + description, undefined, compressMsTotalRef.current);
       }
       if (d.error === "scan_limit_reached") {
         onNavigate("upgrade");

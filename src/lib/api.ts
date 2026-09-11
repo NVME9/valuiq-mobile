@@ -234,22 +234,32 @@ export async function rerunScan(token: string, opts: { itemName: string; brand?:
   });
   return r.json();
 }
-export async function scanImage(token: string, photos: string[], description?: string, buyPrice?: number): Promise<any> {
+export async function scanImage(token: string, photos: string[], description?: string, buyPrice?: number, clientCompressMs?: number): Promise<any> {
+  // CLIENT TIMING INSTRUMENTATION (2026-09-11): _t0 marks entry to this
+  // function (photos are already captured+compressed by now - see
+  // ScannerScreen.tsx's compressMsTotalRef for that cost); clientPrepMs
+  // below covers what was previously invisible: the thumbnail generation
+  // and JSON.stringify of a base64 body that can run several hundred KB.
+  // Both this and clientCompressMs ride in the request body so the
+  // server's [lens timing] log can show real client-side seconds instead
+  // of the estimates the identifyMs/upload latency investigation had to
+  // fall back on.
+  const _t0 = Date.now();
   const body: any = {
     userToken: token,
     // lens/route.ts now sends ALL captured photos into ONE identify call -
     // a user deliberately takes extra photos (e.g. a close-up of the brand
     // tag) to help identification, and only uploading photos[0] was why
     // that close-up never reached the model. Each photo is already
-    // compressed to ~1024px longest edge/80% quality (see compressPhoto in
-    // ScannerScreen.tsx) before it ever reaches this array, so the full set
-    // stays a reasonable payload.
+    // compressed (see compressPhoto in lib/image.ts) before it ever reaches
+    // this array, so the full set stays a reasonable payload.
     images: photos.map(b => `data:image/jpeg;base64,${b}`),
     textInput: description || "",
     buyPrice: buyPrice || 0,
     // Surfaces _debug.timing (per-stage ms) on every scan - the on-screen
     // DEBUG readout reads this. Cheap (a few extra JSON fields), always on.
     debug: true,
+    clientCompressMs: clientCompressMs ?? null,
   };
   try {
     const t = await ImageManipulator.manipulateAsync(
@@ -259,6 +269,7 @@ export async function scanImage(token: string, photos: string[], description?: s
     );
     if (t.base64) body.thumb = `data:image/jpeg;base64,${t.base64}`;
   } catch {}
+  body.clientPrepMs = Date.now() - _t0;
   const r = await fetch(`${API_BASE}/api/lens`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
