@@ -798,6 +798,22 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 skipDetail={skipDetail}
               />
 
+              {/* RESCAN (2026-09-12): distinct from both "New Scan" (top
+                  nav - full reset: clears price/condition/description too)
+                  and the hero's pencil "Edit" (text-detail edit, keeps the
+                  existing photos). This is specifically "the photo was
+                  bad/wrong item - retake it" - clears ONLY `photos`, keeps
+                  everything else (buyPrice/resultCondition/result) intact
+                  in case the user backs out of the camera without
+                  submitting a new one. Isolated to this screen; no change
+                  to reset()/camera permission/navigation elsewhere. */}
+              <TouchableOpacity
+                style={s.rescanBtn}
+                onPress={() => { setPhotos([]); setStep("camera"); }}
+              >
+                <Text style={s.rescanBtnTxt}>{"\u{1F4F7}"} Retake Photo & Rescan</Text>
+              </TouchableOpacity>
+
               {/* PRICE-ON-RESULTS (2026-09-10, item 8): price now lives
                   here, populated the instant the scan returns - the scan is
                   what reads any price tag, so it genuinely can't precede
@@ -1510,6 +1526,8 @@ const s = StyleSheet.create({
   priceFieldDollar:{ color: C.green, fontSize: 26, fontWeight: "800", marginRight: 4 },
   priceFieldInput: { flex: 1, color: C.text1, fontSize: 26, fontWeight: "700", paddingVertical: 14 },
   priceFieldHint:  { color: C.text4, fontSize: 11.5, fontWeight: "600", marginTop: 6 },
+  rescanBtn:       { flexDirection: "row", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: C.border, borderRadius: 12, paddingVertical: 12, marginTop: 14 },
+  rescanBtnTxt:    { color: C.text2, fontSize: 13, fontWeight: "700" },
 
   // Result,
   goodBanner:     { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: C.greenBg, borderWidth: 1.5, borderColor: C.greenBorder, borderRadius: 12, padding: 12, marginBottom: 12 },
