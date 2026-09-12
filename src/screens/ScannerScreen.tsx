@@ -712,6 +712,42 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     ];
     const skipDetail = isSkip ? (result.reasoning || null) : null;
 
+    // PRICE-INPUT GEOMETRY (2026-09-12): moved from below the hero card to
+    // this slot, rendered by ProfitFlexHero between item name/category and
+    // the verdict/profit block - so entering a price and seeing the
+    // resulting verdict/profit/max-buy change it causes are both visible in
+    // the same viewport, no scroll required. Content itself is unchanged
+    // from the prior below-the-hero version (same price label/hint logic,
+    // same buyPrice/setBuyPrice) plus one new line: "Sell price" - the
+    // condition-adjusted resale estimate, ALWAYS visible here regardless of
+    // whether a price has been entered (previously only implicitly visible
+    // as the hero number before a price existed, then replaced by profit).
+    const priceInputBlock = (
+      <View style={{ marginBottom: 4 }}>
+        <Text style={s.sellPriceLabel}>Sell price</Text>
+        <Text style={s.sellPriceValue}>${adjustedResaleValue}</Text>
+        <Text style={[s.priceLabel, { marginTop: 12 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+          {Number(result.retailPriceRead) > 0 ? "Price (from a detected tag)" : "What you paid (optional)"}
+        </Text>
+        <View style={s.priceFieldWrap}>
+          <Text style={s.priceFieldDollar}>$</Text>
+          <TextInput
+            style={s.priceFieldInput}
+            value={buyPrice}
+            onChangeText={setBuyPrice}
+            placeholder="0.00"
+            placeholderTextColor={C.text4}
+            keyboardType="decimal-pad"
+          />
+        </View>
+        <Text style={s.priceFieldHint} numberOfLines={2}>
+          {Number(result.retailPriceRead) > 0
+            ? "Read off a price tag in your photo — edit if it's wrong."
+            : "No price tag detected — enter what you paid to see your real profit and verdict."}
+        </Text>
+      </View>
+    );
+
     return (
       <SafeAreaView style={s.safe}>
         <StatusBar barStyle="light-content"/>
@@ -796,6 +832,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 secondaryStats={secondaryStats}
                 footNote={footNote}
                 skipDetail={skipDetail}
+                priceInputSlot={priceInputBlock}
               />
 
               {/* RESCAN (2026-09-12): distinct from both "New Scan" (top
@@ -813,32 +850,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               >
                 <Text style={s.rescanBtnTxt}>{"\u{1F4F7}"} Retake Photo & Rescan</Text>
               </TouchableOpacity>
-
-              {/* PRICE-ON-RESULTS (2026-09-10, item 8): price now lives
-                  here, populated the instant the scan returns - the scan is
-                  what reads any price tag, so it genuinely can't precede
-                  it. Editing re-runs the verdict LOCALLY (see the
-                  adjustedResale / heroProfit / outcome computation above)
-                  - no new LLM call, no network round trip, instant. */}
-              <Text style={[s.priceLabel, { marginTop: 16 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
-                {Number(result.retailPriceRead) > 0 ? "Price (from a detected tag)" : "What you paid (optional)"}
-              </Text>
-              <View style={s.priceFieldWrap}>
-                <Text style={s.priceFieldDollar}>$</Text>
-                <TextInput
-                  style={s.priceFieldInput}
-                  value={buyPrice}
-                  onChangeText={setBuyPrice}
-                  placeholder="0.00"
-                  placeholderTextColor={C.text4}
-                  keyboardType="decimal-pad"
-                />
-              </View>
-              <Text style={s.priceFieldHint} numberOfLines={2}>
-                {Number(result.retailPriceRead) > 0
-                  ? "Read off a price tag in your photo — edit if it's wrong."
-                  : "No price tag detected — enter what you paid to see your real profit and verdict."}
-              </Text>
 
               {/* CONDITION DROPDOWN (2026-09-10, item 9): pre-filled from
                   the scan's own read (conditionAssessment); changing it
@@ -1526,6 +1537,12 @@ const s = StyleSheet.create({
   priceFieldDollar:{ color: C.green, fontSize: 26, fontWeight: "800", marginRight: 4 },
   priceFieldInput: { flex: 1, color: C.text1, fontSize: 26, fontWeight: "700", paddingVertical: 14 },
   priceFieldHint:  { color: C.text4, fontSize: 11.5, fontWeight: "600", marginTop: 6 },
+  // PRICE-INPUT GEOMETRY (2026-09-12): the condition-adjusted resale
+  // estimate, now always visible directly above the price input (was only
+  // ever implicit as the hero number before a price was entered, then
+  // replaced by profit once one was) - see priceInputBlock.
+  sellPriceLabel:  { color: C.text4, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8 },
+  sellPriceValue:  { color: C.text1, fontSize: 22, fontWeight: "900", marginBottom: 8 },
   rescanBtn:       { flexDirection: "row", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: C.border, borderRadius: 12, paddingVertical: 12, marginTop: 14 },
   rescanBtnTxt:    { color: C.text2, fontSize: 13, fontWeight: "700" },
 

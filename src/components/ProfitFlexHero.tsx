@@ -38,6 +38,17 @@ interface ProfitFlexHeroProps {
 
   // SKIP-path fields
   skipDetail?: string | null;    // lens's own reasoning, shown as secondary context under the one-line reason
+
+  // PRICE-INPUT GEOMETRY (2026-09-12): optional, fully caller-composed
+  // content rendered between the item name/category and the verdict/profit
+  // block below - lets ScannerScreen put its "sell price" line + price
+  // TextInput directly above the numbers they drive, so entering a price
+  // and seeing the resulting verdict/profit change never requires
+  // scrolling. This component knows nothing about price-entry state; it
+  // only reserves the slot. undefined (every other caller - SpecialtyScreen,
+  // FlexRevealCard) renders nothing here, byte-identical to before this prop
+  // existed.
+  priceInputSlot?: React.ReactNode;
 }
 
 const GLOW_W = 340;
@@ -50,7 +61,7 @@ function money(n: number): string {
 export default function ProfitFlexHero({
   outcome, itemName, categoryLine, photoBase64, onEdit, isSkip,
   heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, dataTag, dataTagColor, secondaryStats = [], footNote,
-  skipDetail,
+  skipDetail, priceInputSlot,
 }: ProfitFlexHeroProps) {
   // MEASURED BUG: a long AI-generated item name ("American Flag with Fish
   // Trucker Hat (likely...") had no way to be seen in full - numberOfLines
@@ -123,6 +134,8 @@ export default function ProfitFlexHero({
         <Text style={st.itemNameToggle}>{titleExpanded ? "▲ Show less" : "▼ Tap to see full name"}</Text>
       </TouchableOpacity>
       {categoryLine ? <Text style={st.itemMeta}>{categoryLine}</Text> : null}
+
+      {priceInputSlot}
 
       {isSkip ? (
         <>
