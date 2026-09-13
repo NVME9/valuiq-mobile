@@ -13,7 +13,6 @@ import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
-import ShareButton from "../components/ShareButton";
 import ShareCard from "../components/ShareCard";
 import { API_BASE, scanImage, scanBarcode , getProfitOracle, shareWin } from "../lib/api";
 import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notifications";
@@ -969,41 +968,49 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 </View>
               )}
 
-              {/* Everything below is buy-oriented - hidden entirely on a
-                  skip verdict, which is shown justified by its one reason
-                  in the hero above and stripped of buy-context clutter. */}
+              {/* Share result as image - unconditional on verdict (2026-09-13):
+                  ShareCard already renders a correct branded card for every
+                  decision (BUY/WATCH/PASS all get their own verdict badge -
+                  see ShareCard.tsx's verdictColor/verdictLabel), so a PASS
+                  scan has just as real a card to share as a BUY - "skip this
+                  one" is still a shareable moment, not just a win. Used to
+                  live inside the buy-oriented {!isSkip} block below and got
+                  hidden entirely on a skip verdict along with everything
+                  else in that block, which was a layout decision (no
+                  platform breakdown / community-share on a non-buy), not a
+                  reason this specific button needed hiding too. */}
+              <TouchableOpacity
+                style={{backgroundColor:C.green,borderRadius:14,paddingVertical:15,paddingHorizontal:12,marginBottom:12,alignItems:"center",justifyContent:"center",flexDirection:"row",gap:8,minHeight:52,opacity:sharingImage?0.6:1}}
+                disabled={sharingImage}
+                activeOpacity={0.85}
+                onPress={shareResultImage}
+              >
+                {sharingImage ? (
+                  <ActivityIndicator color={C.greenDark} size="small" />
+                ) : (
+                  <>
+                    <Text style={{fontSize:16}}>{"📷"}</Text>
+                    {/* "Share result as image" -> "Share as image" - shorter
+                        copy first (fits on its own on an SE-width screen);
+                        numberOfLines+adjustsFontSizeToFit+flexShrink is a
+                        backstop, not the primary fix, so it never clips. */}
+                    <Text
+                      style={{color:C.greenDark,fontSize:15,fontWeight:"900",flexShrink:1}}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.85}
+                    >
+                      Share as image
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {/* Everything below IS still buy-oriented - hidden entirely on
+                  a skip verdict (no platform to recommend selling on, no
+                  "win" to post to the community, when there's no buy). */}
               {!isSkip && (
                 <>
-                  {/* Share result as image - promoted out of the collapsed
-                      Share & Content section since it's the highest-intent
-                      share action */}
-                  <TouchableOpacity
-                    style={{backgroundColor:C.green,borderRadius:14,paddingVertical:15,paddingHorizontal:12,marginBottom:12,alignItems:"center",justifyContent:"center",flexDirection:"row",gap:8,minHeight:52,opacity:sharingImage?0.6:1}}
-                    disabled={sharingImage}
-                    activeOpacity={0.85}
-                    onPress={shareResultImage}
-                  >
-                    {sharingImage ? (
-                      <ActivityIndicator color={C.greenDark} size="small" />
-                    ) : (
-                      <>
-                        <Text style={{fontSize:16}}>{"📷"}</Text>
-                        {/* "Share result as image" -> "Share as image" - shorter
-                            copy first (fits on its own on an SE-width screen);
-                            numberOfLines+adjustsFontSizeToFit+flexShrink is a
-                            backstop, not the primary fix, so it never clips. */}
-                        <Text
-                          style={{color:C.greenDark,fontSize:15,fontWeight:"900",flexShrink:1}}
-                          numberOfLines={1}
-                          adjustsFontSizeToFit
-                          minimumFontScale={0.85}
-                        >
-                          Share as image
-                        </Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-
                   {/* Collapsed by default - the hero above already answers
                       the question; everything else is one tap away. */}
                   {result.platformBreakdown && result.platformBreakdown.length > 0 && (
@@ -1105,32 +1112,35 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     </CollapsibleSection>
                   )}
 
-                  <CollapsibleSection title="Share & Content" expanded={showShare} onToggle={()=>setShowShare(v=>!v)}>
-                     <ShareButton
-                       message={
-                         " Just found a $" + Math.round(heroProfit) + " profit flip! " + (result.itemName||"Item") + " - " + heroRoi + "% ROI on " + (result.bestPlatform||"eBay")
-                         + "\n\nI use ValuIQ to find profitable flips > getvaluiq.com"
-                       }
-                       title="My ValuIQ Find"
-                       compact
-                     />
-                     {heroProfit >= 20 && (
-                       <TouchableOpacity
-                         style={s.communityShareBtn}
-                         disabled={winShared || sharingWin}
-                         activeOpacity={0.85}
-                         onPress={async () => {
-                           setSharingWin(true);
-                           const ok = await shareWin(token, result.itemName || "Great find", heroProfit || 0, result.bestPlatform || "eBay", "");
-                           setSharingWin(false);
-                           if (ok) setWinShared(true);
-                         }}>
-                         <Text style={s.communityShareTxt}>
-                           {winShared ? "✓  Shared with the community!" : sharingWin ? "Sharing..." : "🎉  Share this win with the community"}
-                         </Text>
-                       </TouchableOpacity>
-                     )}
-                  </CollapsibleSection>
+                  {/* MEASURED (2026-09-13): this used to hold a second,
+                      weaker personal-share button (plain text via
+                      ShareButton) sitting right below the good branded
+                      "Share as image" button above it - two competing share
+                      actions, one worse than the other, on the same screen.
+                      Removed; the image share is the one personal-share
+                      action now. What's left here is a genuinely different
+                      action (post to the in-app community feed, not a
+                      personal OS share), so it keeps its own gate/section -
+                      renamed from "Share & Content" since that name described
+                      the button that's now gone. */}
+                  {heroProfit >= 20 && (
+                    <CollapsibleSection title="Community" expanded={showShare} onToggle={()=>setShowShare(v=>!v)}>
+                      <TouchableOpacity
+                        style={s.communityShareBtn}
+                        disabled={winShared || sharingWin}
+                        activeOpacity={0.85}
+                        onPress={async () => {
+                          setSharingWin(true);
+                          const ok = await shareWin(token, result.itemName || "Great find", heroProfit || 0, result.bestPlatform || "eBay", "");
+                          setSharingWin(false);
+                          if (ok) setWinShared(true);
+                        }}>
+                        <Text style={s.communityShareTxt}>
+                          {winShared ? "✓  Shared with the community!" : sharingWin ? "Sharing..." : "🎉  Share this win with the community"}
+                        </Text>
+                      </TouchableOpacity>
+                    </CollapsibleSection>
+                  )}
                 </>
               )}
 
