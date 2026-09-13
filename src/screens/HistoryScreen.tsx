@@ -67,6 +67,18 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   // visit this session has nothing to peek and falls back to [] + the
   // `loading` spinner exactly like before.
   const [scans, setScans]           = useState<any[]>(() => peekScanHistory(token, "scan", 50) || []);
+  // Sold/Wins/Losses source list - fetched via its OWN server-side query
+  // (type=sold, filtered by sold_status IN ('sold','passed') in the WHERE
+  // clause, not sliced off the recency-capped `scans` list above).
+  // MEASURED BUG (2026-09-13): the Wins/Losses tabs used to filter `scans`
+  // (type=scan, limit=50 most-RECENT of any status) client-side - an
+  // account that logs more scans than `limit` between two sales pushes the
+  // older sale out of that window entirely. An 11-sale test account with
+  // 148 pending scans had 10 of 11 sales silently vanish from Wins/Losses
+  // this way, even though the rows were fully intact in the DB. This list
+  // is independent of pending-scan volume - it only ever holds actual
+  // sold/passed rows, so it can't be crowded out.
+  const [soldScans, setSoldScans]   = useState<any[]>(() => peekScanHistory(token, "sold", 1000) || []);
   const [thriftRuns, setThriftRuns] = useState<any[]>(() => peekThriftRuns(token) || []);
   const [specialtyScans, setSpecialtyScans] = useState<any[]>(() => peekScanHistory(token, "specialty", 50) || []);
   // The ONE real wins total - from /api/profile's unbounded, Specialty-
@@ -309,19 +321,21 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   }
   const loadData = useCallback(async () => {
     if (!token) { setLoading(false); return; }
-    // All four calls are independent - fire them together instead of the
+    // All five calls are independent - fire them together instead of the
     // previous await-the-first-three-then-await-summary chain, which added
     // a full extra round trip (usually served from cache now anyway, see
     // getWinsSummary in lib/api.ts) onto every load.
-    const [scanRes, thriftRes, specRes, summaryRes] = await Promise.allSettled([
+    const [scanRes, thriftRes, specRes, summaryRes, soldRes] = await Promise.allSettled([
       getScanHistory(token, "scan", 50),
       getThriftRuns(token),
       getScanHistory(token, "specialty", 50),
       getWinsSummary(token),
+      getScanHistory(token, "sold", 1000),
     ]);
     setScans(scanRes.status === "fulfilled" && Array.isArray(scanRes.value) ? scanRes.value : []);
     setThriftRuns(thriftRes.status === "fulfilled" && Array.isArray(thriftRes.value) ? thriftRes.value : []);
     setSpecialtyScans(specRes.status === "fulfilled" && Array.isArray(specRes.value) ? specRes.value : []);
+    setSoldScans(soldRes.status === "fulfilled" && Array.isArray(soldRes.value) ? soldRes.value : []);
     // summaryRes.value is null when the fetch failed AND there was nothing
     // cached to fall back to - keep whatever winsSummary already had (real
     // cached data, or the {0,0} initial default) instead of stomping it
@@ -355,7 +369,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
         onPress: async () => {
           await deleteOne(id);
           if (type === "thrift") setThriftRuns(prev => prev.filter(s => s.id !== id));
-          else setScans(prev => prev.filter(s => s.id !== id));
+          else { setScans(prev => prev.filter(s => s.id !== id)); setSoldScans(prev => prev.filter(s => s.id !== id)); }
         }
       }
     ]);
@@ -379,7 +393,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
         onPress: async () => {
           await Promise.all(ids.map(deleteOne));
           if (tab === "thrift") setThriftRuns(prev => prev.filter(s => !ids.includes(s.id)));
-          else setScans(prev => prev.filter(s => !ids.includes(s.id)));
+          else { setScans(prev => prev.filter(s => !ids.includes(s.id))); setSoldScans(prev => prev.filter(s => !ids.includes(s.id))); }
           setSelected({});
           setSelectMode(false);
         }
@@ -458,7 +472,10 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
     setRerunning(false);
   }
 
-  const filteredScans = scans.filter(sc => {
+  // Sold/Wins/Losses read from `soldScans` (its own server-filtered fetch,
+  // independent of pending-scan volume) instead of slicing the
+  // recency-capped `scans` list - see soldScans's declaration above for why.
+  const filteredScans = (scanFilter === "all" ? scans : soldScans).filter(sc => {
     if (scanFilter === "all") return true;
     const sold = sc.sold_status === "sold";
     if (scanFilter === "sold") return sold;
@@ -561,7 +578,9 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
           {/* SCANS TAB */}
           {tab === "scans" && (
             <>
-              {/* Filter row - client-side only, over rows already in `scans`.
+              {/* Filter row - "All" reads the recency-capped `scans` list;
+                  Sold/Wins/Losses read `soldScans` instead (its own
+                  server-filtered fetch - see soldScans's declaration above).
                   Was undifferentiated: every scan (BUY/PASS/sold/unsold, win
                   or loss) in one mixed scroll with no way to isolate wins or
                   losses. */}
