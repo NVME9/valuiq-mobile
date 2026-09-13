@@ -6,7 +6,6 @@
 import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { C } from "../lib/theme";
-import ShareButton from "./ShareButton";
 
 interface Props {
   hasPhoto: boolean;
@@ -20,7 +19,16 @@ interface Props {
   sold?: boolean;
   onViewReveal?: () => void;
   onEdit: () => void;
-  shareMessage: string;
+  // Caller-owned: builds and captures the branded ShareCard image for THIS
+  // row and opens the native share sheet (see HistoryScreen.tsx's
+  // shareHistoryRow) - replaces the old shareMessage:string prop, which
+  // just handed a pre-built plain-text caption to a generic ShareButton
+  // (Share.share, no image). Omit to hide the pill entirely.
+  onShare?: () => void;
+  // True while THIS row's share capture is in flight - only this row's
+  // pill should show "Sharing…", not every row's (see HistoryScreen.tsx's
+  // shareTarget?.id === row.id gating on the caller side).
+  sharing?: boolean;
   // Omit to hide - only thrift items lack a safe per-item delete today (see
   // HistoryScreen.tsx: deleting one would leave the run's stored totals
   // stale, since those live on the run header, not recomputed by a plain
@@ -28,7 +36,7 @@ interface Props {
   onDelete?: () => void;
 }
 
-export default function FlipActionsRow({ hasPhoto, onView, onSold, sold, onViewReveal, onEdit, shareMessage, onDelete }: Props) {
+export default function FlipActionsRow({ hasPhoto, onView, onSold, sold, onViewReveal, onEdit, onShare, sharing, onDelete }: Props) {
   return (
     <View style={s.row}>
       {hasPhoto && onView ? (
@@ -49,9 +57,15 @@ export default function FlipActionsRow({ hasPhoto, onView, onSold, sold, onViewR
         <Text style={s.pillTxt}>{"✏️"} Edit</Text>
       </TouchableOpacity>
       {/* Sold items already have a superior share path - "View reveal" opens
-          the branded-image win share. A second, plain-text Share pill here
-          would be redundant (and worse) for the same card. */}
-      {!sold && <ShareButton compact message={shareMessage} />}
+          the branded-image win share. A second Share pill here would be
+          redundant for the same card. Not-sold items get the SAME branded
+          ShareCard image (via onShare, owned by the caller) that the scan-
+          result screen produces - plain-text ShareButton retired here. */}
+      {!sold && onShare && (
+        <TouchableOpacity style={s.pill} onPress={onShare} disabled={sharing}>
+          <Text style={s.pillTxt}>{sharing ? "Sharing…" : "📤 Share"}</Text>
+        </TouchableOpacity>
+      )}
       {onDelete ? (
         <TouchableOpacity style={[s.pill, s.pillDelete]} onPress={onDelete}>
           <Text style={[s.pillTxt, s.pillDeleteTxt]}>{"🗑"} Delete</Text>

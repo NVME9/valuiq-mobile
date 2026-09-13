@@ -1,24 +1,43 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  StatusBar, ActivityIndicator, RefreshControl, Alert, Image, TextInput, Linking } from "react-native";
+  StatusBar, ActivityIndicator, RefreshControl, Alert, Image, TextInput, Linking, Share } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import ViewShot from "react-native-view-shot";
+import * as Sharing from "expo-sharing";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import LogSaleModal from "../components/LogSaleModal";
 import PhotoLightbox from "../components/PhotoLightbox";
 import FlipActionsRow from "../components/FlipActionsRow";
 import FlexRevealCard from "../components/FlexRevealCard";
+import ShareCard from "../components/ShareCard";
 import WinsDemoCard from "../components/WinsDemoCard";
 import { toPendingScan } from "../lib/saleCapture";
 import { fetchFlexStat, cacheFlexStat, readCachedFlexStat, concreteLine, FlexStat } from "../lib/flexReveal";
 import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty, getWinsSummary, peekProfileData, getScanHistory, peekScanHistory, invalidateScanHistoryCache, getThriftRuns, peekThriftRuns, invalidateThriftRunsCache } from "../lib/api";
 
-function shareMsg(name: string, profit?: number, platform?: string): string {
-  const p = (platform || "").split("|||")[0];
-  if (profit && profit > 0) return `Found this ${name} - flipping for ~$${Math.round(profit)} profit${p ? ` on ${p}` : ""}. Tracked with ValuIQ.`;
-  return `Checking out this ${name} on ValuIQ.`;
+// Maps either row shape History renders to ShareCard's expected props -
+// the DB-row shape (scans/specialty, snake_case: item_name, net_profit,
+// sell_price, best_platform, image_url) and the thrift-item shape (an
+// in-memory per-item blob inside a run's JSON, already camelCase: itemName,
+// profit, sellPrice, bestPlatform, thumb instead of image_url). Both are
+// tried via fallback chains so one function covers every FlipActionsRow
+// caller in this file - see shareHistoryRow below.
+function toShareResult(row: any) {
+  return {
+    itemName: row.itemName || row.item_name || "Item",
+    brand: row.brand,
+    decision: row.decision || row.verdict || "PASS",
+    netProfit: row.netProfit ?? row.net_profit ?? row.profit,
+    sellPrice: row.sellPrice ?? row.sell_price,
+    bestPlatform: row.bestPlatform || row.best_platform,
+    roi: row.roi,
+  };
+}
+function shareRowPhotoUri(row: any): string | undefined {
+  return row.image_url || row.thumb || undefined;
 }
 
 interface Props {
@@ -119,6 +138,20 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   const [logSaleScan, setLogSaleScan] = useState<any|null>(null);
   const [viewingPhoto, setViewingPhoto] = useState<string|null>(null);
   const [viewingReveal, setViewingReveal] = useState<{ stat: FlexStat | null; itemName: string; brand: string|null; loadingSubStat?: string; netProfit: number | null } | null>(null);
+
+  // Per-item Share (not-sold rows - sold rows share via viewingReveal's
+  // FlexRevealCard instead). One hidden off-screen ShareCard, populated
+  // on demand from whichever row's Share pill was tapped, rather than
+  // rendering one per visible row - same single-target pattern as
+  // viewingReveal/logSaleScan above, avoids mounting N off-screen Image
+  // loads for a 50-row list. See shareHistoryRow below.
+  const [shareTarget, setShareTarget] = useState<any|null>(null);
+  const [sharingRow, setSharingRow] = useState(false);
+  const shareCardRef = useRef<ViewShot>(null);
+  // Bridges ShareCard's onPhotoLoad callback (fired deep inside its Image)
+  // back into the awaited capture flow below - set right before capture
+  // starts, called (and cleared) the moment the photo is ready or errors.
+  const photoReadyRef = useRef<(() => void) | null>(null);
 
   // Lets a win be revisited from History instead of only ever seeing the
   // Flex Reveal once, at log time - and does it WITHOUT the 1-2s dead-button
@@ -373,6 +406,47 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
         }
       }
     ]);
+  }
+
+  // Re-share ANY already-scanned, not-yet-sold row (Scans/Thrift/Specialty
+  // tabs alike - see toShareResult's dual field-name handling above) as the
+  // SAME branded ShareCard image the fresh scan-result screen produces,
+  // instead of the old shareMsg() plain-text caption. Mirrors
+  // ScannerScreen.tsx's shareResultImage() / FlexRevealCard.tsx's
+  // shareFlexImage() exactly: populate an off-screen ViewShot-wrapped copy
+  // of the card, capture it to PNG, hand it to the native share sheet.
+  async function shareHistoryRow(row: any) {
+    if (sharingRow) return;
+    setSharingRow(true);
+    setShareTarget(row);
+    const fallbackCaption = `Checking out this ${row.itemName || row.item_name || "item"} on ValuIQ.`;
+    try {
+      const available = await Sharing.isAvailableAsync();
+      if (!available || !shareCardRef.current?.capture) {
+        await Share.share({ message: fallbackCaption });
+        return;
+      }
+      // Wait for the off-screen photo (if this row has one) to finish
+      // loading before capturing, so the shared image never snapshots a
+      // blank photo slot - race-proofed with a timeout so a slow/broken
+      // image_url can never hang the share button forever (same "never
+      // hang first paint" philosophy as api.ts's withTimeout/App.tsx's).
+      if (shareRowPhotoUri(row)) {
+        await Promise.race([
+          new Promise<void>(resolve => { photoReadyRef.current = resolve; }),
+          new Promise<void>(resolve => setTimeout(resolve, 4000)),
+        ]);
+      }
+      const uri = await shareCardRef.current.capture();
+      await Sharing.shareAsync(uri, { mimeType: "image/png", dialogTitle: "Share your ValuIQ find" });
+    } catch {
+      // Capture/share failed - never leave the tap dead, fall back to text.
+      try { await Share.share({ message: fallbackCaption }); } catch {}
+    } finally {
+      photoReadyRef.current = null;
+      setSharingRow(false);
+      setShareTarget(null);
+    }
   }
 
   function toggleSelect(id: string) {
@@ -706,7 +780,8 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                           onSold={() => setLogSaleScan(scan)}
                           onViewReveal={() => openReveal(scan)}
                           onEdit={() => { openEditor(scan); setExpanded(scan.id); }}
-                          shareMessage={shareMsg(scan.item_name || "Item", scan.profit || scan.net_profit, scan.best_platform)}
+                          onShare={() => shareHistoryRow(scan)}
+                          sharing={sharingRow && shareTarget?.id === scan.id}
                           onDelete={() => deleteItem(scan.id, "scan", scan.item_name||"Item")}
                         />
                       </View>
@@ -915,7 +990,8 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                                 onView={() => setViewingPhoto(item.thumb)}
                                 onSold={() => setLogSaleScan({ ...item, created_at: item.created_at || run.created_at })}
                                 onEdit={() => openThriftEditor(run, item)}
-                                shareMessage={shareMsg(item.itemName || "Item", item.profit, item.bestPlatform)}
+                                onShare={() => shareHistoryRow(item)}
+                                sharing={sharingRow && shareTarget?.id === item.id}
                               />
                             </View>
                             )
@@ -1002,7 +1078,8 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                             onSold={() => setLogSaleScan(item)}
                             onViewReveal={() => openReveal(item)}
                             onEdit={() => { openEditor(item); setExpanded(item.id); }}
-                            shareMessage={shareMsg(item.item_name || "Appraisal", undefined, item.best_platform)}
+                            onShare={() => shareHistoryRow(item)}
+                            sharing={sharingRow && shareTarget?.id === item.id}
                             onDelete={() => deleteItem(item.id, "scan", item.item_name||"Appraisal")}
                           />
                         </View>
@@ -1111,6 +1188,22 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
       />
 
       <PhotoLightbox uri={viewingPhoto} onClose={() => setViewingPhoto(null)} />
+
+      {/* Off-screen, single-instance ShareCard for per-row re-share (see
+          shareHistoryRow above) - only mounted while a row is actually
+          being shared, so this never renders (or loads a photo for) more
+          than one row at a time regardless of list length. */}
+      {shareTarget && (
+        <View style={{ position: "absolute", top: 0, left: -9999 }} pointerEvents="none">
+          <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1, result: "tmpfile" }}>
+            <ShareCard
+              result={toShareResult(shareTarget)}
+              photoUri={shareRowPhotoUri(shareTarget)}
+              onPhotoLoad={() => photoReadyRef.current?.()}
+            />
+          </ViewShot>
+        </View>
+      )}
     </SafeAreaView>
   );
 }

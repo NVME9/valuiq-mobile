@@ -13,6 +13,20 @@ interface ShareCardProps {
   result: any;
   oracle?: any;
   photoBase64?: string;
+  // Alternative to photoBase64 for callers that only have a remote URI on
+  // hand (e.g. History re-sharing an already-logged row, which stores
+  // image_url - not the base64 payload the live scan flow captures inline).
+  // photoBase64 wins if both are somehow passed. Ignored (no Image mounted)
+  // when neither is given - onPhotoLoad below then never fires, so a
+  // caller waiting on it must special-case "no photo at all" itself.
+  photoUri?: string;
+  // Fires once the photo has finished loading (success OR error - either
+  // way there's nothing more to wait for) so a caller capturing this card
+  // off-screen (ViewShot) can hold the capture until the image is actually
+  // painted, instead of racing a blank photo slot into the snapshot. Fires
+  // near-synchronously for photoBase64 (local decode, no network) and after
+  // the real fetch for photoUri - safe to ignore for base64-only callers.
+  onPhotoLoad?: () => void;
 }
 
 function fmtMoney(n: any): string | null {
@@ -21,7 +35,7 @@ function fmtMoney(n: any): string | null {
   return (num < 0 ? "-$" : "$") + Math.round(Math.abs(num));
 }
 
-export default function ShareCard({ result, oracle, photoBase64 }: ShareCardProps) {
+export default function ShareCard({ result, oracle, photoBase64, photoUri, onPhotoLoad }: ShareCardProps) {
   // AGREEMENT-ANCHOR MODEL (2026-09-07): the old notAFlipItem/thinData
   // suppression patchwork is gone (see lib/profitOracle.ts) - identify now
   // reasons a resale-value anchor for every item it can identify at all, so
@@ -60,8 +74,14 @@ export default function ShareCard({ result, oracle, photoBase64 }: ShareCardProp
         <Text style={s.tagline}>what resellers actually made</Text>
       </View>
 
-      {photoBase64 ? (
-        <Image source={{ uri: `data:image/jpeg;base64,${photoBase64}` }} style={s.photo} resizeMode="cover" />
+      {photoBase64 || photoUri ? (
+        <Image
+          source={{ uri: photoBase64 ? `data:image/jpeg;base64,${photoBase64}` : photoUri }}
+          style={s.photo}
+          resizeMode="cover"
+          onLoadEnd={onPhotoLoad}
+          onError={onPhotoLoad}
+        />
       ) : null}
 
       <View style={s.body}>
