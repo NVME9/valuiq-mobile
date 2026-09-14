@@ -17,6 +17,7 @@ import WinsDemoCard from "../components/WinsDemoCard";
 import { toPendingScan } from "../lib/saleCapture";
 import { fetchFlexStat, cacheFlexStat, readCachedFlexStat, concreteLine, FlexStat } from "../lib/flexReveal";
 import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty, getWinsSummary, peekProfileData, getScanHistory, peekScanHistory, invalidateScanHistoryCache, getThriftRuns, peekThriftRuns, invalidateThriftRunsCache } from "../lib/api";
+import { classifyOutcome, OutcomeTierInfo } from "../lib/outcomeTier";
 
 // Maps either row shape History renders to ShareCard's expected props -
 // the DB-row shape (scans/specialty, snake_case: item_name, net_profit,
@@ -58,6 +59,30 @@ function verdictColor(v: string) {
   if (v === "BUY") return C.green;
   if (v === "WATCH") return C.yellow;
   return C.red;
+}
+
+// ONE VERDICT ENGINE (BEASTMODE FIX 1, 2026-09-13): this card used to show
+// the raw stored scan.verdict/scan.decision straight from whatever the
+// backend decided AT SCAN TIME, through verdictColor's own BUY/WATCH/else
+// mapping - never recomputed through the SAME classifyOutcome() Scanner
+// uses, so a scan saved under the backend's old 10%/25% thresholds (now
+// fixed server-side too, but this recomputes locally so it can never drift
+// again) could show a different verdict here than Scanner would give the
+// identical numbers today. noFlipMargin isn't its own scans-table column -
+// it rides along inside specialty_data's saved API-response JSON (`full`,
+// already parsed above), same shape lens/route.ts's own response uses.
+// Returns null (falls back to the raw badge) only when there's no real
+// decision saved yet (priceEntered:false scans, e.g.).
+function scanTier(scan: any, full: any): OutcomeTierInfo | null {
+  const rawDecision = scan.verdict || scan.decision;
+  if (!rawDecision || rawDecision === "UNKNOWN") return null;
+  return classifyOutcome({
+    noFlipMargin: !!full?.noFlipMargin,
+    netProfit: scan.profit ?? scan.net_profit ?? 0,
+    roi: Number(scan.roi) || 0,
+    daysToSell: null, velocityTier: null, sellThrough: null,
+    dataQuality: null, sellPrice: null, sellTimeLabel: null,
+  });
 }
 
 // Recomputed from the saved blob at DISPLAY time - NOT from a possibly-
@@ -246,6 +271,15 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
     if (!editName.trim()) { Alert.alert("Name required", "Enter an item name to re-run."); return; }
     setRerunning(true);
     try {
+      // HISTORY RERUN FIX (2026-09-14): the item's already-known resale
+      // value, carried forward so a price-only edit can't silently re-derive
+      // a different one (see rerunScan's storedResale doc comment / lens/
+      // route.ts's pinnedResale). specialty_data is this same scan's own
+      // last-saved full API response - its priceRange/noFlipMargin are the
+      // same fields a fresh scan would have produced, just already known.
+      let priorFull: any = null;
+      try { priorFull = scan.specialty_data ? JSON.parse(scan.specialty_data) : null; } catch {}
+      const storedSellPrice = Number(scan.sell_price) || 0;
       const data = await rerunScan(token, {
         itemName: editName.trim(),
         brand: editBrand.trim() || "Unknown",
@@ -254,6 +288,12 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
         buyPrice: parseFloat(editPrice) || scan.buy_price || 0,
         extraDescription: editDesc.trim() || undefined,
         newPhotosBase64: editPhotos.length > 0 ? editPhotos : undefined,
+        storedResale: storedSellPrice > 0 ? {
+          value: storedSellPrice,
+          low: priorFull?.priceRange?.low ?? null,
+          high: priorFull?.priceRange?.high ?? null,
+          noFlipMargin: !!priorFull?.noFlipMargin,
+        } : undefined,
       });
       if (data && (data.success || data.sellPrice != null)) {
         // MEASURED BUG: this updated the stat columns (sell_price/net_profit/
@@ -561,7 +601,15 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   const displayScans  = showAll ? filteredScans : filteredScans.slice(0, 10);
   const displayThrift = thriftRuns;
 
-  const buyScans    = scans.filter(s => (s.verdict||s.decision||"").toUpperCase() === "BUY");
+  // Tier-based, not raw decision string (BEASTMODE FIX 1, 2026-09-13) - same
+  // classifyOutcome() the card badges above now use, so "BUY Finds" can't
+  // disagree with what the cards underneath it actually show.
+  const buyScans    = scans.filter(s => {
+    let full: any = null;
+    try { full = s.specialty_data ? JSON.parse(s.specialty_data) : null; } catch {}
+    const t = scanTier(s, full);
+    return t?.tier === "hot" || t?.tier === "solid";
+  });
   const selCount    = selectedIds().length;
 
   // Preview override (dev, see Profile's "Preview new-user flow"): render
@@ -718,6 +766,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                   try { full = scan.specialty_data ? JSON.parse(scan.specialty_data) : null; } catch { full = null; }
                   const scanProfit = scan.profit || scan.net_profit || 0;
                   const scanIsLoss = scanProfit < 0;
+                  const tier = scanTier(scan, full);
                   return (
                   <TouchableOpacity
                     key={scan.id}
@@ -751,9 +800,9 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                             <Text style={s.soldBadgeTxt}>{"✅"} SOLD</Text>
                           </View>
                         ) : (
-                          <View style={[s.verdict, {backgroundColor:verdictColor(scan.verdict||scan.decision||"PASS")+"20"}]}>
-                            <Text style={[s.verdictTxt, {color:verdictColor(scan.verdict||scan.decision||"PASS")}]}>
-                              {(scan.verdict||scan.decision||"PASS").toUpperCase()}
+                          <View style={[s.verdict, {backgroundColor:(tier?tier.accent:verdictColor(scan.verdict||scan.decision||"PASS"))+"20"}]}>
+                            <Text style={[s.verdictTxt, {color:tier?tier.accent:verdictColor(scan.verdict||scan.decision||"PASS")}]}>
+                              {tier ? tier.label : (scan.verdict||scan.decision||"PASS").toUpperCase()}
                             </Text>
                           </View>
                         )}

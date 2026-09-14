@@ -210,7 +210,12 @@ export default function DashboardScreen({ token, plan, planLoaded = true, scansL
   }
 
   // Tools hidden for launch (backend not ready). Remove an id here to re-enable after launch.
-  const LAUNCH_HIDDEN = ["deal-hunter"];
+  // hot-now added (BEASTMODE FIX 4, 2026-09-13): confirmed broken in
+  // production, root cause not yet identified (see HOUSEKEEPING.md) -
+  // pulled from the live tool grid rather than leave a broken tool in front
+  // of paying users. HotNowScreen.tsx and /api/hot-now are untouched -
+  // remove the id here once the underlying issue is fixed and verified live.
+  const LAUNCH_HIDDEN = ["deal-hunter", "hot-now"];
   const myTools    = TOOLS.filter(t => t.minPlan <= level && !LAUNCH_HIDDEN.includes(t.id));
   const lockedTools = TOOLS.filter(t => t.minPlan > level && !LAUNCH_HIDDEN.includes(t.id));
       const tip        = LIVE_FEED[tipIdx];

@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, Image, Dimensions, Linking } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, Image, Dimensions, Linking, TextInput, Alert } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 let CameraView: any = null; let useCameraPermissions: any = () => [null, async()=>{}];
 if (require("react-native").Platform.OS !== "web") { try { const c = require("expo-camera"); CameraView = c.CameraView; useCameraPermissions = c.useCameraPermissions; } catch {} }
@@ -8,12 +8,66 @@ import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareButton from "../components/ShareButton";
-import { API_BASE } from "../lib/api";
+import { API_BASE, rerunScan } from "../lib/api";
+import { classifyOutcome, OutcomeTierInfo } from "../lib/outcomeTier";
 
 const { width } = Dimensions.get("window");
 
 type ItemStatus = "scanning"|"done"|"error";
-type RunItem = { id:string; photo:string; status:ItemStatus; decision?:string; profit?:number; sellPrice?:number; buyTarget?:number; platform?:string; name?:string; error?:string; };
+// roi/noFlipMargin (BEASTMODE FIX 1, 2026-09-13) - added so this screen can
+// run the SAME classifyOutcome() Scanner uses instead of trusting the raw
+// backend `decision` field, which used to disagree with Scanner's tier for
+// the identical numbers (the backend's own 10%/25% split vs outcomeTier's
+// real 30% BUY floor - now fixed server-side too, but computing the tier
+// locally here means this screen can never drift again even if the two
+// backends' thresholds are retuned independently in the future).
+// brand/category/condition/buyPrice (2026-09-14, THRIFT-RUN USABILITY FIX):
+// brand/category/condition let a per-item correction re-submit the full
+// identity, not just the name; buyPrice is what the user actually paid -
+// previously nonexistent, so profit/ROI always assumed the max-buy CEILING
+// as cost, never a real number.
+type RunItem = { id:string; photo:string; status:ItemStatus; decision?:string; profit?:number; roi?:number; noFlipMargin?:boolean; sellPrice?:number; buyTarget?:number; platform?:string; name?:string; brand?:string; category?:string; condition?:string; buyPrice?:number; error?:string; };
+
+// classifyOutcome() needs the full OutcomeTierInput shape - the fields this
+// screen doesn't track (daysToSell/velocityTier/sellThrough/dataQuality/
+// sellPrice/sellTimeLabel) are display-only in classifyOutcome and safe to
+// pass as null/undefined (see outcomeTier.ts's own comments on each field).
+function itemTier(item: RunItem): OutcomeTierInfo | null {
+  if (!item.decision) return null; // not analyzed yet
+  return classifyOutcome({
+    noFlipMargin: !!item.noFlipMargin,
+    netProfit: item.profit || 0,
+    roi: item.roi || 0,
+    daysToSell: null, velocityTier: null, sellThrough: null,
+    dataQuality: null, sellPrice: null, sellTimeLabel: null,
+  });
+}
+
+// ONE FEE TABLE (mirrors deal-ai-pro/lib/profitMath.ts's PLATFORM_FEES -
+// can't literally share a module across the two repos). Used ONLY for the
+// local price-entry recompute below - the server-computed sellPrice/
+// buyTarget this screen already has are never touched.
+const PLATFORM_FEES: Record<string, number> = {
+  eBay: 0.1327, Poshmark: 0.20, Mercari: 0.10, Depop: 0.10,
+  Etsy: 0.065, Whatnot: 0.11, StockX: 0.125, GOAT: 0.095,
+  Facebook: 0.05, OfferUp: 0.0, Amazon: 0.15,
+};
+
+// LOCAL RECOMPUTE (2026-09-14, THRIFT-RUN USABILITY FIX): mirrors
+// ScannerScreen.tsx's local recompute exactly - sellPrice (resale) is
+// SERVER data and never moves here; only the cost-basis-dependent numbers
+// (fees/profit/roi) recompute off the newly entered buyPrice. No network
+// call - this is what makes it instant, and what guarantees "what you paid"
+// can never accidentally re-derive resale the way History's rerun bug did.
+function applyPaidPrice(item: RunItem, paidPrice: number): RunItem {
+  const sellPrice = Number(item.sellPrice) || 0;
+  const platformName = item.platform?.split("|||")[0] || "";
+  const feeRate = PLATFORM_FEES[platformName] ?? 0.13;
+  const fees = Math.round(sellPrice * feeRate * 100) / 100;
+  const netProfit = Math.round((sellPrice - fees - paidPrice) * 100) / 100;
+  const roi = paidPrice > 0 ? Math.round((netProfit / paidPrice) * 100) : 0;
+  return { ...item, buyPrice: paidPrice, profit: netProfit, roi };
+}
 
 interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string)=>void; onBack?:()=>void; onLogout:()=>void; }
 
@@ -22,9 +76,90 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
   const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState<"intro"|"running"|"done">("intro");
   const [items, setItems] = useState<RunItem[]>([]);
-  const [selectedItem, setSelectedItem] = useState<RunItem|null>(null);
+  // THRIFT-RUN USABILITY FIX (2026-09-14): was `selectedItem: RunItem|null`,
+  // a snapshot taken at tap time - once price entry / correction could
+  // mutate an item in place, that snapshot went stale (the list badges
+  // above would update, but the expanded detail card underneath wouldn't).
+  // Storing just the id and deriving the live object below means the detail
+  // card always reflects whatever `items` currently holds.
+  const [selectedId, setSelectedId] = useState<string|null>(null);
+  const selectedItem = items.find(i => i.id === selectedId) || null;
+  const [paidPriceInput, setPaidPriceInput] = useState("");
+  const [editingCorrection, setEditingCorrection] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editBrand, setEditBrand] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editCondition, setEditCondition] = useState("Good");
+  const [savingCorrection, setSavingCorrection] = useState(false);
   const cameraRef = useRef<any>(null);
   const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
+
+  // Opens (or closes, on a second tap) an item's detail card and resets the
+  // edit forms to that item's current values - so re-opening a different
+  // item never shows stale text from whichever item was open before.
+  function selectItem(item: RunItem) {
+    if (selectedId === item.id) { setSelectedId(null); setEditingCorrection(false); return; }
+    setSelectedId(item.id);
+    setPaidPriceInput(item.buyPrice != null ? String(item.buyPrice) : "");
+    setEditName(item.name || ""); setEditBrand(item.brand || "");
+    setEditCategory(item.category || ""); setEditCondition(item.condition || "Good");
+    setEditingCorrection(false);
+  }
+
+  // PRICE INPUT (2026-09-14, THRIFT-RUN USABILITY FIX): instant, local,
+  // same guarantee as ScannerScreen.tsx's own price recompute - resale
+  // (sellPrice) never moves, only profit/ROI/tier (via applyPaidPrice ->
+  // itemTier reading the updated item.profit/roi).
+  function applyPrice() {
+    if (!selectedItem) return;
+    const paid = parseFloat(paidPriceInput) || 0;
+    setItems(prev => prev.map(x => x.id === selectedItem.id ? applyPaidPrice(x, paid) : x));
+  }
+
+  // PER-ITEM CORRECTION (2026-09-14, THRIFT-RUN USABILITY FIX): a real
+  // identity change (wrong brand/name/condition guess) genuinely can move
+  // resale, unlike a price edit - so this is a real, if lightweight, server
+  // round trip (same confirmedIdentification mechanism History's rerun
+  // uses), NOT a local recompute. No storedResale is sent - unlike History's
+  // rerun, the whole point here is letting resale be freshly re-derived for
+  // the CORRECTED item, since the original resale was computed for a
+  // possibly-wrong identification.
+  async function saveCorrection() {
+    if (!selectedItem || !editName.trim()) return;
+    setSavingCorrection(true);
+    try {
+      const data = await rerunScan(token, {
+        itemName: editName.trim(),
+        brand: editBrand.trim() || "Unknown",
+        category: editCategory.trim() || "Other",
+        condition: editCondition.trim() || "Good",
+        buyPrice: selectedItem.buyPrice || 0,
+      });
+      if (data && (data.success || data.sellPrice != null)) {
+        setItems(prev => prev.map(x => x.id === selectedItem.id ? {
+          ...x,
+          decision: data.decision, profit: data.netProfit, roi: data.roi, noFlipMargin: data.noFlipMargin,
+          sellPrice: data.sellPrice, buyTarget: data.buyTarget, platform: data.bestPlatform,
+          name: data.itemName, brand: data.brand, category: data.category, condition: data.condition,
+        } : x));
+        setEditingCorrection(false);
+      } else {
+        Alert.alert("Couldn't update", "Try again.");
+      }
+    } catch {
+      Alert.alert("Couldn't update", "Check your connection and try again.");
+    }
+    setSavingCorrection(false);
+  }
+
+  // DELETE (2026-09-14, THRIFT-RUN USABILITY FIX): a bad photo, a duplicate,
+  // or an item the user just decides not to count - local only, nothing was
+  // ever saved to the server for an in-progress run (thrift-run-save only
+  // fires once, at End Run).
+  function deleteItem(id: string) {
+    setItems(prev => prev.filter(x => x.id !== id));
+    if (selectedId === id) { setSelectedId(null); setEditingCorrection(false); }
+  }
 
   async function takePhoto() {
     if (!cameraRef.current) return;
@@ -53,8 +188,9 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
       if (d.success) {
         setItems(prev=>prev.map(x=>x.id===id?{
           ...x, status:"done",
-          decision:d.decision, profit:d.netProfit, sellPrice:d.sellPrice,
-          buyTarget:d.buyTarget, platform:d.bestPlatform, name:d.itemName }:x));
+          decision:d.decision, profit:d.netProfit, roi:d.roi, noFlipMargin:d.noFlipMargin, sellPrice:d.sellPrice,
+          buyTarget:d.buyTarget, platform:d.bestPlatform, name:d.itemName,
+          brand:d.brand, category:d.category, condition:d.condition }:x));
       } else {
         setItems(prev=>prev.map(x=>x.id===id?{...x,status:"error",error:d.error||"Failed"}:x));
       }
@@ -65,8 +201,11 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
 
   function endRun() {
     setPhase("done");
-    // Save run to history
-    const buyItemsList = items.filter(x => x.decision === "BUY");
+    // Save run to history. "Buy" here now means classifyOutcome() actually
+    // landed on hot/solid - was raw decision==="BUY" (BEASTMODE FIX 1,
+    // 2026-09-13), which could disagree with what this same screen now
+    // displays for the identical item.
+    const buyItemsList = items.filter(x => { const t = itemTier(x); return t?.tier === "hot" || t?.tier === "solid"; });
     const totalProfitCalc = buyItemsList.reduce((sum,x) => sum + (x.profit||0), 0);
     fetch(`${API_BASE}/api/thrift-run-save`, {
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -83,7 +222,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
       })
     }).catch(()=>{});
   }
-  function newRun() { setItems([]); setPhase("running"); setSelectedItem(null); }
+  function newRun() { setItems([]); setPhase("running"); setSelectedId(null); setEditingCorrection(false); }
 
   const THRIFT_LIMITS: Record<string, number> = {
     free: 3, seller: 10, pro: 999, lifetime: 999, business: 999
@@ -115,9 +254,21 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
 
 
 
-  const dc = (dec?:string) => dec==="BUY"?C.green:dec==="WATCH"?C.yellow:C.red;
-  const buyItems = items.filter(x=>x.decision==="BUY");
+  // buyItems now mirrors endRun's tier-based filter (BEASTMODE FIX 1,
+  // 2026-09-13) - was raw decision==="BUY", which the backend's now-fixed
+  // 30%/75% thresholds mostly resolve anyway, but computing it locally via
+  // classifyOutcome keeps this screen's own count/total honest even if the
+  // two backends' thresholds are ever retuned independently again.
+  const buyItems = items.filter(x=>{ const t = itemTier(x); return t?.tier==="hot"||t?.tier==="solid"; });
   const totalProfit = buyItems.reduce((sum,x)=>sum+(x.profit||0),0);
+  // COUNT BUG FIX (2026-09-14, THRIFT-RUN USABILITY FIX): the done-phase
+  // summary's WATCH/PASS tallies used to filter on the raw backend
+  // `decision` string while buyItems/the per-item badges already used the
+  // local classifyOutcome tier - the two could disagree on the same screen
+  // (e.g. an item the backend called WATCH but the tier says "thin" AND an
+  // entered price later reclassifies). Same tier, all three counts now.
+  const watchItems = items.filter(x=>itemTier(x)?.tier==="thin");
+  const passItems = items.filter(x=>{ const t = itemTier(x); return t?.tier==="skip" || (!t && x.status==="error"); });
 
   // INTRO,
   if (phase==="intro") return (
@@ -192,7 +343,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
         {/* Summary card */}
         <View style={s.summaryCard}>
           <View style={{ flexDirection:"row", gap:8 }}>
-            {[[buyItems.length.toString(),"BUY",C.green],[items.filter(x=>x.decision==="WATCH").length.toString(),"WATCH",C.yellow],[items.filter(x=>x.decision==="PASS"||x.status==="error").length.toString(),"PASS",C.red]].map(([val,label,color])=>(
+            {[[buyItems.length.toString(),"BUY",C.green],[watchItems.length.toString(),"WATCH",C.yellow],[passItems.length.toString(),"PASS",C.red]].map(([val,label,color])=>(
               <View key={label as string} style={[s.summaryBit,{borderColor:(color as string)+"30"}]}>
                 <Text style={[s.summaryBitVal,{color:color as string}]}>{val as string}</Text>
                 <Text style={s.summaryBitLabel}>{label as string}</Text>
@@ -207,8 +358,10 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
 
         {/* Items list */}
         <Text style={[s.sectionLabel,{marginBottom:10}]}>All Items</Text>
-        {items.map(item=>(
-          <TouchableOpacity key={item.id} style={[s.runItem,{borderColor:item.decision?dc(item.decision)+"30":C.border}]} onPress={()=>setSelectedItem(selectedItem?.id===item.id?null:item)}>
+        {items.map(item=>{
+          const tier = itemTier(item);
+          return (
+          <TouchableOpacity key={item.id} style={[s.runItem,{borderColor:tier?tier.accent+"30":C.border}]} onPress={()=>selectItem(item)}>
             <Image source={{uri:`data:image/jpeg;base64,${item.photo}`}} style={s.thumb} />
             <View style={{flex:1,paddingLeft:12}}>
               {item.status==="scanning" ? (
@@ -225,23 +378,32 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
                 </>
               )}
             </View>
-            {item.decision && (
+            {tier && (
               <View style={{alignItems:"flex-end",gap:3}}>
-                <View style={[s.decBadge,{backgroundColor:dc(item.decision)+"15",borderColor:dc(item.decision)+"40"}]}>
-                  <Text style={[s.decText,{color:dc(item.decision)}]}>{item.decision}</Text>
+                <View style={[s.decBadge,{backgroundColor:tier.accent+"15",borderColor:tier.accent+"40"}]}>
+                  <Text style={[s.decText,{color:tier.accent}]}>{tier.label}</Text>
                 </View>
                 <Text style={{color:C.text1,fontSize:13,fontWeight:"700"}}>${Math.round(item.profit||0)}</Text>
               </View>
             )}
           </TouchableOpacity>
-        ))}
+          );
+        })}
 
         {/* Expanded item detail */}
         {selectedItem && selectedItem.decision && (
           <View style={s.detailCard}>
-            <Text style={[s.h2,{marginBottom:12}]}>{selectedItem.name}</Text>
+            <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <Text style={[s.h2,{marginBottom:12,flex:1}]}>{selectedItem.name}</Text>
+              <TouchableOpacity onPress={() => Alert.alert("Delete this scan?", selectedItem.name || "Item", [
+                { text: "Cancel", style: "cancel" },
+                { text: "Delete", style: "destructive", onPress: () => deleteItem(selectedItem.id) },
+              ])}>
+                <Text style={{fontSize:18}}>🗑</Text>
+              </TouchableOpacity>
+            </View>
             <View style={{flexDirection:"row",gap:8}}>
-              {[["Max Pay","$"+(selectedItem.buyTarget||0),C.yellow],["Sell For","$"+(selectedItem.sellPrice||0),C.text1],["Profit","$"+Math.round(selectedItem.profit||0),C.green]].map(([l,v,c])=>(
+              {[["Max Pay","$"+(selectedItem.buyTarget||0),C.yellow],["Sell For","$"+(selectedItem.sellPrice||0),C.text1],[selectedItem.buyPrice?"Profit":"Est. Profit","$"+Math.round(selectedItem.profit||0),C.green]].map(([l,v,c])=>(
                 <View key={l as string} style={s.detailStat}>
                   <Text style={s.detailStatLabel}>{l as string}</Text>
                   <Text style={[s.detailStatVal,{color:c as string}]}>{v as string}</Text>
@@ -249,6 +411,70 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
               ))}
             </View>
             <Text style={{color:C.text4,fontSize:12,marginTop:8}}>Best on {selectedItem.platform?.split("|||")[0]}</Text>
+
+            {/* PRICE INPUT (2026-09-14): instant local recompute, no network
+                call - see applyPrice/applyPaidPrice above. Without this,
+                profit/ROI always assumed the Max Pay ceiling as cost. */}
+            <View style={{marginTop:14,paddingTop:14,borderTopWidth:1,borderTopColor:C.border}}>
+              <Text style={s.detailStatLabel}>What you paid</Text>
+              <View style={{flexDirection:"row",gap:8,marginTop:6}}>
+                <TextInput
+                  style={s.priceInput}
+                  value={paidPriceInput}
+                  onChangeText={setPaidPriceInput}
+                  placeholder={selectedItem.buyTarget ? String(selectedItem.buyTarget) : "0"}
+                  placeholderTextColor={C.text4}
+                  keyboardType="numeric"
+                />
+                <TouchableOpacity style={s.applyBtn} onPress={applyPrice}>
+                  <Text style={s.applyBtnText}>Apply</Text>
+                </TouchableOpacity>
+              </View>
+              {selectedItem.buyPrice ? (
+                <Text style={{color:C.text4,fontSize:11,marginTop:6}}>Profit/ROI above reflect the ${selectedItem.buyPrice} you paid, not the ceiling.</Text>
+              ) : (
+                <Text style={{color:C.text4,fontSize:11,marginTop:6}}>Profit above is projected against Max Pay until you enter a real price.</Text>
+              )}
+            </View>
+
+            {/* PER-ITEM CORRECTION (2026-09-14): fix a wrong ID/condition
+                without leaving the run - see saveCorrection above. */}
+            {!editingCorrection ? (
+              <TouchableOpacity style={s.fixBtn} onPress={() => setEditingCorrection(true)}>
+                <Text style={s.fixBtnText}>✏️ Wrong item or condition? Fix it</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={{marginTop:14,paddingTop:14,borderTopWidth:1,borderTopColor:C.border}}>
+                <Text style={s.detailStatLabel}>Item name</Text>
+                <TextInput style={s.fixInput} value={editName} onChangeText={setEditName} placeholderTextColor={C.text4} />
+                <View style={{flexDirection:"row",gap:8,marginTop:8}}>
+                  <View style={{flex:1}}>
+                    <Text style={s.detailStatLabel}>Brand</Text>
+                    <TextInput style={s.fixInput} value={editBrand} onChangeText={setEditBrand} placeholderTextColor={C.text4} />
+                  </View>
+                  <View style={{flex:1}}>
+                    <Text style={s.detailStatLabel}>Category</Text>
+                    <TextInput style={s.fixInput} value={editCategory} onChangeText={setEditCategory} placeholderTextColor={C.text4} />
+                  </View>
+                </View>
+                <Text style={[s.detailStatLabel,{marginTop:8}]}>Condition</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:6,marginTop:4}}>
+                  {["New","Like New","Good","Fair","Poor"].map(c => (
+                    <TouchableOpacity key={c} style={[s.condChip, editCondition===c && s.condChipActive]} onPress={()=>setEditCondition(c)}>
+                      <Text style={[s.condChipText, editCondition===c && s.condChipTextActive]}>{c}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                <View style={{flexDirection:"row",gap:8,marginTop:12}}>
+                  <TouchableOpacity style={[s.applyBtn,{flex:1,opacity:savingCorrection?0.6:1}]} onPress={saveCorrection} disabled={savingCorrection}>
+                    {savingCorrection ? <ActivityIndicator color={C.greenDark} size="small" /> : <Text style={s.applyBtnText}>Save & Re-price</Text>}
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.cancelFixBtn} onPress={() => setEditingCorrection(false)}>
+                    <Text style={s.cancelFixBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
           </View>
         )}
       </ScrollView>
@@ -304,8 +530,10 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
               <Text style={{color:C.text3,fontSize:13,textAlign:"center"}}>Tap the shutter button above to scan items</Text>
             </View>
           )}
-          {items.map(item=>(
-            <View key={item.id} style={[s.runItemCompact,{borderColor:item.decision?dc(item.decision)+"30":C.border}]}>
+          {items.map(item=>{
+            const tier = itemTier(item);
+            return (
+            <View key={item.id} style={[s.runItemCompact,{borderColor:tier?tier.accent+"30":C.border}]}>
               <Image source={{uri:`data:image/jpeg;base64,${item.photo}`}} style={s.thumbSm} />
               <View style={{flex:1,paddingLeft:10}}>
                 {item.status==="scanning" ? (
@@ -317,14 +545,15 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
                   <Text style={{color:C.text1,fontSize:12,fontWeight:"700"}} numberOfLines={1}>{item.name||"Unknown"}</Text>
                 )}
               </View>
-              {item.decision && (
+              {tier && (
                 <View style={{alignItems:"flex-end"}}>
-                  <Text style={{color:dc(item.decision),fontSize:12,fontWeight:"800"}}>{item.decision}</Text>
+                  <Text style={{color:tier.accent,fontSize:12,fontWeight:"800"}}>{tier.label}</Text>
                   <Text style={{color:C.text1,fontSize:12,fontWeight:"700"}}>${Math.round(item.profit||0)}</Text>
                 </View>
               )}
             </View>
-          ))}
+            );
+          })}
         </ScrollView>
       </View>
     </View>
@@ -377,4 +606,16 @@ const s = StyleSheet.create({
   detailCard:       { backgroundColor:C.surfaceHigh, borderWidth:1, borderColor:C.border, borderRadius:14, padding:16, marginBottom:12 },
   detailStat:       { flex:1, backgroundColor:C.bg, borderRadius:8, padding:10, alignItems:"center" },
   detailStatLabel:  { color:C.text4, fontSize:9, fontWeight:"700", textTransform:"uppercase", marginBottom:4 },
-  detailStatVal:    { fontSize:18, fontWeight:"900" } });
+  detailStatVal:    { fontSize:18, fontWeight:"900" },
+  priceInput:       { flex:1, backgroundColor:C.bg, borderWidth:1, borderColor:C.border, borderRadius:10, paddingHorizontal:12, paddingVertical:10, color:C.text1, fontSize:15 },
+  applyBtn:         { backgroundColor:C.green, borderRadius:10, paddingHorizontal:18, alignItems:"center", justifyContent:"center" },
+  applyBtnText:     { color:C.greenDark, fontSize:14, fontWeight:"800" },
+  fixBtn:           { marginTop:14, paddingTop:14, borderTopWidth:1, borderTopColor:C.border, alignItems:"center" },
+  fixBtnText:       { color:C.text3, fontSize:13, fontWeight:"700" },
+  fixInput:         { backgroundColor:C.bg, borderWidth:1, borderColor:C.border, borderRadius:10, paddingHorizontal:12, paddingVertical:10, color:C.text1, fontSize:14, marginTop:4 },
+  condChip:         { paddingHorizontal:12, paddingVertical:7, borderRadius:16, backgroundColor:C.bg, borderWidth:1, borderColor:C.border },
+  condChipActive:   { backgroundColor:C.green, borderColor:C.green },
+  condChipText:     { color:C.text3, fontSize:12, fontWeight:"700" },
+  condChipTextActive:{ color:C.greenDark },
+  cancelFixBtn:     { paddingHorizontal:16, alignItems:"center", justifyContent:"center", borderRadius:10, borderWidth:1, borderColor:C.border },
+  cancelFixBtnText: { color:C.text3, fontSize:14, fontWeight:"700" } });

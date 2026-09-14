@@ -873,7 +873,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
           {plan!=="free" && plan!=="lifetime" && (
             <TouchableOpacity
               onPress={()=>Linking.openURL("https://apps.apple.com/account/subscriptions")}
-              style={s.cancelBtn}
+              style={s.cancelSubBtn}
             >
               <Text style={s.cancelBtnTxt}>Cancel Subscription</Text>
             </TouchableOpacity>
@@ -1058,7 +1058,12 @@ const s = StyleSheet.create({
   promoCard:         { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:14, padding:16 },
   accountSection:    { marginTop:24, borderTopWidth:1, borderTopColor:C.border, paddingTop:20 },
   accountSectionTitle:{ color:C.text1, fontSize:16, fontWeight:"900", marginBottom:14 },
-  cancelBtn:         { backgroundColor:"#1a0505", borderWidth:1, borderColor:C.red+"50", borderRadius:12, padding:14, alignItems:"center", marginBottom:10 },
+  // Renamed from cancelBtn (BEASTMODE FIX 3, 2026-09-13) - was a duplicate
+  // StyleSheet.create key with Edit-Profile's plain "cancelBtn" above; object-
+  // literal duplicate keys silently let this SECOND definition win for the
+  // whole file, so Edit-Profile's own neutral Cancel button was rendering
+  // with THIS destructive red styling instead of its own.
+  cancelSubBtn:      { backgroundColor:"#1a0505", borderWidth:1, borderColor:C.red+"50", borderRadius:12, padding:14, alignItems:"center", marginBottom:10 },
   cancelBtnTxt:      { color:C.red, fontSize:14, fontWeight:"700" },
   manageBtn:         { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:12, padding:14, alignItems:"center", marginBottom:10 },
   manageBtnTxt:      { color:C.green, fontSize:13, fontWeight:"700" },

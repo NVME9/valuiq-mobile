@@ -16,11 +16,25 @@ interface Props {
 
 const TABS = ["TikTok", "Instagram", "Twitter/X", "Reddit"];
 
+// ONE FEE TABLE (BEASTMODE FIX 2, 2026-09-13): mirrors deal-ai-pro/lib/
+// profitMath.ts's PLATFORM_FEES (can't literally share a module across the
+// two repos - update both if these are ever retuned). Was a hardcoded flat
+// 13% ("sp * 0.87") regardless of platform, so a Poshmark flip (20% fee)
+// showed a profit number here that could visibly disagree with what
+// History/Scanner would show for the exact same real sale.
+const PLATFORM_FEES: Record<string, number> = {
+  eBay: 0.1327, Poshmark: 0.20, Mercari: 0.10, Depop: 0.10,
+  Etsy: 0.065, Whatnot: 0.11, StockX: 0.125, GOAT: 0.095,
+  Facebook: 0.05, OfferUp: 0.0, Amazon: 0.15,
+};
+const PLATFORM_OPTIONS = ["eBay", "Poshmark", "Mercari", "Depop", "Etsy", "Facebook"];
+
 export default function ViralContentScreen({ token, onBack }: Props) {
   const [itemName, setItemName] = useState("");
   const [buyPrice, setBuyPrice] = useState("");
   const [sellPrice, setSellPrice] = useState("");
   const [category, setCategory] = useState("");
+  const [soldPlatform, setSoldPlatform] = useState("eBay");
   const [loading, setLoading] = useState(false);
   const [content, setContent] = useState<any>(null);
   const [tab, setTab] = useState("TikTok");
@@ -29,14 +43,15 @@ export default function ViralContentScreen({ token, onBack }: Props) {
   async function generate() {
     if (!itemName.trim()) { Alert.alert("Add an item", "Enter the item you flipped."); return; }
     const bp = Number(buyPrice) || 0, sp = Number(sellPrice) || 0;
-    const profit = Math.round(sp * 0.87 - bp);
+    const feeRate = PLATFORM_FEES[soldPlatform] ?? 0.13;
+    const profit = Math.round(sp * (1 - feeRate) - bp);
     const roi = bp > 0 ? Math.round((profit / bp) * 100) : 0;
     setLoading(true); setContent(null);
     try {
       const r = await fetch(`${API_BASE}/api/viral-content`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, itemName, profit, roi, buyPrice: bp, sellPrice: sp, platform: "all", category }),
+        body: JSON.stringify({ token, itemName, profit, roi, buyPrice: bp, sellPrice: sp, platform: soldPlatform, category }),
       });
       const d = await r.json();
       if (!d.success) { Alert.alert("Couldn't generate", d.error || "Try again."); }
@@ -84,6 +99,15 @@ export default function ViralContentScreen({ token, onBack }: Props) {
           <View style={s.third}><Text style={s.label}>Sold</Text><TextInput style={s.input} value={sellPrice} onChangeText={setSellPrice} placeholder="145" keyboardType="numeric" placeholderTextColor={C.text4} /></View>
           <View style={s.third}><Text style={s.label}>Category</Text><TextInput style={s.input} value={category} onChangeText={setCategory} placeholder="Clothing" placeholderTextColor={C.text4} /></View>
         </View>
+
+        <Text style={s.label}>Sold on</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+          {PLATFORM_OPTIONS.map((p) => (
+            <TouchableOpacity key={p} style={[s.tab, soldPlatform === p && s.tabActive]} onPress={() => setSoldPlatform(p)}>
+              <Text style={[s.tabTxt, soldPlatform === p && s.tabTxtActive]}>{p}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
 
         <TouchableOpacity style={s.genBtn} onPress={generate} disabled={loading}>
           {loading ? <ActivityIndicator color={C.greenDark} /> : <Text style={s.genTxt}>Generate Content</Text>}

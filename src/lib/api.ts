@@ -210,7 +210,17 @@ export async function updateScan(token: string, id: string, updates: any): Promi
   });
   return r.json();
 }
-export async function rerunScan(token: string, opts: { itemName: string; brand?: string; category?: string; condition?: string; buyPrice?: number; extraDescription?: string; newPhotosBase64?: string[]; }): Promise<any> {
+export async function rerunScan(token: string, opts: {
+  itemName: string; brand?: string; category?: string; condition?: string; buyPrice?: number;
+  extraDescription?: string; newPhotosBase64?: string[];
+  // HISTORY RERUN FIX (2026-09-14): the item's already-known resale value
+  // from the scan being edited. Sent ONLY when there are no new photos (a
+  // pure price/text edit, not a fresh re-scan) - the server pins sellPrice
+  // to this instead of re-deriving it through the oracle/eBay pipeline, so
+  // changing the BUY price can never move the SELL price. See
+  // lib/lensPricing.ts's `identified.pinnedResale` handling server-side.
+  storedResale?: { value: number; low?: number | null; high?: number | null; noFlipMargin?: boolean } | null;
+}): Promise<any> {
   const body: any = {
     userToken: token,
     textInput: `${opts.brand ? opts.brand + " " : ""}${opts.itemName}`,
@@ -226,8 +236,14 @@ export async function rerunScan(token: string, opts: { itemName: string; brand?:
       size: null,
     },
   };
-  if (opts.newPhotosBase64 && opts.newPhotosBase64.length > 0) {
-    body.images = opts.newPhotosBase64.map(b => b.startsWith("data:") ? b : `data:image/jpeg;base64,${b}`);
+  const hasNewPhotos = !!opts.newPhotosBase64 && opts.newPhotosBase64.length > 0;
+  if (hasNewPhotos) {
+    body.images = opts.newPhotosBase64!.map(b => b.startsWith("data:") ? b : `data:image/jpeg;base64,${b}`);
+  } else if (opts.storedResale && Number(opts.storedResale.value) > 0) {
+    // Only pinned on a photo-less edit - new photos mean the user is
+    // deliberately re-evidencing the item, so a fresh resale derivation is
+    // the right call there, not a regression this fix should touch.
+    body.storedResale = opts.storedResale;
   }
   const r = await fetch(`${API_BASE}/api/lens`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
