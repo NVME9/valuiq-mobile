@@ -477,8 +477,10 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
           </View>
         ) : null}
 
-        {/* Everything below is buy-oriented - hidden entirely on a skip
-            verdict, already justified by its one reason in the hero above. */}
+        {/* Buy-oriented ONLY - genuinely depends on there being a cost basis/
+            decision to act on (per-platform PROFIT numbers, sharing a find
+            you've priced). Hidden on a skip verdict, already justified by
+            its one reason in the hero above. */}
         {!isSkip && (
           <>
             <ShareButton compact
@@ -510,33 +512,6 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
               </CollapsibleSection>
             )}
 
-            {(result.authFlags?.length > 0 || result.redFlags?.length > 0) && (
-              <CollapsibleSection title="AUTHENTICITY & RISK" expanded={showAuth} onToggle={() => setShowAuth(v => !v)}>
-                {result.authFlags && result.authFlags.length > 0 && (
-                  <View style={{ marginBottom: result.redFlags?.length ? 12 : 0 }}>
-                    <Text style={[s.infoLabel, { color: C.red, marginBottom: 6 }]}>Authenticity / provenance flags</Text>
-                    {result.authFlags.map((flag: string, i: number) => (
-                      <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
-                        <Text style={{ color: C.red, fontSize: 13 }}>{"•"}</Text>
-                        <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, flex: 1 }}>{flag}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-                {result.redFlags && result.redFlags.length > 0 && (
-                  <View>
-                    <Text style={[s.infoLabel, { color: C.yellow, marginBottom: 6 }]}>Watch out for</Text>
-                    {result.redFlags.map((flag: string, i: number) => (
-                      <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
-                        <Text style={{ color: C.yellow, fontSize: 13 }}>{"•"}</Text>
-                        <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, flex: 1 }}>{flag}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-              </CollapsibleSection>
-            )}
-
             {result.verifyLinks && Object.keys(result.verifyLinks).length > 0 && (
               <CollapsibleSection title="VERIFY PRICES" expanded={showVerify} onToggle={() => setShowVerify(v => !v)}>
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
@@ -548,42 +523,79 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
                 </View>
               </CollapsibleSection>
             )}
-
-            {(result.variantCheck || result.conditionCurve || result.valueAddMoves || result.timing || result.listingTitle) && (
-              <CollapsibleSection title="EXPERT ANALYSIS" expanded={showAnalysis} onToggle={() => setShowAnalysis(v => !v)}>
-                {result.variantCheck ? (
-                  <View style={{ marginBottom: 12 }}>
-                    <Text style={[s.infoLabel, { color: C.green }]}>Variant check {"—"} this matters</Text>
-                    <Text style={s.infoText}>{result.variantCheck}</Text>
-                  </View>
-                ) : null}
-                {result.conditionCurve ? (
-                  <View style={{ marginBottom: 12 }}>
-                    <Text style={s.infoLabel}>Condition &amp; grade value</Text>
-                    <Text style={s.infoText}>{result.conditionCurve}</Text>
-                  </View>
-                ) : null}
-                {result.valueAddMoves ? (
-                  <View style={{ marginBottom: 12 }}>
-                    <Text style={[s.infoLabel, { color: C.green }]}>Value-add moves</Text>
-                    <Text style={s.infoText}>{result.valueAddMoves}</Text>
-                  </View>
-                ) : null}
-                {result.timing ? (
-                  <View style={{ marginBottom: 12 }}>
-                    <Text style={s.infoLabel}>Where &amp; when to sell</Text>
-                    <Text style={s.infoText}>{result.timing}</Text>
-                  </View>
-                ) : null}
-                {result.listingTitle ? (
-                  <View>
-                    <Text style={s.infoLabel}>Suggested listing title</Text>
-                    <Text style={s.infoText}>{result.listingTitle}</Text>
-                  </View>
-                ) : null}
-              </CollapsibleSection>
-            )}
           </>
+        )}
+
+        {/* EXPERT DEPTH (2026-09-14 fix) - was inside the {!isSkip} block
+            above, so a normal price-less scan (isSkip forced true just to
+            reuse the skip tier's "no big hero" layout, NOT a real bad
+            verdict - see the outcome ternary further up) hid this
+            unconditionally, even though authFlags/conditionCurve/
+            variantCheck/redFlags/valueAddMoves are category-specific expert
+            content about what the item IS, not about whether you've decided
+            to buy it. This is Specialty's entire differentiation from the
+            main Scanner - it must show whenever the appraise step actually
+            produced it, independent of verdict tier or priceEntered. */}
+        {(result.authFlags?.length > 0 || result.redFlags?.length > 0) && (
+          <CollapsibleSection title="AUTHENTICITY & RISK" expanded={showAuth} onToggle={() => setShowAuth(v => !v)}>
+            {result.authFlags && result.authFlags.length > 0 && (
+              <View style={{ marginBottom: result.redFlags?.length ? 12 : 0 }}>
+                <Text style={[s.infoLabel, { color: C.red, marginBottom: 6 }]}>Authenticity / provenance flags</Text>
+                {result.authFlags.map((flag: string, i: number) => (
+                  <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
+                    <Text style={{ color: C.red, fontSize: 13 }}>{"•"}</Text>
+                    <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, flex: 1 }}>{flag}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            {result.redFlags && result.redFlags.length > 0 && (
+              <View>
+                <Text style={[s.infoLabel, { color: C.yellow, marginBottom: 6 }]}>Watch out for</Text>
+                {result.redFlags.map((flag: string, i: number) => (
+                  <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
+                    <Text style={{ color: C.yellow, fontSize: 13 }}>{"•"}</Text>
+                    <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, flex: 1 }}>{flag}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </CollapsibleSection>
+        )}
+
+        {(result.variantCheck || result.conditionCurve || result.valueAddMoves || result.timing || result.listingTitle) && (
+          <CollapsibleSection title="EXPERT ANALYSIS" expanded={showAnalysis} onToggle={() => setShowAnalysis(v => !v)}>
+            {result.variantCheck ? (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={[s.infoLabel, { color: C.green }]}>Variant check {"—"} this matters</Text>
+                <Text style={s.infoText}>{result.variantCheck}</Text>
+              </View>
+            ) : null}
+            {result.conditionCurve ? (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={s.infoLabel}>Condition &amp; grade value</Text>
+                <Text style={s.infoText}>{result.conditionCurve}</Text>
+              </View>
+            ) : null}
+            {result.valueAddMoves ? (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={[s.infoLabel, { color: C.green }]}>Value-add moves</Text>
+                <Text style={s.infoText}>{result.valueAddMoves}</Text>
+              </View>
+            ) : null}
+            {result.timing ? (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={s.infoLabel}>Where &amp; when to sell</Text>
+                <Text style={s.infoText}>{result.timing}</Text>
+              </View>
+            ) : null}
+            {result.listingTitle ? (
+              <View>
+                <Text style={s.infoLabel}>Suggested listing title</Text>
+                <Text style={s.infoText}>{result.listingTitle}</Text>
+              </View>
+            ) : null}
+          </CollapsibleSection>
         )}
 
         <TouchableOpacity
