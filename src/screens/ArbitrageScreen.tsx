@@ -14,35 +14,22 @@ export default function ArbitrageScreen({ token, plan, onNavigate, onBack }: Pro
   const [results, setResults] = useState<any[]>([]);
   const [summary, setSummary] = useState("");
   const [error, setError] = useState("");
-  const [debug, setDebug] = useState("");
+  const [noResultNote, setNoResultNote] = useState("");
 
   const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
 
   async function search() {
     if (!query.trim()) { setError("Enter what to search for."); return; }
-    setLoading(true); setError(""); setResults([]); setDebug("");
+    setLoading(true); setError(""); setResults([]); setNoResultNote("");
     try {
-      const started = Date.now();
       const r = await fetch(`${API_BASE}/api/arbitrage`, {
         method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({ userToken:token, query:query.trim(), maxBuy:Number(maxBuy)||0 }) });
-      const raw = await r.text();
-      let d:any = null; let parseErr = "";
-      try { d = JSON.parse(raw); } catch(pe:any) { parseErr = pe.message; }
-      const ms = Date.now() - started;
-      setDebug(
-        `HTTP ${r.status} in ${ms}ms\n` +
-        `base=${API_BASE}\n` +
-        `parseErr=${parseErr||"none"}\n` +
-        `success=${d?d.success:"n/a"}\n` +
-        `error=${d?.error||"none"}\n` +
-        `results=${Array.isArray(d?.results)?d.results.length:"n/a"}\n` +
-        `body[0..300]=${raw.slice(0,300)}`
-      );
-      if (!d) throw new Error("Non-JSON response (see debug)");
+      const d = await r.json();
       if (!d.success) throw new Error(d.error||"Search failed");
       setResults(d.results||[]);
       setSummary(d.summary||"");
+      setNoResultNote((d.results&&d.results.length) ? "" : (d.note || d.noFlipMargin ? (d.note||"No arbitrage opportunity found for this search.") : "No results found. Try a different search."));
     } catch(e:any) { setError(e.message); }
     setLoading(false);
   }
@@ -77,7 +64,7 @@ export default function ArbitrageScreen({ token, plan, onNavigate, onBack }: Pro
           </View>
         )}
 
-        {debug?<View style={{backgroundColor:"#111",padding:10,borderRadius:8,marginBottom:12}}><Text style={{color:"#0f0",fontFamily:"monospace",fontSize:11}} selectable>{debug}</Text></View>:null}
+        {noResultNote?<View style={s.summaryCard}><Text style={s.summaryText}>{noResultNote}</Text></View>:null}
         {summary?<View style={s.summaryCard}><Text style={s.summaryText}>{summary}</Text></View>:null}
 
         {results.map((item:any,i:number)=>(
