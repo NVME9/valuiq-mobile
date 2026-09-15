@@ -51,7 +51,7 @@ export default function ArbitrageScreen({ token, plan, onNavigate, onBack }: Pro
           <View style={{gap:12,marginBottom:20}}>
             {error?<View style={s.errBox}><Text style={s.errText}>{error}</Text></View>:null}
             <View><Text style={s.label}>Search for</Text>
-              <TextInput style={s.input} value={query} onChangeText={setQuery} placeholder="e.g. Nike, Dunk Low, Stanley, Cup, KitchenAid" placeholderTextColor={C.text4} onSubmitEditing={search}/>
+              <TextInput style={s.input} value={query} onChangeText={setQuery} placeholder="e.g. Nike Dunk Low, Stanley Cup, KitchenAid Mixer" placeholderTextColor={C.text4} onSubmitEditing={search}/>
             </View>
             <View><Text style={s.label}>Max buy price (optional)</Text>
               <TextInput style={s.input} value={maxBuy} onChangeText={setMaxBuy} placeholder="$50" placeholderTextColor={C.text4} keyboardType="decimal-pad"/>
@@ -68,7 +68,13 @@ export default function ArbitrageScreen({ token, plan, onNavigate, onBack }: Pro
           <View key={i} style={[s.resultCard,{borderColor:item.profit>0?C.green+"30":C.border}]}>
             <Text style={s.resultName}>{item.title||item.name}</Text>
             <View style={{flexDirection:"row",gap:8,marginTop:8,marginBottom:8}}>
-              {[["Buy","$"+Math.round(item.buyPrice||0),C.yellow],["Sell","$"+Math.round(item.sellPrice||0),C.text1],["Profit","$"+Math.round(item.profit||0),item.profit>0?C.green:C.red]].map(([l,v,c])=>(
+              {/* 2026-09-15 fix: was item.sellPrice, a field the backend
+                  never sets - /api/arbitrage's result object only carries
+                  this number as typicalSellPrice (also aliased soldAvg/
+                  avg_sold_price), so this always rendered $0 regardless of
+                  the real (non-zero) value profit was correctly computed
+                  from. See app/api/arbitrage/route.ts's results.push(). */}
+              {[["Buy","$"+Math.round(item.buyPrice||0),C.yellow],["Sell","$"+Math.round(item.typicalSellPrice||0),C.text1],["Profit","$"+Math.round(item.profit||0),item.profit>0?C.green:C.red]].map(([l,v,c])=>(
                 <View key={l as string} style={s.miniStat}>
                   <Text style={s.miniStatLabel}>{l as string}</Text>
                   <Text style={[s.miniStatVal,{color:c as string}]}>{v as string}</Text>
