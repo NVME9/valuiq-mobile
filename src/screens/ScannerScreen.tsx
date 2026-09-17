@@ -14,12 +14,13 @@ import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareCard from "../components/ShareCard";
-import { API_BASE, scanImage, scanBarcode , getProfitOracle, shareWin } from "../lib/api";
+import { API_BASE, scanImage, scanBarcode , getProfitOracle, shareWin, refineScan } from "../lib/api";
 import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notifications";
 import StagedProgress from "../components/StagedProgress";
 import * as Notifications from "expo-notifications";
 import { matchSpecialtyCategory } from "./SpecialtyScreen";
 import ProfitFlexHero from "../components/ProfitFlexHero";
+import FlashHighlight from "../components/FlashHighlight";
 import { classifyOutcome, ROI_BUY_MIN, PROFIT_JUDGMENT_FLOOR } from "../lib/outcomeTier";
 import LogSaleModal from "../components/LogSaleModal";
 import { toPendingScan } from "../lib/saleCapture";
@@ -100,8 +101,32 @@ function CollapsibleSection({ title, expanded, onToggle, children }: { title: st
   );
 }
 
+// NAV SPEED FIX (2026-09-11): useCameraPermissions() starts null on EVERY
+// mount - there's no cache of its own, and since this whole app fully
+// unmounts/remounts every screen on every tab switch (see App.tsx's
+// SCREENS[screen] render), that meant a full-screen blocking spinner on
+// EVERY single visit to the Scan tab, even when permission was granted
+// seconds ago on the last visit. Module-level (not React state), so it
+// survives this component's unmount/remount - resets only on a fresh JS
+// process (app cold start), which is exactly when re-verifying is correct
+// anyway. This is a PURELY OPTIMISTIC skip of the blocking wait below, never
+// a substitute for the real permission object: if OS permission was
+// actually revoked since it was last granted (backgrounded, revoked in
+// Settings, foregrounded), useCameraPermissions() still resolves the truth
+// on this mount and the denied-prompt gate below still fires correctly the
+// moment it does - see the two gates right after the hook.
+let cameraPermissionKnownGranted = false;
+
 export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, onNavigate, onLogout, firstScanNudge, onDismissFirstScanNudge }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
+  // Mirrors permission.granted into the module-level cache the instant it's
+  // known true, so the NEXT mount (next visit to this tab) can skip the
+  // blocking wait below. Never writes `false`/revoked here - a later
+  // genuine revoke is caught by the denied-prompt gate itself re-evaluating
+  // once `permission` resolves this mount, not by this cache.
+  useEffect(() => {
+    if (permission?.granted) cameraPermissionKnownGranted = true;
+  }, [permission?.granted]);
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>("camera");
   const [mode, setMode] = useState<"photo" | "barcode">("photo");
@@ -133,6 +158,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // edits (see the results-step render below).
   const [resultCondition, setResultCondition] = useState("");
   const [result, setResult] = useState<any>(null);
+  // TWO-STAGE SCAN RENDER (2026-09-11): bumped once per successful
+  // background /refine merge (never on a normal price/condition edit) -
+  // passed to ProfitFlexHero/the range card as flashSeq so the updated
+  // numbers visibly "sharpen" in place instead of silently swapping. See
+  // maybeRefineInBackground below and app/api/lens/refine/route.ts.
+  const [refineSeq, setRefineSeq] = useState(0);
   const [oracle, setOracle] = useState<any>(null);
   // Soft notification ask (never fire Apple's cold prompt un-primed)
   const [pendingCheckIn, setPendingCheckIn] = useState<{scanId:string; itemName:string}|null>(null);
@@ -285,6 +316,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // or sit stale on screen while the new one is in flight.
     setBuyPrice("");
     setResultCondition("");
+    let photosForRefine: string[] = [];
     try {
       let d: any;
       if (barcode) {
@@ -294,6 +326,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         if (!p.length && !description && !brandInput) {
           setStep("review"); return;
         }
+        photosForRefine = p;
         // No price is ever collected pre-scan any more - the scan itself is
         // what reads the price tag (retailPriceRead). See the results step
         // below for where a price is now entered/edited.
@@ -305,6 +338,31 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       }
       if (!d.success) throw new Error(d.error || "Analysis failed");
       setResult(d);
+      setRefineSeq(0);
+      // TWO-STAGE SCAN RENDER (2026-09-11): d IS the final, complete result
+      // already (identify now runs allowSearch:false on this path - see
+      // app/api/lens/route.ts) - this fires the deferred, search-enabled
+      // refinement ONLY when the scan's own needsRefine flag says the moat
+      // didn't confirm the price and the item is worth checking (see that
+      // flag's comment server-side). Fire-and-forget, un-awaited - never
+      // blocks the result from showing, never shows a spinner, and a
+      // failure/timeout is silently swallowed by refineScan's caller here:
+      // the card already stands on stage-1's numbers either way.
+      if (!barcode && d.needsRefine && d.id && photosForRefine.length) {
+        // Number(d.retailPriceRead), not the buyPrice state var - buyPrice
+        // was just cleared above (setBuyPrice("")) and won't reflect THIS
+        // scan's price until the setBuyPrice call below commits, so reading
+        // it here would race a stale/empty value. d.retailPriceRead is the
+        // same number that seeding is about to write into state.
+        refineScan(token, d.id, photosForRefine, (brandInput ? "Brand: " + brandInput + ". " : "") + description, Number(d.retailPriceRead) || 0, plan)
+          .then((refined) => {
+            if (refined?.success && refined?.updated) {
+              setResult((prev: any) => (prev && prev.id === d.id ? { ...prev, ...refined } : prev));
+              setRefineSeq((s) => s + 1);
+            }
+          })
+          .catch(() => {});
+      }
       // PRICE-ON-RESULTS / CONDITION DROPDOWN (items 8/9): seed both from
       // what THIS scan actually found - a detected tag price, and the
       // model's own condition read - editable from here, never re-collected
@@ -343,8 +401,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     }
   }
 
-  if (!permission) return <View style={s.center}><ActivityIndicator color={C.green} size="large" /></View>;
-  if (!permission.granted) return (
+  // Blocks ONLY while permission is unresolved AND we have no cached reason
+  // to expect "granted" - once cameraPermissionKnownGranted is true, this
+  // falls through immediately (before this mount's own permission check has
+  // even resolved) straight to the camera render below. The denied-prompt
+  // gate right after is unaffected either way - it only fires once
+  // `permission` is actually known, whatever it turns out to say.
+  if (!permission && !cameraPermissionKnownGranted) {
+    return <View style={s.center}><ActivityIndicator color={C.green} size="large" /></View>;
+  }
+  if (permission && !permission.granted) return (
     <SafeAreaView style={s.safe}>
       <View style={s.center}>
         <Text style={{ fontSize: 48, marginBottom: 16 }}></Text>
@@ -454,6 +520,34 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const hasNoData      = !hasGoodData && !hasLimitedData;
     const specialtyMatch  = matchSpecialtyCategory(result.category, result.itemName || result.item_name);
 
+    // ONE RESALE REALITY (2026-09-17): tier is a real top-level field on
+    // result.crowdVerdict (lib/crowdVerdict.ts's CrowdVerdict interface in
+    // deal-ai-pro - "strong"|"limited"|"thin"), not something regexed out
+    // of the label - traced call!=="UNKNOWN" against tier across all 4
+    // return paths in crowdVerdict(): tier==="thin" hardcodes call:
+    // "UNKNOWN" in both its return paths, and the two non-thin paths
+    // require n>=8, which fetchClusterStats guarantees a non-null
+    // sellThroughPct for, which callFor() requires to ever return anything
+    // BUT "UNKNOWN" - so tier!=="thin" and call!=="UNKNOWN" are exactly
+    // the same condition, proven, not assumed. Reading tier directly below
+    // instead of re-deriving it. When true, the crowd line becomes the ONE
+    // resale number this screen shows - both AI-range renderings
+    // (standalone banner below, and the no-price outcome.copy mention
+    // further down) are suppressed so there's never two competing resale
+    // realities on screen at once.
+    const crowdHasRealData = result?.crowdVerdict?.tier === "strong" || result?.crowdVerdict?.tier === "limited";
+    // ONE SELL PRICE (2026-09-17): crowdHasRealData (tier strong/limited)
+    // is NOT sufficient to gate the price swap below - tier only requires
+    // n>=8 RESOLVED outcomes, which a cluster can clear entirely on PASSED
+    // rows with zero actually sold (a real, honest 0% sell-through), in
+    // which case medianSoldPrice is null (median of an empty sold-set).
+    // That state must fall back to the AI estimate for the actual sell
+    // price - crowdMedianAvailable is the narrower, correct gate for the
+    // price/math swap; crowdHasRealData remains what it was (gates the
+    // crowd verdict BOX itself, which has real sell-through/sample-size
+    // content to show even with a null median).
+    const crowdMedianAvailable = result?.crowdVerdict?.medianSoldPrice != null && Number(result.crowdVerdict.medianSoldPrice) > 0;
+
     // ONE ORACLE SOURCE (2026-08-24): the scan result card now reads every
     // Oracle-derived number from `result` itself - lens/route.ts already
     // queries the SAME community moat internally (Wave 1) and embeds its
@@ -515,7 +609,31 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       ? enteredBp
       : (Number(result.retailPriceRead) > 0 ? Number(result.retailPriceRead) : null);
 
-    const sellPriceForProfit = adjustedResaleValue || Number(result.sellPrice) || 0;
+    // ONE CANONICAL SELL PRICE (2026-09-17, extended 2026-09-17): the
+    // single sell-price figure every downstream number (fees, heroProfit,
+    // heroRoi, maxBuy, the "sell price" stat, the estimate-tier hero/copy,
+    // and the Profit Oracle priceData box's visibility) derives from -
+    // rounded to the dollar ONCE, here, so no two displays of the same
+    // underlying number can independently round to different figures (the
+    // "$6 profit / 138% ROI don't cross-check" bug).
+    //
+    // ONE RESALE REALITY, PART 2: when crowdMedianAvailable, this is now
+    // the crowd's real median sold price - NOT the AI/Oracle estimate -
+    // deliberately NOT multiplied by conditionFactor. conditionFactor
+    // exists to adjust a MODEL'S GUESS for condition it can't verify from
+    // a raw catalog number; the crowd median is not a guess, it's an
+    // aggregate of real transactions, and applying a made-up multiplier
+    // to a real number would misrepresent it as more precise than it is.
+    // Only the AI-estimate fallback path (crowdMedianAvailable false)
+    // keeps the condition adjustment. This is also why the card previously
+    // showed three different sell prices at once ($10 AI estimate driving
+    // profit/ROI, "avg $12" from the separate Profit Oracle priceData box,
+    // "$18 median" from the crowd box) - all three are now gated to show
+    // exactly one at a time, matching whichever number the math actually
+    // used.
+    const sellPriceForProfit = crowdMedianAvailable
+      ? Math.round(Number(result.crowdVerdict.medianSoldPrice))
+      : Math.round(adjustedResaleValue || Number(result.sellPrice) || 0);
     // LOCAL RECOMPUTE (2026-09-10, items 8/9): mirrors lib/profitMath.ts's
     // computeProfit exactly - fees = round(sp*feeRate*100)/100, netProfit =
     // round((sp-fees-cost)*100)/100 - so editing price or condition here
@@ -528,9 +646,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const heroProfit = enteredBp > 0 ? Math.round((sellPriceForProfit - localFees - enteredBp) * 100) / 100 : 0;
 
     // MAX-BUY LOCAL RECOMPUTE (2026-09-10, Fix 1): mirrors deal-ai-pro/
-    // lib/profitMath.ts's computeMaxBuy, but driven by adjustedResaleValue
-    // (the CURRENT condition-adjusted resale, same input heroProfit above
-    // uses) instead of the frozen result.buyTarget the server computed once
+    // lib/profitMath.ts's computeMaxBuy, but driven by sellPriceForProfit
+    // (the CURRENT condition-adjusted, canonically-rounded resale, same
+    // input heroProfit above uses) instead of the frozen result.buyTarget
+    // the server computed once
     // at scan time. REPLACES reading result.buyTarget directly - that froze
     // the ceiling at whatever condition/price existed AT SCAN TIME, so
     // editing price or condition here moved the hero/ROI/profit but left
@@ -543,11 +662,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // verdict's BUY-tier floors (ROI_BUY_MIN% after-fees ROI, AND the
     // PROFIT_JUDGMENT_FLOOR dollar floor) against the current resale -
     // whichever constraint is tighter wins, same dual-constraint shape as
-    // computeMaxBuy.
-    const netAfterFeesAtCeiling = adjustedResaleValue * (1 - feeRate);
+    // computeMaxBuy. Reads sellPriceForProfit (the ONE canonical rounded
+    // sell price, see above), not adjustedResaleValue directly, so the
+    // ceiling this quotes is built from the exact same number the profit/
+    // ROI/stat tile all use - never a different, unrounded figure.
+    const netAfterFeesAtCeiling = sellPriceForProfit * (1 - feeRate);
     const roiCeilingBuy = netAfterFeesAtCeiling / (1 + ROI_BUY_MIN / 100);
     const profitFloorBuy = netAfterFeesAtCeiling - PROFIT_JUDGMENT_FLOOR;
-    const maxBuy = adjustedResaleValue > 0
+    const maxBuy = sellPriceForProfit > 0
       ? Math.max(1, Math.floor(Math.min(roiCeilingBuy, profitFloorBuy)))
       : null;
     const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
@@ -623,27 +745,35 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           tier: "estimate" as const,
           emoji: "🏷️",
           label: "ESTIMATE",
-          copy: adjustedResaleLow != null && adjustedResaleHigh != null
-            ? `Sells for about $${adjustedResaleValue} (range $${adjustedResaleLow}-$${adjustedResaleHigh}). Enter what you paid above for your real profit and verdict.`
-            : `Sells for about $${adjustedResaleValue}. Enter what you paid above for your real profit and verdict.`,
+          // ONE RESALE REALITY (2026-09-17): the range clause only ever
+          // appears in THIS branch (priced tiers' copy comes from
+          // outcomeTier.ts's own strings, which never mention a range) -
+          // when crowdMedianAvailable (NOT the broader crowdHasRealData -
+          // see the comment above crowdMedianAvailable's definition) the
+          // crowd line below carries the real resale number, so this
+          // reuses the existing no-range fallback instead of stating the
+          // AI range a second time. Not left blank - ProfitFlexHero
+          // renders this unconditionally for every non-skip tier, so it
+          // always needs SOME sentence here.
+          // ONE CANONICAL SELL PRICE: reads sellPriceForProfit, not the raw
+          // adjustedResaleValue - already resolves to the crowd median when
+          // crowdMedianAvailable (see sellPriceForProfit's definition), so
+          // the no-price "sells for about $X" figure matches the exact
+          // number the "sell price" stat and maxBuy ceiling use once a
+          // price IS entered, instead of a separately-rounded one.
+          copy: (adjustedResaleLow != null && adjustedResaleHigh != null && !crowdMedianAvailable)
+            ? `Sells for about $${sellPriceForProfit} (range $${adjustedResaleLow}-$${adjustedResaleHigh}). Enter what you paid above for your real profit and verdict.`
+            : `Sells for about $${sellPriceForProfit}. Enter what you paid above for your real profit and verdict.`,
           accent: C.yellow,
           adjustedROI: 0,
           daysUsed: 0,
         };
     const isSkip = outcome.tier === "skip";
-    // MIDDLE BAND (2026-09-10): a "thin margin — judgment call" verdict
-    // (outcomeTier.ts's new "thin" tier) is explicitly NOT a confident
-    // verdict - it exists specifically for the case where the app itself
-    // isn't sure. isSkip alone (used everywhere else on this screen for
-    // skip-vs-buy LAYOUT - a thin verdict still gets the buy-oriented
-    // layout, share/log-sale actions, etc.) doesn't capture that; this is
-    // ONLY for the hedge-banner gate below, which cares about confidence,
-    // not layout.
-    const isConfidentVerdict = outcome.tier === "hot" || outcome.tier === "solid";
     // Hero number: real profit once a price exists, the estimate itself
     // before that - ProfitFlexHero just renders whatever it's handed under
     // `profitLabel`, no component change needed for this to work.
-    const heroDisplayValue = enteredBp > 0 ? heroProfit : adjustedResaleValue;
+    // Reads sellPriceForProfit (canonical, rounded), not adjustedResaleValue.
+    const heroDisplayValue = enteredBp > 0 ? heroProfit : sellPriceForProfit;
 
     // WHICH PLATFORM (2026-08-25): bestPlatform drives the actual netProfit/
     // roi shown above (lens/route.ts picks the platform with the lowest fee,
@@ -675,7 +805,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // agreeingCount). Never re-derived from dataQuality/crowdConfidence
     // tiers here, so this screen can't drift from what the web scanner or
     // ShareCard say about the identical scan.
-    const dataPhrase = result.agreementBadge || "Based on market estimate";
+    // DECLUTTER (2026-09-16): only prefix with agreementBadge when it's a
+    // REAL, non-generic signal - the old unconditional dataPhrase (which
+    // fell back to "Based on market estimate") repeated the exact same
+    // caveat this card already states once in the badge/tag and once more
+    // in footNote below. Dropping the generic fallback here, not the real
+    // value - a genuine "confirmed by N real sales" agreementBadge is live
+    // information, not clutter, and still leads this line when present.
+    const maxBuyPrefix = result.agreementBadge ? `${result.agreementBadge}. ` : "";
     // The claim must match the number: maxBuy (recomputed above off the
     // CURRENT condition-adjusted resale, not a frozen scan-time value) is
     // the price where this clears the verdict's own BUY floor - so it's
@@ -684,14 +821,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const maxBuyReasoning = maxBuy == null ? "" : (
       enteredBp > 0
         ? (enteredBp <= maxBuy
-            ? `${dataPhrase}. You paid $${enteredBp} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
-            : `${dataPhrase}. You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
-        : `${dataPhrase}. Pay $${maxBuy} or less to make this a real flip (≥${ROI_BUY_MIN}% ROI, ≥$${PROFIT_JUDGMENT_FLOOR} profit after fees).`
+            ? `${maxBuyPrefix}You paid $${enteredBp} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
+            : `${maxBuyPrefix}You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
+        : `${maxBuyPrefix}Pay $${maxBuy} or less to make this a real flip (≥${ROI_BUY_MIN}% ROI, ≥$${PROFIT_JUDGMENT_FLOOR} profit after fees).`
     );
 
+    // DECLUTTER (2026-09-16): "● ESTIMATE" here duplicates the tier badge
+    // above ONLY in the specific state where that badge ALSO says ESTIMATE
+    // (no price entered yet, tier:"estimate") AND the data itself is
+    // unconfirmed - both true at once is the redundant case. Once a price
+    // is entered the badge becomes BUY/SKIP/etc. and this tag becomes a
+    // genuinely different, useful signal ("this verdict rests on estimated
+    // data") - so the suppression is scoped to enteredBp<=0, not blanket.
     const dataTag = result.confirmedByMoat
       ? (result.agreeingCount >= 30 ? "● REAL DATA" : "● REAL DATA · SMALL SAMPLE")
-      : "● ESTIMATE";
+      : (enteredBp > 0 ? "● ESTIMATE" : undefined);
     const dataTagColor = result.confirmedByMoat
       ? (result.agreeingCount >= 30 ? C.green : C.yellow)
       : C.text4;
@@ -705,7 +849,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // would be exactly the "two numbers disagree" bug this app has fixed
     // elsewhere - a condition edit must move both together.
     const secondaryStats = [
-      { label: "sell price", value: sellPriceForProfit > 0 ? "$" + Math.round(sellPriceForProfit) : "—" },
+      { label: "sell price", value: sellPriceForProfit > 0 ? "$" + sellPriceForProfit : "—" },
       { label: "ROI", value: heroRoi ? heroRoi + "%" : "—" },
       { label: "to sell", value: oracleDaysTxt },
     ];
@@ -758,52 +902,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           {/* - PROFIT (only when we have data) - */}
           {!hasNoData && (
             <>
-              {/* FIX 4 (2026-09-10): reorder so the verdict/result card and
-                  the price field are the HEROES - top of the page, above
-                  the fold, visible without scrolling. This used to sit
-                  below the estimate banner and the price/condition inputs,
-                  burying the actual answer under the inputs that produce
-                  it. Order is now: verdict/result card, price field,
-                  condition, then everything else (data-confidence banner,
-                  range card, sold/reminder rows). THE hero: verdict +
-                  profit + max-buy (with reasoning) + key stats, reconciled
-                  into one card instead of a separate verdict card stacked
-                  on a separate Profit Oracle card. outcome (classifyOutcome)
-                  is the single source of truth for buy-vs-skip - nothing
-                  else on this screen computes or shows a different
-                  verdict. */}
-              <ProfitFlexHero
-                outcome={heroOutcome}
-                itemName={result.itemName || result.item_name || "Unknown Item"}
-                categoryLine={categoryLine}
-                photoBase64={photos[0]}
-                onEdit={()=>{
-                  // Deliberately NOT clearing result here - the review screen
-                  // never reads it, and keeping it around is what lets that
-                  // screen's back button tell "editing an existing result"
-                  // apart from "starting a fresh scan" and return to it.
-                  setDescription(result.itemName||"");
-                  setStep("review");
-                }}
-                isSkip={isSkip}
-                heroProfit={heroDisplayValue}
-                profitLabel={enteredBp > 0 ? profitLabel : "estimated sell price"}
-                maxBuy={maxBuy}
-                maxBuyReasoning={maxBuyReasoning}
-                dataTag={dataTag}
-                dataTagColor={dataTagColor}
-                secondaryStats={secondaryStats}
-                footNote={footNote}
-                skipDetail={skipDetail}
-              />
-
-              {/* PRICE-ON-RESULTS (2026-09-10, item 8): price now lives
-                  here, populated the instant the scan returns - the scan is
-                  what reads any price tag, so it genuinely can't precede
-                  it. Editing re-runs the verdict LOCALLY (see the
+              {/* REORDER (2026-09-16): price now renders FIRST - the
+                  editable price input is the actual top-of-screen content,
+                  above the fold, no scroll. The 2026-09-10 FIX 4 reorder
+                  (below) had put the verdict card first instead, which left
+                  the "Enter what you paid above" copy (in the no-price
+                  outcome branch above) pointing at a price field that no
+                  longer rendered above it. Moving price back to the top
+                  makes "above" literally true again without touching that
+                  string. Editing re-runs the verdict LOCALLY (see the
                   adjustedResale / heroProfit / outcome computation above)
                   - no new LLM call, no network round trip, instant. */}
-              <Text style={[s.priceLabel, { marginTop: 16 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+              <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
                 {Number(result.retailPriceRead) > 0 ? "Price (from a detected tag)" : "What you paid (optional)"}
               </Text>
               <View style={s.priceFieldWrap}>
@@ -822,6 +932,119 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   ? "Read off a price tag in your photo — edit if it's wrong."
                   : "No price tag detected — enter what you paid to see your real profit and verdict."}
               </Text>
+
+              {/* THE hero: verdict + profit + max-buy (with reasoning) + key
+                  stats, reconciled into one card instead of a separate
+                  verdict card stacked on a separate Profit Oracle card.
+                  outcome (classifyOutcome) is the single source of truth for
+                  buy-vs-skip - nothing else on this screen computes or shows
+                  a different verdict. The marginTop wrapper replaces the
+                  price label's old top margin - same gap, now sitting
+                  between price and this card instead of above the label. */}
+              <View style={{ marginTop: 16 }}>
+                <ProfitFlexHero
+                  outcome={heroOutcome}
+                  itemName={result.itemName || result.item_name || "Unknown Item"}
+                  categoryLine={categoryLine}
+                  photoBase64={photos[0]}
+                  onEdit={()=>{
+                    // Deliberately NOT clearing result here - the review screen
+                    // never reads it, and keeping it around is what lets that
+                    // screen's back button tell "editing an existing result"
+                    // apart from "starting a fresh scan" and return to it.
+                    setDescription(result.itemName||"");
+                    setStep("review");
+                  }}
+                  isSkip={isSkip}
+                  heroProfit={heroDisplayValue}
+                  profitLabel={enteredBp > 0 ? profitLabel : "estimated sell price"}
+                  maxBuy={maxBuy}
+                  maxBuyReasoning={maxBuyReasoning}
+                  dataTag={dataTag}
+                  dataTagColor={dataTagColor}
+                  secondaryStats={secondaryStats}
+                  footNote={footNote}
+                  skipDetail={skipDetail}
+                  flashSeq={refineSeq}
+                />
+              </View>
+
+              {/* ONE RESALE REALITY (2026-09-17, split into two
+                  independent gates 2026-09-17): this used to be a single
+                  crowdHasRealData ? crowdBox : aiRangeBanner ternary - but
+                  crowdHasRealData (tier strong/limited) and
+                  crowdMedianAvailable (a real, positive median to actually
+                  price off) can diverge: a strong-tier cluster with n>=8
+                  resolved outcomes and ZERO sold (honest 0% sell-through)
+                  has crowdHasRealData=true but no median at all. In that
+                  state the crowd box (below) correctly shows the
+                  sell-through warning with NO dollar figure of its own
+                  (medianSoldPrice null skips that clause entirely - see
+                  crowdBits), and the AI range banner (further below) is
+                  the ONLY $ figure on screen, matching what the math
+                  actually falls back to (sellPriceForProfit's
+                  crowdMedianAvailable branch, see above) - not a
+                  disagreement, since only one of the two ever states a
+                  price. The two normal cases stay exactly one-box-only:
+                  real median -> crowd box (with its $ line) only, AI
+                  range gated off; thin -> AI range only, crowd box gated
+                  off (crowdHasRealData false). */}
+              {crowdHasRealData ? (() => {
+                const cv = result.crowdVerdict;
+                const crowdBits: string[] = [];
+                if (cv.sellThroughPct != null) {
+                  crowdBits.push(`${cv.sellThroughPct}% of these actually sold` + (cv.medianDaysToSale != null ? `, in ~${cv.medianDaysToSale}d` : ""));
+                }
+                if (cv.medianSoldPrice != null) crowdBits.push(`$${cv.medianSoldPrice} median`);
+                const crowdHeadline = (cv.scope === "category" ? "Category trend — " : "") + crowdBits.join(" — ");
+                const crowdCredential = `from ${cv.sampleSize} real reseller sales`;
+                const disagrees = (outcome.label === "HOT BUY" || outcome.label === "BUY") && cv.call === "PASS";
+                // CROWD-OWN COLOR (2026-09-17): this box's tint follows
+                // cv.call, NOT outcome.accent (the ROI verdict's color,
+                // still used everywhere else on this card, including the
+                // AI-range fallback below) - so the color always agrees
+                // with the message actually printed inside THIS box. A
+                // crowd PASS is red here even when the ROI badge above is
+                // green BUY - that color disagreement between the two
+                // boxes IS the signal (see the disagrees branch), not a
+                // bug to reconcile.
+                const crowdAccent = cv.call === "BUY" ? C.green : cv.call === "PASS" ? C.red : C.yellow;
+                return (
+                  <View style={[s.rangeBanner, { backgroundColor: crowdAccent + "1a", borderColor: crowdAccent + "55" }]}>
+                    <Text>{"👥"}</Text>
+                    <FlashHighlight flashSeq={refineSeq}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: crowdAccent, fontSize: 13, fontWeight: "800", marginBottom: 2 }}>
+                          {disagrees ? "⚠️ but real resellers move these slowly" : crowdHeadline}
+                        </Text>
+                        <Text style={s.rangeBannerSub}>{disagrees ? `${crowdHeadline} — ${crowdCredential}` : crowdCredential}</Text>
+                      </View>
+                    </FlashHighlight>
+                  </View>
+                );
+              })() : null}
+
+              {/* AI range banner - gated on !crowdMedianAvailable (NOT
+                  !crowdHasRealData - see the comment above): shows
+                  whenever the math is actually using the AI/Oracle
+                  estimate, whether that's because tier is thin OR because
+                  it's the 0-sold strong-tier edge case above. Part 1/5:
+                  identify's retail-arbitrage read, only shown when there's
+                  a price to compare against the resale range, never
+                  invented. Reads outcome.tier/label/emoji/accent directly
+                  - the SAME OutcomeTierInfo the verdict card renders (FIX
+                  3, 2026-09-10) - so this can't contradict the verdict
+                  card. Tier label dropped (2026-09-16) - it repeated the
+                  card's own badge; only the range NUMBERS are new
+                  information. */}
+              {!crowdMedianAvailable && dealCompareValue != null && adjustedResaleLow != null ? (
+                <View style={[s.rangeBanner, { backgroundColor: outcome.accent + "1a", borderColor: outcome.accent + "55" }]}>
+                  <Text></Text>
+                  <FlashHighlight flashSeq={refineSeq}>
+                    <Text style={[s.rangeBannerSub, { flex: 1 }]}>{`At $${dealCompareValue}, resale range is $${adjustedResaleLow}-$${adjustedResaleHigh}.`}</Text>
+                  </FlashHighlight>
+                </View>
+              ) : null}
 
               {/* CONDITION DROPDOWN (2026-09-10, item 9): pre-filled from
                   the scan's own read (conditionAssessment); changing it
@@ -851,11 +1074,25 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 })}
               </View>
 
-              {/* Data confidence - shown in both BUY and SKIP layouts; backs
-                  the max-buy reasoning (and the skip reason) either way.
-                  Driven by the SAME agreementBadge the badge/footnote/
-                  reasoning above use, so this can never contradict them. */}
-              {result.confirmedByMoat && result.priceData ? (
+              {/* Data confidence: real listings + link, shown only when
+                  confirmed by moat. DECLUTTER (2026-09-16): removed the
+                  else-branch hedge banner ("{agreementBadge} — verify
+                  before buying", s.limitedBanner) - it was a THIRD
+                  rendering of the same "this is an estimate" caveat this
+                  screen already carries in the tier badge/tag and in
+                  footNote below, in its own separate card. footNote is the
+                  one caveat this screen keeps. isConfidentVerdict (used
+                  only to gate that removed branch) is gone with it.
+                  ONE SELL PRICE (2026-09-17): this box's own "avg $X ·
+                  range $Y-$Z" (result.priceData - the separate Profit
+                  Oracle prediction, a THIRD price source distinct from
+                  both the AI estimate and the crowd median) is now also
+                  gated on !crowdMedianAvailable - when the crowd median is
+                  driving the math/display, this box would be a second,
+                  different sell-price claim sitting right below it. Thin
+                  case (crowdMedianAvailable false) is unaffected - shows
+                  exactly as it did before. */}
+              {!crowdMedianAvailable && result.confirmedByMoat && result.priceData ? (
                 <TouchableOpacity style={[s.goodBanner, { marginTop: 16 }]} onPress={()=>Linking.openURL(result.priceData.ebaySearchUrl)}>
                   <Text></Text>
                   <View style={{flex:1}}>
@@ -864,58 +1101,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   </View>
                   <Text style={{color:C.green}}>{'>'}</Text>
                 </TouchableOpacity>
-              ) : (
-                // BANNER VS VERDICT (2026-09-10, MEASURED): this hedge used
-                // to render unconditionally whenever confirmedByMoat/
-                // priceData weren't both present - independent of `outcome`,
-                // the SAME verdict object (outcomeTier.ts's classifyOutcome,
-                // "THE single source of truth for the verdict") the tier
-                // badge/hero/copy below all read. Confirmed live: a HOT BUY
-                // (outcome.tier==="hot" - strong ROI + velocity + real
-                // dollar profit) rendered with "Market estimate — verify
-                // before buying" sitting right above it, because that
-                // verdict can be reached off a pure LLM anchor with zero
-                // agreeing real sold rows (confirmedByMoat===false) - a
-                // legitimate, honestly-labeled state that has nothing to do
-                // with whether classifyOutcome's OWN math trusts the number
-                // enough to call it a real profit. The hedge is only
-                // informative when there's no confident verdict to hedge
-                // against - gated on isConfidentVerdict (hot/solid only;
-                // "thin" (JUDGMENT CALL) is explicitly NOT confident, so it
-                // keeps showing the hedge same as skip does), not a second,
-                // independently-computed confidence check.
-                !isConfidentVerdict && (
-                  <View style={[s.limitedBanner, { marginTop: 16 }]}>
-                    <Text></Text>
-                    <Text style={s.limitedText}>{result.agreementBadge} — verify before buying.</Text>
-                  </View>
-                )
-              )}
-
-              {/* Part 1/5: identify's retail-arbitrage read - only shown
-                  when there's a price to compare against the resale range,
-                  never invented. FIX 3 (2026-09-10, ONE VERDICT SOURCE):
-                  this used to compute and color itself off its own
-                  independent isGoodDeal comparison - a SECOND, separately-
-                  computed verdict that could (and did, on the Fisher-Price
-                  scan) say "good deal" in green while outcome below said
-                  SKIP for the identical item, because range-position and
-                  dollar-profit-floor are different questions that can
-                  disagree. It now reads outcome.tier/label/emoji/accent
-                  directly - the SAME OutcomeTierInfo the verdict card
-                  renders - so this card and the verdict card render off one
-                  shared source and can no longer contradict each other. It
-                  still shows the range NUMBERS (dealCompareValue vs
-                  adjustedResaleLow/High); only the framing/color/label now
-                  follows the verdict instead of an independent check. */}
-              {dealCompareValue != null && adjustedResaleLow != null ? (
-                <View style={[s.rangeBanner, { backgroundColor: outcome.accent + "1a", borderColor: outcome.accent + "55" }]}>
-                  <Text></Text>
-                  <View style={{flex:1}}>
-                    <Text style={[s.rangeBannerTitle, { color: outcome.accent }]}>{outcome.emoji} {outcome.label}</Text>
-                    <Text style={s.rangeBannerSub}>{`At $${dealCompareValue}, resale range is $${adjustedResaleLow}-$${adjustedResaleHigh}.`}</Text>
-                  </View>
-                </View>
               ) : null}
 
               {/* MEASURED BUG: this used to be TWO stacked elements that did
@@ -1525,13 +1710,10 @@ const s = StyleSheet.create({
   goodBanner:     { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: C.greenBg, borderWidth: 1.5, borderColor: C.greenBorder, borderRadius: 12, padding: 12, marginBottom: 12 },
   goodBannerTitle:{ color: C.green, fontSize: 13, fontWeight: "800", marginBottom: 2 },
   goodBannerSub:  { color: C.text3, fontSize: 12 },
-  limitedBanner:  { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#1a1508", borderWidth: 1, borderColor: C.yellow + "40", borderRadius: 12, padding: 12, marginBottom: 12 },
-  limitedText:    { color: C.yellow, fontSize: 13, fontWeight: "700", flex: 1 },
   // Fix 3 (2026-09-10): color/border set inline per-render from
   // outcome.accent (hot/solid=green, thin=yellow, skip=red, estimate=
   // yellow) - this base style only carries the fixed layout.
   rangeBanner:      { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1.5, borderRadius: 12, padding: 12, marginBottom: 12 },
-  rangeBannerTitle: { fontSize: 13, fontWeight: "800", marginBottom: 2 },
   rangeBannerSub:   { color: C.text3, fontSize: 12 },
   noDataBanner:   { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#1a0808", borderWidth: 1, borderColor: C.red + "30", borderRadius: 12, padding: 12, marginBottom: 12 },
   noDataText:     { color: C.red, fontSize: 13, fontWeight: "700", flex: 1 },

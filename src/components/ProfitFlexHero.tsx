@@ -12,6 +12,7 @@ import Svg, { Defs, RadialGradient, Stop, Rect } from "react-native-svg";
 import { C } from "../lib/theme";
 import { OutcomeTierInfo } from "../lib/outcomeTier";
 import { useCountUp } from "./FlexRevealCard";
+import FlashHighlight from "./FlashHighlight";
 
 interface SecondaryStat {
   label: string;
@@ -38,19 +39,43 @@ interface ProfitFlexHeroProps {
 
   // SKIP-path fields
   skipDetail?: string | null;    // lens's own reasoning, shown as secondary context under the one-line reason
+
+  // TWO-STAGE SCAN RENDER (2026-09-11): bumped by ScannerScreen ONLY when a
+  // background /refine call actually landed corrected numbers - triggers a
+  // one-shot "sharpen into focus" flash on the hero number/badge/max-buy
+  // (see FlashHighlight) so the update reads as the number resolving, not
+  // silently swapping. 0/unset = no flash (default, normal render).
+  flashSeq?: number;
 }
 
 const GLOW_W = 340;
 const GLOW_H = 200;
 
+// RECONCILE FIX (2026-09-17): used to always round to the nearest dollar
+// ("$5.52" -> "$6"), which was the actual cause of a "$6 profit / 138% ROI
+// don't cross-check" report - heroProfit and heroRoi were computed off the
+// SAME number the whole time (see ScannerScreen.tsx's ONE CANONICAL SELL
+// PRICE comment), the ROI stat just showed it unrounded-to-the-percent
+// while this rounded the dollar figure to a DIFFERENT precision, so two
+// legitimate roundings of one consistent number looked like disagreeing
+// math. Now shows cents whenever they're nonzero ("$5.52") and stays
+// clean whole-dollar ("$6") only when the value genuinely IS $6.00 - no
+// ".00" clutter on the common case, no silently-dropped fee cents on the
+// uncommon one.
 function money(n: number): string {
-  return (n < 0 ? "-$" : "$") + Math.round(Math.abs(n)).toLocaleString();
+  const abs = Math.abs(n);
+  const hasCents = Math.round(abs * 100) % 100 !== 0;
+  const formatted = abs.toLocaleString(undefined, {
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  });
+  return (n < 0 ? "-$" : "$") + formatted;
 }
 
 export default function ProfitFlexHero({
   outcome, itemName, categoryLine, photoBase64, onEdit, isSkip,
   heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, dataTag, dataTagColor, secondaryStats = [], footNote,
-  skipDetail,
+  skipDetail, flashSeq = 0,
 }: ProfitFlexHeroProps) {
   // MEASURED BUG: a long AI-generated item name ("American Flag with Fish
   // Trucker Hat (likely...") had no way to be seen in full - numberOfLines
@@ -58,8 +83,22 @@ export default function ProfitFlexHero({
   // Tap the title (or the toggle line under it) to see the whole thing.
   const [titleExpanded, setTitleExpanded] = useState(false);
   const isHot = outcome.tier === "hot";
-  const count = useCountUp(Math.round(heroProfit), isHot, 900);
-  const heroText = isHot ? money(count) : money(heroProfit);
+  // RECONCILE FIX (2026-09-17): useCountUp animates and DISPLAYS only
+  // whole integers internally (FlexRevealCard.tsx's listener rounds every
+  // tick) - a real constraint of that shared hook, not something to widen
+  // here since it's also used for plain integer stats elsewhere. A hot-
+  // tier item is exactly the case that broke ("138% ROI" requires
+  // ROI_HOT_MIN=75%+, so the reported $6/138% scan WAS hot-tier) - if
+  // heroProfit carries cents, animating Math.round(heroProfit) would
+  // silently re-introduce the same rounding-seam bug money() above just
+  // fixed, just one line up. So the animated count-up (a deliberate
+  // flourish, unrelated to this fix) only runs for a whole-dollar hot
+  // profit; a hot profit with cents skips the animation and renders the
+  // exact money(heroProfit) directly, same as every other tier.
+  const heroHasCents = Math.round(Math.abs(heroProfit) * 100) % 100 !== 0;
+  const animateHero = isHot && !heroHasCents;
+  const count = useCountUp(Math.round(heroProfit), animateHero, 900);
+  const heroText = animateHero ? money(count) : money(heroProfit);
 
   // Subtle pulse on the tier badge — the only continuous motion, and only
   // for the tier that's supposed to feel like a banger.
@@ -101,22 +140,24 @@ export default function ProfitFlexHero({
         <Image source={{ uri: `data:image/jpeg;base64,${photoBase64}` }} style={st.photo} resizeMode="cover" />
       ) : null}
 
-      <View style={st.top}>
-        {isHot ? (
-          <Animated.Text style={[st.badge, { color: outcome.accent }, pulseStyle]} numberOfLines={1}>
-            {outcome.emoji} {outcome.label}
-          </Animated.Text>
-        ) : (
-          <Text style={[st.badge, { color: outcome.accent }]} numberOfLines={1}>{outcome.emoji} {outcome.label}</Text>
-        )}
-        {/* MEASURED BUG (2026-09-10): "● REAL DATA · SMALL SAMPLE" clipped
-            mid-word ("SAMP…") - `top` was a single non-wrapping row with
-            justifyContent:"space-between", so a long badge label left the
-            tag too little width before its own numberOfLines={1} ellipsized
-            it. flexWrap lets the tag drop to its own full-width line
-            instead of fighting the badge for room on one line. */}
-        {dataTag ? <Text style={[st.tag, { color: dataTagColor }]}>{dataTag}</Text> : null}
-      </View>
+      <FlashHighlight flashSeq={flashSeq}>
+        <View style={st.top}>
+          {isHot ? (
+            <Animated.Text style={[st.badge, { color: outcome.accent }, pulseStyle]} numberOfLines={1}>
+              {outcome.emoji} {outcome.label}
+            </Animated.Text>
+          ) : (
+            <Text style={[st.badge, { color: outcome.accent }]} numberOfLines={1}>{outcome.emoji} {outcome.label}</Text>
+          )}
+          {/* MEASURED BUG (2026-09-10): "● REAL DATA · SMALL SAMPLE" clipped
+              mid-word ("SAMP…") - `top` was a single non-wrapping row with
+              justifyContent:"space-between", so a long badge label left the
+              tag too little width before its own numberOfLines={1} ellipsized
+              it. flexWrap lets the tag drop to its own full-width line
+              instead of fighting the badge for room on one line. */}
+          {dataTag ? <Text style={[st.tag, { color: dataTagColor }]}>{dataTag}</Text> : null}
+        </View>
+      </FlashHighlight>
 
       <TouchableOpacity onPress={() => setTitleExpanded(v => !v)} activeOpacity={0.7}>
         <Text style={st.itemName} numberOfLines={titleExpanded ? undefined : 2}>{itemName}</Text>
@@ -131,7 +172,9 @@ export default function ProfitFlexHero({
         </>
       ) : (
         <>
-          <Text style={[st.hero, { color: outcome.accent }]} numberOfLines={1} adjustsFontSizeToFit>{heroText}</Text>
+          <FlashHighlight flashSeq={flashSeq}>
+            <Text style={[st.hero, { color: outcome.accent }]} numberOfLines={1} adjustsFontSizeToFit>{heroText}</Text>
+          </FlashHighlight>
           <Text style={st.heroLabel}>{profitLabel}</Text>
           <Text style={[st.copy, { color: outcome.accent }]}>{outcome.copy}</Text>
 
@@ -152,10 +195,12 @@ export default function ProfitFlexHero({
           paired with the reasoning that explains it - never a bare number
           asking for trust. */}
       {maxBuy != null && (
-        <View style={st.maxBuyBox}>
-          <Text style={st.maxBuyHeadline}>Max buy: {money(maxBuy)}</Text>
-          {maxBuyReasoning ? <Text style={st.maxBuyReasoning}>{maxBuyReasoning}</Text> : null}
-        </View>
+        <FlashHighlight flashSeq={flashSeq}>
+          <View style={st.maxBuyBox}>
+            <Text style={st.maxBuyHeadline}>Max buy: {money(maxBuy)}</Text>
+            {maxBuyReasoning ? <Text style={st.maxBuyReasoning}>{maxBuyReasoning}</Text> : null}
+          </View>
+        </FlashHighlight>
       )}
 
       {footNote ? <Text style={st.foot}>{footNote}</Text> : null}
