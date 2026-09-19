@@ -790,8 +790,12 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                       <View style={{flex:1}}>
                         <Text style={s.cardName} numberOfLines={1}>{scan.item_name || "Item"}</Text>
                         <Text style={s.cardMeta}>{new Date(scan.created_at).toLocaleDateString()}</Text>
+                        {/* HONESTY SWEEP (2026-09-18): scan.best_platform is
+                            the persisted scan-time fee guess, never a real
+                            sale - labeled, not shown bare, so it can't read
+                            as "this is where it sold." */}
                         {scan.best_platform ? (
-                          <Text style={s.cardPlatform} numberOfLines={1}>{scan.best_platform}</Text>
+                          <Text style={s.cardPlatform} numberOfLines={1}>Low fee: {scan.best_platform}</Text>
                         ) : null}
                       </View>
                       <View style={s.cardRight}>
@@ -856,9 +860,13 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                             </View>
                           ))}
                         </View>
+                        {/* HONESTY SWEEP (2026-09-18): "Best platform" implied
+                            a sell recommendation this was never backed by -
+                            scan.best_platform is the persisted scan-time fee
+                            guess, never a real sale. */}
                         {scan.best_platform ? (
                           <Text style={{color:C.text3,fontSize:12,marginBottom:8}}>
-                            Best platform: <Text style={{color:C.text1,fontWeight:"700"}}>{scan.best_platform}</Text>
+                            Lowest fees: <Text style={{color:C.text1,fontWeight:"700"}}>{scan.best_platform}</Text>
                           </Text>
                         ) : null}
 
@@ -1028,7 +1036,9 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                                 )}
                                 <View style={{flex:1}}>
                                   <Text style={s.cardName} numberOfLines={1}>{item.itemName || "Item"}</Text>
-                                  <Text style={s.cardPlatform} numberOfLines={1}>Pay {"\u2264"}${item.buyTarget} {"\u00B7"} {item.bestPlatform}</Text>
+                                  {/* HONESTY SWEEP (2026-09-18): bestPlatform
+                                      here is the fee guess, not a sell rec. */}
+                                  <Text style={s.cardPlatform} numberOfLines={1}>Pay {"\u2264"}${item.buyTarget} {"\u00B7"} low fee: {item.bestPlatform}</Text>
                                 </View>
                                 <Text style={[s.profit, {fontSize:14, color:(item.decision==="BUY"?C.green:C.text4)}]}>
                                   {item.decision==="BUY" ? "+$"+Math.round(item.profit||0) : "PASS"}

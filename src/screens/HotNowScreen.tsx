@@ -121,6 +121,14 @@ export default function HotNowScreen({ token, onNavigate, onBack }: Props) {
                     </View>
                   )}
                 </View>
+                {/* HONESTY SWEEP (2026-09-19): new field, real data - see
+                    hot-now/route.ts's getRealHotCategories(). Only rendered
+                    when it clears the majority floor server-side. */}
+                {c.realPlatformClaim && (
+                  <Text style={[s.statLbl, { marginTop: 4, marginBottom: 4 }]}>
+                    {c.realPlatformClaim.pct}% sold on {c.realPlatformClaim.platform} ({c.realPlatformClaim.n} real sales)
+                  </Text>
+                )}
                 <TouchableOpacity style={s.verifyBtn} onPress={() => ebaySearch(c.category)}>
                   <Text style={s.verifyText}>Check sold comps ›</Text>
                 </TouchableOpacity>

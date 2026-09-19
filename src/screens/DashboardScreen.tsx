@@ -475,9 +475,11 @@ export default function DashboardScreen({ token, plan, planLoaded = true, scansL
                     </View>
                     <View style={{flex:1}}>
                       <Text style={s.scanName} numberOfLines={1}>{scan.item_name || "Item"}</Text>
+                      {/* HONESTY SWEEP (2026-09-19): bare best_platform is
+                          the scan-time fee guess, never a real sale. */}
                       <Text style={s.scanMeta}>
                         {scan.decision==="BUY"? "+$" + (Math.round(scan.net_profit||0)) + " · " :""}
-                        {(scan.best_platform||"").split("|||")[0]}
+                        {(scan.best_platform||"") ? "low fee: " + (scan.best_platform||"").split("|||")[0] : ""}
                       </Text>
                     </View>
                     <Text style={{color:C.text4, fontSize:18}}>›</Text>

@@ -290,16 +290,32 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
                 </View>
               )}
 
-              {/* Best platform */}
+              {/* HONESTY SWEEP (2026-09-19): "Best Platform" implied a
+                  factual sell recommendation - platformRanking is the
+                  model's own advisory opinion (this route has no fee-argmax
+                  table at all, unlike Scanner/Specialty), never real sales
+                  data. Retitled to say so; a real claim (result.realPlatformClaim,
+                  majority-gated crowd data) gets its own labeled banner
+                  above it when one exists for this category. */}
               <View style={s.section}>
-                <Text style={s.sectionTitle}>Best Platform</Text>
+                <Text style={s.sectionTitle}>AI Platform Take</Text>
+                {result.realPlatformClaim && (
+                  <View style={{backgroundColor:C.surfaceHigh,borderRadius:10,padding:12,marginBottom:10,borderWidth:1,borderColor:C.green+"40"}}>
+                    <Text style={{color:C.green,fontSize:14,fontWeight:"800"}}>
+                      {result.realPlatformClaim.pct}% of real {result.category || "similar"} sales sold on {result.realPlatformClaim.platform}
+                    </Text>
+                    <Text style={{color:C.text3,fontSize:11,marginTop:2}}>
+                      From {result.realPlatformClaim.n} real reported sales - not the AI take below
+                    </Text>
+                  </View>
+                )}
                 {(result.analysis?.platformRanking || []).slice(0,4).map((p: any, i: number) => (
                   <View key={i} style={s.platformRow}>
                     <View style={[s.platformScore, { backgroundColor: i===0 ? C.green+"20" : C.surface }]}>
                       <Text style={[s.platformScoreNum, { color: i===0 ? C.green : C.text3 }]}>{p.score}</Text>
                     </View>
                     <View style={{ flex:1 }}>
-                      <Text style={[s.platformName, i===0&&{color:C.green}]}>{p.platform} {i===0?"★ Best":""}</Text>
+                      <Text style={[s.platformName, i===0&&{color:C.green}]}>{p.platform} {i===0?"★ AI pick":""}</Text>
                       <Text style={s.platformReason}>{p.reasoning}</Text>
                     </View>
                   </View>

@@ -38,7 +38,6 @@ export default function ViralContentScreen({ token, onBack }: Props) {
   const [loading, setLoading] = useState(false);
   const [content, setContent] = useState<any>(null);
   const [tab, setTab] = useState("TikTok");
-  const [best, setBest] = useState("");
 
   async function generate() {
     if (!itemName.trim()) { Alert.alert("Add an item", "Enter the item you flipped."); return; }
@@ -55,7 +54,10 @@ export default function ViralContentScreen({ token, onBack }: Props) {
       });
       const d = await r.json();
       if (!d.success) { Alert.alert("Couldn't generate", d.error || "Try again."); }
-      else { setContent(d.content); setBest(d.content?.bestPlatform || ""); }
+      // HONESTY SWEEP (2026-09-18): d.content.bestPlatform (an invented,
+      // unfounded "which social platform performs best" guess) is no
+      // longer returned by the API - see app/api/viral-content/route.ts.
+      else { setContent(d.content); }
     } catch {
       Alert.alert("Error", "Check your connection and try again.");
     }
@@ -115,8 +117,6 @@ export default function ViralContentScreen({ token, onBack }: Props) {
 
         {content && (
           <View style={{ marginTop: 22 }}>
-            {best ? <Text style={s.best}>🔥 Best for this find: {best}</Text> : null}
-
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
               {TABS.map((t) => (
                 <TouchableOpacity key={t} style={[s.tab, tab === t && s.tabActive]} onPress={() => setTab(t)}>

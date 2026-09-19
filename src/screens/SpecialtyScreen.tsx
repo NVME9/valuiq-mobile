@@ -362,15 +362,16 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
         };
     const isSkip = outcome.tier === "skip";
 
-    // WHICH PLATFORM (2026-08-25): same fix as ScannerScreen.tsx - bestPlatform
-    // drives the actual netProfit/roi shown above but never reached this card.
-    // Only prepended when a real price was entered. Never prepended for a
-    // suppressed item: specialty/route.ts's bestPlatform falls back to the
-    // literal string "eBay" even with zero real platformBreakdown entries
-    // (sellPrice===0 filters every candidate out) - "On eBay — Not enough
-    // data..." would falsely imply an eBay-specific claim that was never made.
-    const heroOutcome = (!suppressed && enteredBp > 0 && result.bestPlatform)
-      ? { ...outcome, copy: `On ${result.bestPlatform} — ${outcome.copy}` }
+    // HONESTY SWEEP (2026-09-18): same fix as ScannerScreen.tsx - only
+    // prepend a platform mention when result.realPlatformClaim clears the
+    // server-side majority floor (see lib/crowdPlatform.ts), worded as a
+    // claim ("Most sold on X"), never as a bare location ("On X"). Still
+    // never prepended for a suppressed item - see the original comment
+    // this replaces for why. No fallback line needed when no real claim:
+    // outcome.copy already leads with "{roi}% ROI..." for every
+    // non-noFlipMargin tier (src/lib/outcomeTier.ts).
+    const heroOutcome = (!suppressed && enteredBp > 0 && result.realPlatformClaim)
+      ? { ...outcome, copy: `Most sold on ${result.realPlatformClaim.platform} — ${outcome.copy}` }
       : outcome;
 
     const categoryLine = `${selectedCat.label}${result.confidence ? " - " + result.confidence + " confidence" : ""}`;
@@ -487,15 +488,30 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
               message={selectedCat.label + " appraisal via ValuIQ\n\n" + (result.identification || selectedCat.label) + "\nSell price: $" + (result.sellPrice || "See app") + "\n\ngetvaluiq.com"}
             />
 
+            {/* HONESTY SWEEP (2026-09-18): same fix as ScannerScreen.tsx -
+                see its identical comment for the full rationale. */}
             {result.platformBreakdown && result.platformBreakdown.length > 0 && (
-              <CollapsibleSection title="BEST PLACE TO SELL" expanded={showPlatforms} onToggle={() => setShowPlatforms(v => !v)}>
+              <CollapsibleSection title={result.realPlatformClaim ? "WHERE THIS SELLS" : "LOWEST FEES"} expanded={showPlatforms} onToggle={() => setShowPlatforms(v => !v)}>
+                {result.realPlatformClaim && (
+                  <View style={{backgroundColor:C.surfaceHigh,borderRadius:10,padding:12,marginBottom:12,borderWidth:1,borderColor:C.green+"40"}}>
+                    <Text style={{color:C.green,fontSize:15,fontWeight:"800"}}>
+                      {result.realPlatformClaim.pct}% sold on {result.realPlatformClaim.platform}
+                    </Text>
+                    <Text style={{color:C.text3,fontSize:11,marginTop:2}}>
+                      From {result.realPlatformClaim.n} real reported sales - not a fee estimate
+                    </Text>
+                  </View>
+                )}
+                <Text style={{color:C.text4,fontSize:10,fontWeight:"700",textTransform:"uppercase",marginBottom:8}}>
+                  {result.realPlatformClaim ? "Profit by platform (after fees)" : "Ranked by profit after fees"}
+                </Text>
                 {result.platformBreakdown.map((pb: any, i: number) => (
                   <View key={pb.platform} style={{ marginBottom: 10 }}>
                     <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                         <View style={{ width: 3, height: 16, borderRadius: 2, backgroundColor: i === 0 ? C.green : C.border }} />
                         <Text style={{ color: i === 0 ? C.text1 : C.text3, fontSize: 14, fontWeight: i === 0 ? "800" : "500" }}>{pb.platform}</Text>
-                        {i === 0 && <Text style={{ color: C.green, fontSize: 9, fontWeight: "900" }}>BEST</Text>}
+                        {i === 0 && <Text style={{ color: C.green, fontSize: 9, fontWeight: "900" }}>LOW FEE</Text>}
                       </View>
                       <Text style={{ color: pb.netProfit < 0 ? C.red : (i === 0 ? C.green : C.text2), fontSize: 15, fontWeight: "800" }}>
                         {pb.netProfit < 0 ? "-$" + Math.abs(pb.netProfit) : "+$" + pb.netProfit} profit

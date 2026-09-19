@@ -105,11 +105,13 @@ export default function AICoachScreen({ token, plan, onNavigate, onBack }: Props
                 </View>
               )}
 
-              {(data.coaching?.categoryRecommendation || data.coaching?.platformRecommendation) && (
+              {/* HONESTY SWEEP (2026-09-19): platformRecommendation removed
+                  server-side (app/api/ai-coach/route.ts) - it was a pure LLM
+                  hallucination with zero grounding, not even the fee guess. */}
+              {data.coaching?.categoryRecommendation && (
                 <View style={s.recCard}>
                   <Text style={s.recTitle}>Focus Here</Text>
-                  {data.coaching?.categoryRecommendation && <View style={s.recRow}><Text style={{fontSize:16}}>🗂️</Text><Text style={s.recTxt}>{data.coaching.categoryRecommendation}</Text></View>}
-                  {data.coaching?.platformRecommendation && <View style={s.recRow}><Text style={{fontSize:16}}>📱</Text><Text style={s.recTxt}>{data.coaching.platformRecommendation}</Text></View>}
+                  <View style={s.recRow}><Text style={{fontSize:16}}>🗂️</Text><Text style={s.recTxt}>{data.coaching.categoryRecommendation}</Text></View>
                 </View>
               )}
             </>

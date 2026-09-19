@@ -775,16 +775,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // Reads sellPriceForProfit (canonical, rounded), not adjustedResaleValue.
     const heroDisplayValue = enteredBp > 0 ? heroProfit : sellPriceForProfit;
 
-    // WHICH PLATFORM (2026-08-25): bestPlatform drives the actual netProfit/
-    // roi shown above (lens/route.ts picks the platform with the lowest fee,
-    // e.g. Facebook's 5% vs eBay's 13.27%) but never reached this card - a
-    // user could see "$4 profit, 29% ROI" with no way to tell it assumes a
-    // platform they might not even be selling on. Only prepended when a
-    // real price was entered (enteredBp > 0) - the neutral no-price state
-    // above has its own copy and no real bestPlatform-driven verdict to
-    // attribute.
-    const heroOutcome = (enteredBp > 0 && result.bestPlatform)
-      ? { ...outcome, copy: `On ${result.bestPlatform} — ${outcome.copy}` }
+    // HONESTY SWEEP (2026-09-18): this used to prepend "On {bestPlatform} —"
+    // whenever a price was entered, where bestPlatform was ALWAYS the
+    // scan-time fee-argmax guess (lens/route.ts picks the lowest fee, e.g.
+    // Facebook's 5% vs eBay's 13.27%) - a user could see "On Facebook — 29%
+    // ROI" with no way to tell that platform was a fee guess, not a real
+    // claim about where this item sells. Now: only prepended when
+    // result.realPlatformClaim clears the server-side majority floor (see
+    // lib/crowdPlatform.ts) - a real, sourced claim, worded as a claim
+    // ("Most sold on X"), not a location assertion ("On X"). When no real
+    // claim exists, outcome.copy is left exactly as classifyOutcome wrote
+    // it - every non-noFlipMargin tier already leads with "{roi}% ROI..."
+    // (see src/lib/outcomeTier.ts), which IS the honest, platform-free
+    // framing the fallback needs - no separate ROI line has to be built.
+    const heroOutcome = (enteredBp > 0 && result.realPlatformClaim)
+      ? { ...outcome, copy: `Most sold on ${result.realPlatformClaim.platform} — ${outcome.copy}` }
       : outcome;
 
     // CONDITION CONCEPT (2026-09-10, item 9): reads resultCondition
@@ -1198,8 +1203,34 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 <>
                   {/* Collapsed by default - the hero above already answers
                       the question; everything else is one tap away. */}
+                  {/* HONESTY SWEEP (2026-09-18): this section used to be
+                      titled "BEST PLACE TO SELL" with a "BEST" badge on the
+                      top fee-ranked entry, unconditionally - platformBreakdown
+                      is pure fee math (netProfit = sellPrice*(1-fee) - cost),
+                      never a claim about where the item actually sells. That
+                      title/badge implied a sell recommendation this section
+                      never had data to back. Now: a real claim (realPlatformClaim,
+                      from crowd_platform_stats, majority-gated - see
+                      lib/crowdPlatform.ts server-side) gets its own honestly-
+                      labeled banner ABOVE the fee table when one clears the
+                      floor; the fee table itself is always labeled as what it
+                      is (fees), never as a sell recommendation, whether or not
+                      a real claim exists above it. */}
                   {result.platformBreakdown && result.platformBreakdown.length > 0 && (
-                    <CollapsibleSection title="BEST PLACE TO SELL" expanded={showPlatforms} onToggle={()=>setShowPlatforms(v=>!v)}>
+                    <CollapsibleSection title={result.realPlatformClaim ? "WHERE THIS SELLS" : "LOWEST FEES"} expanded={showPlatforms} onToggle={()=>setShowPlatforms(v=>!v)}>
+                      {result.realPlatformClaim && (
+                        <View style={{backgroundColor:C.surfaceHigh,borderRadius:10,padding:12,marginBottom:12,borderWidth:1,borderColor:C.green+"40"}}>
+                          <Text style={{color:C.green,fontSize:15,fontWeight:"800"}}>
+                            {result.realPlatformClaim.pct}% sold on {result.realPlatformClaim.platform}
+                          </Text>
+                          <Text style={{color:C.text3,fontSize:11,marginTop:2}}>
+                            From {result.realPlatformClaim.n} real reported sales - not a fee estimate
+                          </Text>
+                        </View>
+                      )}
+                      <Text style={{color:C.text4,fontSize:10,fontWeight:"700",textTransform:"uppercase",marginBottom:8}}>
+                        {result.realPlatformClaim ? "Profit by platform (after fees)" : "Ranked by profit after fees"}
+                      </Text>
                       {(goDeeper ? result.platformBreakdown : result.platformBreakdown.slice(0,3)).map((pb:any, i:number) => {
                         const profNum = Number(pb.netProfit) || 0;
                         const isNeg = profNum < 0;
@@ -1216,7 +1247,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                             <View style={{flexDirection:"row",alignItems:"center",gap:6,flex:1,flexShrink:1}}>
                               <View style={{width:3,height:16,borderRadius:2,backgroundColor:isBest?C.green:C.border}}/>
                               <Text style={{color:i===0?C.text1:C.text3,fontSize:14,fontWeight:i===0?"800":"500",flexShrink:1}} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{pb.platform}</Text>
-                              {isBest && <Text style={{color:C.green,fontSize:9,fontWeight:"900"}}>BEST</Text>}
+                              {/* "LOW FEE", not "BEST" - this badge marks the
+                                  lowest-fee entry in a fee comparison, not a
+                                  sell recommendation. */}
+                              {isBest && <Text style={{color:C.green,fontSize:9,fontWeight:"900"}}>LOW FEE</Text>}
                             </View>
                             <Text style={{color:isNeg?C.red:(i===0?C.green:C.text2),fontSize:15,fontWeight:"800",flexShrink:0}} numberOfLines={1}>
                               {isNeg ? "-$" + Math.abs(profNum) : "+$" + profNum} profit
@@ -1316,7 +1350,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                         activeOpacity={0.85}
                         onPress={async () => {
                           setSharingWin(true);
-                          const ok = await shareWin(token, result.itemName || "Great find", heroProfit || 0, result.bestPlatform || "eBay", "");
+                          // HONESTY SWEEP (2026-09-18): this posted
+                          // result.bestPlatform (the fee-argmax guess) to
+                          // the public Community feed as if it were the
+                          // platform the item sold on - found while fixing
+                          // the same pattern elsewhere, not one of the
+                          // originally-named surfaces. Only a real claim
+                          // gets posted now; formatFeedDetail already omits
+                          // the platform line entirely when none is passed
+                          // (see lib/flipFormat.ts), so this degrades to
+                          // "no platform shown" rather than a fabricated one.
+                          const ok = await shareWin(token, result.itemName || "Great find", heroProfit || 0, result.realPlatformClaim?.platform, "");
                           setSharingWin(false);
                           if (ok) setWinShared(true);
                         }}>

@@ -60,9 +60,15 @@ export default function ShareCard({ result, oracle, photoBase64, photoUri, onPho
   const days = pred?.medianDays != null && !isNaN(Number(pred.medianDays)) ? Math.round(Number(pred.medianDays)) : null;
 
   const resale = fmtMoney(result?.sellPrice);
-  const bestPlatform = result?.bestPlatform || null;
+  // HONESTY SWEEP (2026-09-18): this stat used to always be result.bestPlatform
+  // (the fee-argmax guess) labeled "best platform" on a publicly shared image
+  // - relabeled to what it actually is when it's a guess, and only claims a
+  // real sell location when result.realPlatformClaim clears the floor.
+  const realClaim = result?.realPlatformClaim || null;
+  const platformValue = realClaim?.platform || result?.bestPlatform || null;
+  const platformLabel = realClaim ? "sells on" : "lowest fees";
   const roi = result?.roi != null && !isNaN(Number(result.roi)) ? Math.round(Number(result.roi)) + "%" : null;
-  const hasSecondaryRow = !!(resale || bestPlatform || roi);
+  const hasSecondaryRow = !!(resale || platformValue || roi);
 
   const itemName = result?.itemName || result?.item_name || "Item";
   const brand = result?.brand && result.brand !== "Unknown" ? result.brand : null;
@@ -127,10 +133,10 @@ export default function ShareCard({ result, oracle, photoBase64, photoUri, onPho
                     <Text style={s.secondaryLabel}>resale value</Text>
                   </View>
                 ) : null}
-                {bestPlatform ? (
+                {platformValue ? (
                   <View style={s.secondaryStat}>
-                    <Text style={s.secondaryValue} numberOfLines={1}>{bestPlatform}</Text>
-                    <Text style={s.secondaryLabel}>best platform</Text>
+                    <Text style={s.secondaryValue} numberOfLines={1}>{platformValue}</Text>
+                    <Text style={s.secondaryLabel}>{platformLabel}</Text>
                   </View>
                 ) : null}
                 {roi ? (

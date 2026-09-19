@@ -293,6 +293,32 @@ export async function scanImage(token: string, photos: string[], description?: s
   });
   return r.json();
 }
+// TWO-STAGE SCAN RENDER (2026-09-11): the background "stage 2" call - see
+// app/api/lens/refine/route.ts's header comment for the full design. Fired
+// fire-and-forget by ScannerScreen.tsx ONLY when the scan response's own
+// needsRefine flag said to (moat didn't confirm the price AND the item is
+// worth >$50) - callers must check that flag themselves, this function
+// doesn't gate anything. Resends the same photos scanImage() already sent
+// (no server-side image cache - see the plan this was built from) since
+// they're already sitting in ScannerScreen's own state at this point in the
+// flow. Never throws: a network failure here must be silently swallowed by
+// the caller exactly like a timeout/no-op response - stage 1 already stands
+// as a complete result either way.
+export async function refineScan(token: string, scanId: string, photos: string[], description: string | undefined, buyPrice: number, plan: string): Promise<any> {
+  const r = await fetch(`${API_BASE}/api/lens/refine`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      scanId,
+      userToken: token,
+      images: photos.map(b => `data:image/jpeg;base64,${b}`),
+      textInput: description || "",
+      buyPrice: buyPrice || 0,
+      plan,
+    }),
+  });
+  return r.json();
+}
 export async function scanBarcode(token: string, upc: string): Promise<any> {
   const r = await fetch(`${API_BASE}/api/lens`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, upc}) });
   return r.json();
@@ -530,7 +556,15 @@ async function fetchWithTimeout(url: string, options?: RequestInit, timeoutMs: n
 }
 
 export interface ProfileData { profile: any; stats: any; badges: any[] }
-const PROFILE_TTL = 30000;
+// NAV SPEED FIX (2026-09-11): 30s -> 3min. This app fully unmounts/remounts
+// every screen on every tab switch (see App.tsx), so this cache is the ONLY
+// thing standing between a normal Scan -> Profile hop and a full re-fetch -
+// but a scan itself now commonly takes 8-20s+ (identify/search), so a real
+// "scan an item, then check Profile" flow was routinely landing past the
+// old 30s window and missing the cache it was built for. 3min covers a
+// normal single scan comfortably while still refreshing within any one
+// active session.
+const PROFILE_TTL = 180000;
 
 // MEASURED BUG (2026-08-31): the Dashboard header read the avatar off
 // peekProfileData, which is TTL-gated at PROFILE_TTL (30s) - a screen that
@@ -640,9 +674,13 @@ export async function getWinsSummary(token: string): Promise<{ count: number; to
 // Unlike the profile stat (read-only-ish, changes slowly), THIS list gets
 // directly mutated by the same screen (delete/edit/re-run/log-sale) - a
 // blind cache here would make "I just deleted this" or "I just logged this
-// sale" look like it silently didn't work for up to 30s. Callers that mutate
-// MUST call invalidateScanHistoryCache(token) right after, before re-fetching.
-const SCAN_HISTORY_TTL = 30000;
+// sale" look like it silently didn't work for up to the TTL. Callers that
+// mutate MUST call invalidateScanHistoryCache(token) right after, before
+// re-fetching - that contract is what makes raising this safe.
+// NAV SPEED FIX (2026-09-11): 30s -> 3min, same reasoning as PROFILE_TTL
+// above - a scan now commonly takes 8-20s+, so a real Scan -> History hop
+// was routinely missing the old 30s window.
+const SCAN_HISTORY_TTL = 180000;
 export async function getScanHistory(token: string, type: string, limit: number): Promise<any[]> {
   const key = `scan-history:${stableIdFromToken(token)}:${type}:${limit}`;
   const cached = cacheGet<any[]>(key, SCAN_HISTORY_TTL);
@@ -838,7 +876,9 @@ export async function shareWin(
         userToken: token,
         itemName,
         profit: Math.round(profit),
-        platform: platform || "eBay",
+        // HONESTY SWEEP (2026-09-18): no "eBay" default - an unspecified
+        // platform should post with none shown, not a fabricated guess.
+        platform: platform || undefined,
         storeName: storeName || "",
       }),
     });

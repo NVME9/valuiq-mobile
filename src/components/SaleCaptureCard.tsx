@@ -13,6 +13,11 @@ import { C } from "../lib/theme";
 import { recordSaleOutcome, defaultDaysToSale, buildDisplayTitle, PendingScan } from "../lib/saleCapture";
 import { fetchFlexStat, concreteLine, cacheFlexStat, FlexStat } from "../lib/flexReveal";
 
+// Same enum the scraper (valuiq-scraper/scraper.js EXTRACTION_SYSTEM) and
+// the admin log-sale route validate against - keeps every sold_platform
+// writer across the system speaking the same set of values.
+const PLATFORMS = ["eBay", "Poshmark", "Mercari", "Facebook", "Depop", "Whatnot", "Etsy", "Amazon"];
+
 interface Props {
   token: string;
   scan: PendingScan;
@@ -33,14 +38,23 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal, onRevea
   const [price, setPrice] = useState("");
   const [days, setDays] = useState(() => String(defaultDaysToSale(scan.created_at)));
   const [saving, setSaving] = useState(false);
+  // DELIBERATE BLANK DEFAULT: no pre-selection, not even the scan's own
+  // best_platform guess. Pre-selecting a "likely" platform and letting the
+  // user just hit Save without touching it would write the fee-argmax guess
+  // into sold_platform as if it were a real report - reintroducing the exact
+  // contamination this whole feature exists to remove. Real data requires an
+  // actual tap. "unspecified" (the Rather-not-say chip) and never tapping
+  // anything both resolve to sending nothing - see save() below.
+  const [platform, setPlatform] = useState<string>("");
 
   async function save(withPrice: boolean) {
     setSaving(true);
     const p = withPrice ? parseFloat(price) : NaN;
     const d = parseInt(days, 10);
+    const soldPlatform = platform && platform !== "unspecified" ? platform : undefined;
     const result = await recordSaleOutcome(
       token, scan.id, "sold", "in_app", scan.created_at,
-      isNaN(p) ? undefined : p, isNaN(d) ? undefined : d
+      isNaN(p) ? undefined : p, isNaN(d) ? undefined : d, soldPlatform
     );
     setSaving(false);
 
@@ -122,6 +136,26 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal, onRevea
           <Text style={s.daysLabel}>days</Text>
         </View>
       </View>
+
+      <Text style={s.platformPrompt}>Where'd it sell? <Text style={s.optionalTag}>optional</Text></Text>
+      <View style={s.chipRow}>
+        {PLATFORMS.map((p) => (
+          <TouchableOpacity
+            key={p}
+            style={[s.chip, platform === p && s.chipActive]}
+            onPress={() => setPlatform(platform === p ? "" : p)}
+          >
+            <Text style={[s.chipText, platform === p && s.chipTextActive]}>{p}</Text>
+          </TouchableOpacity>
+        ))}
+        <TouchableOpacity
+          style={[s.chip, platform === "unspecified" && s.chipActive]}
+          onPress={() => setPlatform(platform === "unspecified" ? "" : "unspecified")}
+        >
+          <Text style={[s.chipText, platform === "unspecified" && s.chipTextActive]}>Rather not say</Text>
+        </TouchableOpacity>
+      </View>
+
       <View style={s.btnRow}>
         <TouchableOpacity
           style={[s.btn, s.btnSold, { flex: 1 }]}
@@ -163,6 +197,16 @@ const s = StyleSheet.create({
   title: { color: C.text1, fontSize: 16, fontWeight: "700" },
   meta: { color: C.text3, fontSize: 13, marginTop: 3 },
   prompt: { color: C.text2, fontSize: 15, fontWeight: "600", marginBottom: 10 },
+  platformPrompt: { color: C.text2, fontSize: 13, fontWeight: "600", marginBottom: 8 },
+  optionalTag: { color: C.text4, fontSize: 11, fontWeight: "500" },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 14 },
+  chip: {
+    paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20,
+    backgroundColor: C.surfaceHigh, borderColor: C.border, borderWidth: 1,
+  },
+  chipActive: { backgroundColor: C.green, borderColor: C.green },
+  chipText: { color: C.text2, fontSize: 13, fontWeight: "600" },
+  chipTextActive: { color: C.greenDark, fontWeight: "800" },
   btnRow: { flexDirection: "row", gap: 8 },
   btn: { flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   btnSold: { backgroundColor: C.green },

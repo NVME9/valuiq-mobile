@@ -75,7 +75,8 @@ export async function recordSaleOutcome(
   channel: "push" | "in_app" | "banner",
   createdAt?: string,
   actualPrice?: number,
-  daysOverride?: number
+  daysOverride?: number,
+  soldPlatform?: string
 ): Promise<RecordSaleResult> {
   const updates: any = {
     sold_status: outcome,
@@ -95,6 +96,14 @@ export async function recordSaleOutcome(
         1,
         Math.round((soldDate.getTime() - new Date(createdAt).getTime()) / 86400000)
       );
+    }
+    // Real, user-confirmed platform ONLY - the caller (SaleCaptureCard)
+    // never pre-fills this from the scan's own best_platform guess, so a
+    // value arriving here always means the user actively tapped a chip.
+    // Omitted entirely (not sent as null) when unset, matching every other
+    // optional field in this payload.
+    if (soldPlatform) {
+      updates.sold_platform = soldPlatform;
     }
   }
   try {
