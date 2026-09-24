@@ -12,7 +12,11 @@ export default function ProfitTrackerScreen({ token, plan, onNavigate, onBack }:
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [period, setPeriod] = useState<"week"|"month"|"year"|"all">("month");
-  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
+  // GATING CONSOLIDATION (2026-09-24): aligned to seller+, matching the
+  // server's requirePlan(token,1) full-history gate in profit-tracker/
+  // route.ts exactly (was already seller-level in practice, just missing
+  // hustler/tester/vip - the canonical seller-or-above set).
+  const isPaid = ["seller","hustler","pro","tester","lifetime","titan","vip"].includes(plan);
 
   useEffect(()=>{ if(isPaid) load(); else setLoading(false); },[period]);
 

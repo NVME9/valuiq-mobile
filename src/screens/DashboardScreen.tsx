@@ -29,11 +29,18 @@ interface Props {
   onNavigate: (s: string) => void; onBack?: () => void; onLogout: () => void;
 }
 
+// GATING CONSOLIDATION (2026-09-24): dropped a dead branch (the
+// lifetime-specific check at "return 3" could never run - lifetime already
+// matched the titan/lifetime/vip check above it and returned 4) and added
+// hustler/tester, which this function silently treated as free (0) before -
+// a hustler-plan user saw every tool in this grid locked regardless of what
+// the backend granted them. Now matches deal-ai-pro's canonical
+// lib/planGate.ts PLAN_LEVEL exactly (titan/vip collapsed into lifetime's
+// level, not a separate higher one - same access, no bug).
 function planLevel(p: string) {
-  if (p === "titan" || p === "lifetime" || p === "vip") return 4;
-  if (p === "lifetime") return 3;
-  if (p === "pro") return 2;
-  if (p === "seller") return 1;
+  if (p === "lifetime" || p === "titan" || p === "vip") return 3;
+  if (p === "pro" || p === "tester") return 2;
+  if (p === "seller" || p === "hustler") return 1;
   return 0;
 }
 function planLabel(p: string) {
@@ -76,7 +83,12 @@ const TOOLS = [
   { id:"arbitrage",     icon:"📈", name:"Arbitrage Finder", desc:"Underpriced items hiding in plain sight",minPlan:2, accent:C.green  },
   { id:"ai-coach",      icon:"🧠", name:"AI Coach",         desc:"Personal insights from your history",   minPlan:2, accent:"#b066ff" },
   { id:"inventory",     icon:"📦", name:"Inventory",        desc:"Track everything you own",              minPlan:1, accent:C.text3   },
-  { id:"profit-tracker",icon:"💰", name:"Profit Tracker",   desc:"Your real P&L every flip",             minPlan:2, accent:C.green   },
+  // RETIER (2026-09-24): pro+ -> seller+ for full history (matches the
+  // server's requirePlan(token,1) in profit-tracker/route.ts); free users
+  // still see this locked in the grid at minPlan:1 (current-month-only
+  // access exists server-side but isn't exposed through this screen's own
+  // paywall yet - see ProfitTrackerScreen.tsx's isPaid).
+  { id:"profit-tracker",icon:"💰", name:"Profit Tracker",   desc:"Your real P&L every flip",             minPlan:1, accent:C.green   },
 ];
 
 

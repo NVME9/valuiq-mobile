@@ -27,7 +27,7 @@ const FAQS = [
       },
       {
         q: "How many free scans do I get?",
-        a: "Free accounts get 10 scans per month. Scans reset on the 1st of each month. Upgrade to Seller for 100 scans, or Pro for unlimited."
+        a: "Free accounts get 10 scans per month. Scans reset on the 1st of each month. Upgrade to Seller for 30 scans, or Pro for unlimited."
       },
     ]
   },

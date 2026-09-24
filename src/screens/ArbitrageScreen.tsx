@@ -16,7 +16,12 @@ export default function ArbitrageScreen({ token, plan, onNavigate, onBack }: Pro
   const [error, setError] = useState("");
   const [noResultNote, setNoResultNote] = useState("");
 
-  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
+  // GATING CONSOLIDATION (2026-09-24): was seller+ client-side (including
+  // "seller" itself) while Arbitrage is pro+ everywhere else (the
+  // dashboard's own minPlan:2 for this tool, and the server's
+  // requirePlan(token,2) in arbitrage/route.ts) - a seller-plan user saw
+  // this UNLOCKED here despite failing the server gate. Aligned to pro+.
+  const isPaid = ["pro","tester","business","lifetime","titan","vip"].includes(plan);
 
   async function search() {
     if (!query.trim()) { setError("Enter what to search for."); return; }
@@ -47,7 +52,7 @@ export default function ArbitrageScreen({ token, plan, onNavigate, onBack }: Pro
         <Text style={s.h1}>📈 Arbitrage Search</Text>
         <Text style={[s.body,{marginBottom:20}]}>Find underpriced items on eBay where the spread is big enough to profit on resale.</Text>
 
-        {!isPaid && <View style={s.lockedCard}><Text style={s.lockedIcon}>🔒</Text><Text style={s.lockedTitle}>Seller Plan Required</Text><Text style={s.lockedBody}>Upgrade to search arbitrage opportunities.</Text></View>}
+        {!isPaid && <View style={s.lockedCard}><Text style={s.lockedIcon}>🔒</Text><Text style={s.lockedTitle}>Pro Plan Required</Text><Text style={s.lockedBody}>Upgrade to search arbitrage opportunities.</Text></View>}
 
         {isPaid && (
           <View style={{gap:12,marginBottom:20}}>

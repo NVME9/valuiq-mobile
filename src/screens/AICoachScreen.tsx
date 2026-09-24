@@ -17,7 +17,14 @@ export default function AICoachScreen({ token, plan, onNavigate, onBack }: Props
   const [data, setData]   = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const isPaid = ["seller","pro","lifetime","titan"].includes(plan);
+  // GATING CONSOLIDATION (2026-09-24): was seller+ client-side (including
+  // "seller" itself) while the tools tier map (and the dashboard's own
+  // minPlan:2 for this tool) puts AI Coach at pro+ - a seller-plan user
+  // saw this UNLOCKED here, then hit the new server-side pro+ gate
+  // (requirePlan(token,2), added to ai-coach/route.ts) and got a silent
+  // empty screen (load()'s `if (d.success) setData(d)` has no else).
+  // Aligned to pro+ so that mismatch can't happen.
+  const isPaid = ["pro","tester","business","lifetime","titan","vip"].includes(plan);
 
   useEffect(() => { if (isPaid) load(); else setLoading(false); }, []);
 
@@ -47,7 +54,7 @@ export default function AICoachScreen({ token, plan, onNavigate, onBack }: Props
             <Text style={s.lockedTitle}>Your Personal AI Coach</Text>
             <Text style={s.lockedBody}>Analyzes your scan patterns — what you overpay for, your best categories, projected monthly profit, and exactly what to do differently.</Text>
             <TouchableOpacity style={s.upgradeBtn} onPress={()=>onNavigate("upgrade")}>
-              <Text style={s.upgradeTxt}>Unlock with Seller Plan →</Text>
+              <Text style={s.upgradeTxt}>Unlock with Pro Plan →</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>

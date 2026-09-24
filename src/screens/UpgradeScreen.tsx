@@ -24,10 +24,10 @@ const PLANS = [
     id:"seller", tierLabel:"SELLER", label:"💪 Seller", price:"$14.99", sub:"/month", color:C.green,
     annualPrice:"$109", annualSub:"/year", annualSavings:"Save $71",
     headline:"For resellers who flip every week",
-    pitch:"One profitable flip pays for 3 months. 75 scans, Thrift Run, Death Pile, Auto-Relist, Hot Now.",
+    pitch:"One profitable flip pays for 3 months. 30 scans, Thrift Run, Death Pile, Auto-Relist, Hot Now.",
     badge:"MOST POPULAR", badgeBg:C.green,
     features:[
-      "75 scans per month",
+      "30 scans per month",
       "10 Price Battles per month",
       "Thrift Run — 5 sessions/month",
       "Death Pile Rescue — 5/month",

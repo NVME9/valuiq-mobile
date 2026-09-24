@@ -13,7 +13,7 @@ interface Props {
   onNavigate: (s: string) => void; onBack?: () => void; onLogout: () => void;
 }
 
-export default function DemandRadarScreen({ token, onNavigate, onBack }: Props) {
+export default function DemandRadarScreen({ token, plan, onNavigate, onBack }: Props) {
   const [rising, setRising] = useState<any[]>([]);
   const [dataMode, setDataMode] = useState<string>("");
   const [message, setMessage] = useState<string>("");
@@ -21,7 +21,17 @@ export default function DemandRadarScreen({ token, onNavigate, onBack }: Props) 
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => { load(); }, []);
+  // GATING CONSOLIDATION (2026-09-24): this route had no server-side plan
+  // check at all until now (requirePlan(token,2) added in demand-radar/
+  // route.ts) and this screen never had to handle an upgrade_required
+  // response - the dashboard's own tool grid already blocks nav here below
+  // pro, but this client-side precheck matches every other gated screen's
+  // own defense-in-depth pattern (see ArbitrageScreen/ProfitTrackerScreen),
+  // so a direct/deep-linked hit shows a real upgrade prompt, not a stuck
+  // spinner or a silently empty list.
+  const isPaid = ["pro","tester","business","lifetime","titan","vip"].includes(plan);
+
+  useEffect(() => { if (isPaid) load(); else setLoading(false); }, []);
 
   async function load() {
     setError("");
@@ -47,6 +57,29 @@ export default function DemandRadarScreen({ token, onNavigate, onBack }: Props) 
     dataMode === "crowd-led" ? { txt: "● RESELLER SIGNAL", color: C.green } :
     dataMode === "early-signal" ? { txt: "● EARLY SIGNAL", color: C.yellow } :
     { txt: "● BUILDING DATA", color: C.text4 };
+
+  if (!isPaid) {
+    return (
+      <SafeAreaView style={s.safe}>
+        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+        <View style={s.nav}>
+          <TouchableOpacity onPress={() => onBack?.()} style={s.navBack}>
+            <Text style={s.navBackText}>‹ Back</Text>
+          </TouchableOpacity>
+          <Text style={s.navTitle}>🚀 Demand Radar</Text>
+          <View style={{ width: 50 }} />
+        </View>
+        <View style={s.pwCard}>
+          <Text style={s.pwIcon}>🔒</Text>
+          <Text style={s.pwTitle}>Pro Plan Required</Text>
+          <Text style={s.pwBody}>Upgrade to Pro to see rising demand before prices spike.</Text>
+          <TouchableOpacity style={s.pwBtn} onPress={() => onNavigate("upgrade")}>
+            <Text style={s.pwBtnText}>Upgrade →</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (loading) {
     return (
@@ -144,6 +177,12 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   loadingText: { color: C.text3, marginTop: 12, fontSize: 14 },
+  pwCard: { margin: 20, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 16, padding: 32, alignItems: "center" },
+  pwIcon: { fontSize: 40, marginBottom: 12 },
+  pwTitle: { color: C.text1, fontSize: 18, fontWeight: "800", marginBottom: 8 },
+  pwBody: { color: C.text3, fontSize: 13, textAlign: "center", lineHeight: 20, marginBottom: 16 },
+  pwBtn: { backgroundColor: C.green, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 24 },
+  pwBtnText: { color: C.greenDark, fontWeight: "900", fontSize: 15 },
   nav: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomColor: C.border, borderBottomWidth: 1 },
   navBack: { minWidth: 64, flexShrink: 0, paddingRight: 8 }, navBackText: { color: C.green, fontSize: 16, fontWeight: "600" },
   navTitle: { color: C.text1, fontSize: 18, fontWeight: "800" },

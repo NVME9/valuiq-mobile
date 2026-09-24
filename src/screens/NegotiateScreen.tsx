@@ -14,7 +14,7 @@ interface Props {
   onNavigate: (s: string) => void; onBack?: () => void; onLogout: () => void;
 }
 
-export default function NegotiateScreen({ onBack }: Props) {
+export default function NegotiateScreen({ token, onBack }: Props) {
   const [itemName, setItemName] = useState("");
   const [askingPrice, setAskingPrice] = useState("");
   const [sellPrice, setSellPrice] = useState("");
@@ -26,10 +26,13 @@ export default function NegotiateScreen({ onBack }: Props) {
     if (!itemName.trim() || !askingPrice.trim()) { Alert.alert("Add details", "Enter the item and asking price."); return; }
     setLoading(true); setResult(null);
     try {
+      // GATING CONSOLIDATION (2026-09-24): the request never sent a token at
+      // all, so negotiate/route.ts (also just gated seller+, see its own
+      // comment) had no way to identify the caller - an open back door.
       const r = await fetch(`${API_BASE}/api/negotiate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itemName, askingPrice: Number(askingPrice) || 0, sellPrice: Number(sellPrice) || 0, platform }),
+        body: JSON.stringify({ itemName, askingPrice: Number(askingPrice) || 0, sellPrice: Number(sellPrice) || 0, platform, userToken: token }),
       });
       const d = await r.json();
       if (!d.success) { Alert.alert("Couldn't generate", d.error || "Try again."); }

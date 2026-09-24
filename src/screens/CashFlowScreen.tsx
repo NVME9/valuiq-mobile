@@ -13,13 +13,18 @@ interface Props {
   onNavigate: (s: string) => void; onBack?: () => void; onLogout: () => void;
 }
 
-export default function CashFlowScreen({ token, onBack }: Props) {
+export default function CashFlowScreen({ token, plan, onNavigate, onBack }: Props) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => { load(); }, []);
+  // GATING CONSOLIDATION (2026-09-24): see DemandRadarScreen's matching
+  // comment - this route had no server-side plan check until now
+  // (requirePlan(token,2) added in cashflow-oracle/route.ts).
+  const isPaid = ["pro","tester","business","lifetime","titan","vip"].includes(plan);
+
+  useEffect(() => { if (isPaid) load(); else setLoading(false); }, []);
   async function load() {
     setError("");
     try {
@@ -33,6 +38,27 @@ export default function CashFlowScreen({ token, onBack }: Props) {
     setLoading(false);
   }
   async function refresh() { setRefreshing(true); await load(); setRefreshing(false); }
+
+  if (!isPaid) {
+    return (
+      <SafeAreaView style={s.safe}>
+        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+        <View style={s.nav}>
+          <TouchableOpacity onPress={() => onBack?.()} style={s.navBack}><Text style={s.navBackText}>‹ Back</Text></TouchableOpacity>
+          <Text style={s.navTitle}>💰 Cash Flow Oracle</Text>
+          <View style={{ width: 50 }} />
+        </View>
+        <View style={s.pwCard}>
+          <Text style={s.pwIcon}>🔒</Text>
+          <Text style={s.pwTitle}>Pro Plan Required</Text>
+          <Text style={s.pwBody}>Upgrade to Pro for your 30/60/90-day cash forecast.</Text>
+          <TouchableOpacity style={s.pwBtn} onPress={() => onNavigate("upgrade")}>
+            <Text style={s.pwBtnText}>Upgrade →</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (loading) {
     return (
@@ -134,6 +160,12 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   loadingText: { color: C.text3, marginTop: 12, fontSize: 14 },
+  pwCard: { margin: 20, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 16, padding: 32, alignItems: "center" },
+  pwIcon: { fontSize: 40, marginBottom: 12 },
+  pwTitle: { color: C.text1, fontSize: 18, fontWeight: "800", marginBottom: 8 },
+  pwBody: { color: C.text3, fontSize: 13, textAlign: "center", lineHeight: 20, marginBottom: 16 },
+  pwBtn: { backgroundColor: C.green, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 24 },
+  pwBtnText: { color: C.greenDark, fontWeight: "900", fontSize: 15 },
   nav: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomColor: C.border, borderBottomWidth: 1 },
   navBack: { minWidth: 64, flexShrink: 0, paddingRight: 8 }, navBackText: { color: C.green, fontSize: 16, fontWeight: "600" },
   navTitle: { color: C.text1, fontSize: 18, fontWeight: "800" },

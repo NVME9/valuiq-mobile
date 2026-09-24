@@ -14,7 +14,7 @@ interface Props {
   onNavigate: (s: string) => void; onBack?: () => void; onLogout: () => void;
 }
 
-export default function BundleBuilderScreen({ onBack }: Props) {
+export default function BundleBuilderScreen({ token, onBack }: Props) {
   const [items, setItems] = useState<{ name: string; price: string }[]>([{ name: "", price: "" }]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -30,10 +30,13 @@ export default function BundleBuilderScreen({ onBack }: Props) {
     if (valid.length < 2) { Alert.alert("Add items", "Add at least 2 items to bundle."); return; }
     setLoading(true); setResult(null);
     try {
+      // GATING CONSOLIDATION (2026-09-24): the request never sent a token at
+      // all, so bundle-builder/route.ts (also just gated seller+, see its
+      // own comment) had no way to identify the caller - an open back door.
       const r = await fetch(`${API_BASE}/api/bundle-builder`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: valid.map((it) => ({ name: it.name, price: Number(it.price) || 0 })) }),
+        body: JSON.stringify({ items: valid.map((it) => ({ name: it.name, price: Number(it.price) || 0 })), userToken: token }),
       });
       const d = await r.json();
       if (!d.success) { Alert.alert("Couldn't build bundles", d.error || "Try again."); }
