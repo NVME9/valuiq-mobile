@@ -114,13 +114,9 @@ export default function LoginScreen({ onLogin }: Props) {
         ? await signUp(email.trim(), password)
         : await signIn(email.trim(), password);
       await saveSession(session);
-      if (justSignedUp) {
-        fetch(`${API_BASE}/api/email-sequences`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "welcome", email: email.trim() }),
-        }).catch(() => {});
-      }
+      // Auto welcome email disabled 2026-09-28 — Nate sends welcomes personally
+      // for now. /api/email-sequences (type:"welcome") is untouched for manual/
+      // future use; this was the only client trigger for it.
       // Offer biometrics — show prompt then call onLogin regardless of choice
       const { available, type: detectedType } = await isBiometricAvailable();
       const alreadyEnabled = available ? await isBiometricEnabled() : true;
