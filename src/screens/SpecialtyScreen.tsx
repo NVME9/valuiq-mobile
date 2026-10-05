@@ -362,17 +362,10 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
         };
     const isSkip = outcome.tier === "skip";
 
-    // HONESTY SWEEP (2026-09-18): same fix as ScannerScreen.tsx - only
-    // prepend a platform mention when result.realPlatformClaim clears the
-    // server-side majority floor (see lib/crowdPlatform.ts), worded as a
-    // claim ("Most sold on X"), never as a bare location ("On X"). Still
-    // never prepended for a suppressed item - see the original comment
-    // this replaces for why. No fallback line needed when no real claim:
-    // outcome.copy already leads with "{roi}% ROI..." for every
-    // non-noFlipMargin tier (src/lib/outcomeTier.ts).
-    const heroOutcome = (!suppressed && enteredBp > 0 && result.realPlatformClaim)
-      ? { ...outcome, copy: `Most sold on ${result.realPlatformClaim.platform} — ${outcome.copy}` }
-      : outcome;
+    // REMOVED (2026-10-04, decision 8/10) - same fix as ScannerScreen.tsx:
+    // realPlatformClaim is a brand+category-WIDE stat, never item-specific -
+    // see that file's comment for the measured case this closes.
+    const heroOutcome = outcome;
 
     const categoryLine = `${selectedCat.label}${result.confidence ? " - " + result.confidence + " confidence" : ""}`;
 
@@ -396,12 +389,13 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
     // since confirmedByMoat/agreeingCount is the actual honesty signal
     // (never dataQuality tiers, which only describe identification
     // confidence, not moat agreement).
+    // REAL DATA GATE (2026-10-04, decision 4) - same fix as ScannerScreen.tsx:
+    // server confirmedByMoat already requires >=5 same-item-type agreeing
+    // rows now, no small-sample variant needed below that bar.
     const dataTag = suppressed ? undefined :
-      result.confirmedByMoat ? (result.agreeingCount >= 30 ? "● REAL DATA" : "● REAL DATA · SMALL SAMPLE")
-      : "● ESTIMATE";
+      result.confirmedByMoat ? "● REAL DATA" : "● ESTIMATE";
     const dataTagColor = suppressed ? undefined :
-      result.confirmedByMoat ? (result.agreeingCount >= 30 ? C.green : C.yellow)
-      : C.text4;
+      result.confirmedByMoat ? C.green : C.text4;
     const secondaryStats = [
       { label: "sell price", value: result.sellPrice != null ? "$" + Math.round(result.sellPrice) : "—" },
       { label: "ROI", value: result.roi ? result.roi + "%" : "—" },
@@ -738,7 +732,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
             active
             steps={[
               { label: "Identifying your item", ms: 4000 },
-              { label: "Checking real reseller sales", ms: 1500 },
+              { label: "Checking real reseller outcomes", ms: 1500 },
               { label: "Applying category expertise", ms: 12000 },
               { label: "Finalizing your appraisal", ms: 7500 },
             ]}

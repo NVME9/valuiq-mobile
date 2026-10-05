@@ -367,7 +367,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       // what THIS scan actually found - a detected tag price, and the
       // model's own condition read - editable from here, never re-collected
       // before a scan again.
-      setBuyPrice(Number(d.retailPriceRead) > 0 ? String(d.retailPriceRead) : "");
+      // TAG CONFIDENCE (2026-10-04, decision 2): a low-confidence tag read
+      // (a shelf tag with multiple numbers - was/now, unit price - that the
+      // model wasn't sure about) is NOT auto-seeded into buyPrice anymore -
+      // measured live: a Disney Minnie item tagged $26 read as $15 (the
+      // SAME wrong number across two separate scans of it), which would
+      // have silently driven the whole verdict off a guess with no
+      // confirmation step. High-confidence reads still auto-seed exactly as
+      // before; a low-confidence one leaves the field blank and the hint
+      // below (near the price input) shows what was read, asking the user
+      // to confirm or correct it before any verdict leans on it.
+      setBuyPrice(
+        Number(d.retailPriceRead) > 0 && d.retailPriceReadConfidence !== "low"
+          ? String(d.retailPriceRead)
+          : ""
+      );
       setResultCondition(d.conditionAssessment || "");
       // SALE-CAPTURE MOAT: on a BUY, either schedule (if already allowed) or
       // surface the soft in-app ask. Never fire Apple's cold prompt directly.
@@ -609,31 +623,31 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       ? enteredBp
       : (Number(result.retailPriceRead) > 0 ? Number(result.retailPriceRead) : null);
 
-    // ONE CANONICAL SELL PRICE (2026-09-17, extended 2026-09-17): the
-    // single sell-price figure every downstream number (fees, heroProfit,
-    // heroRoi, maxBuy, the "sell price" stat, the estimate-tier hero/copy,
-    // and the Profit Oracle priceData box's visibility) derives from -
-    // rounded to the dollar ONCE, here, so no two displays of the same
-    // underlying number can independently round to different figures (the
-    // "$6 profit / 138% ROI don't cross-check" bug).
+    // ONE CANONICAL SELL PRICE (2026-09-17, REVERTED 2026-10-04 - decision
+    // 3/10, Walmart-aisle testing): the single sell-price figure every
+    // downstream number (fees, heroProfit, heroRoi, maxBuy, the "sell
+    // price" stat, the estimate-tier hero/copy, and the Profit Oracle
+    // priceData box's visibility) derives from - rounded to the dollar
+    // ONCE, here, so no two displays of the same underlying number can
+    // independently round to different figures (the "$6 profit / 138% ROI
+    // don't cross-check" bug).
     //
-    // ONE RESALE REALITY, PART 2: when crowdMedianAvailable, this is now
-    // the crowd's real median sold price - NOT the AI/Oracle estimate -
-    // deliberately NOT multiplied by conditionFactor. conditionFactor
-    // exists to adjust a MODEL'S GUESS for condition it can't verify from
-    // a raw catalog number; the crowd median is not a guess, it's an
-    // aggregate of real transactions, and applying a made-up multiplier
-    // to a real number would misrepresent it as more precise than it is.
-    // Only the AI-estimate fallback path (crowdMedianAvailable false)
-    // keeps the condition adjustment. This is also why the card previously
-    // showed three different sell prices at once ($10 AI estimate driving
-    // profit/ROI, "avg $12" from the separate Profit Oracle priceData box,
-    // "$18 median" from the crowd box) - all three are now gated to show
-    // exactly one at a time, matching whichever number the math actually
-    // used.
-    const sellPriceForProfit = crowdMedianAvailable
-      ? Math.round(Number(result.crowdVerdict.medianSoldPrice))
-      : Math.round(adjustedResaleValue || Number(result.sellPrice) || 0);
+    // This used to prefer result.crowdVerdict.medianSoldPrice (the crowd-
+    // verdict RPC's median) over the server's own Oracle sellPrice whenever
+    // crowdMedianAvailable - reasoned at the time as "a real median beats a
+    // guess." Measured live: crowd_verdict_stats matches by brand+category
+    // ALONE (lib/crowdVerdict.ts - no item-type, no price-band, no
+    // condition filter, unlike lib/profitOracle.ts's Oracle match), so for
+    // a brand with a large, mixed catalog (parts/accessories/full-units all
+    // together) its median can be wildly off this SPECIFIC item - a sealed
+    // Dyson PencilVac showed "$50" from this path while the server's own
+    // carefully-matched Oracle answer was $392. The server's sellPrice (via
+    // adjustedResaleValue for the condition-adjustable AI-estimate case) is
+    // now the ONLY source for this screen's canonical price - the crowd
+    // verdict box still renders its own sell-through/sample-size content
+    // (see the crowd-box render further down), it just no longer overrides
+    // the price everything else on this card is computed from.
+    const sellPriceForProfit = Math.round(adjustedResaleValue || Number(result.sellPrice) || 0);
     // LOCAL RECOMPUTE (2026-09-10, items 8/9): mirrors lib/profitMath.ts's
     // computeProfit exactly - fees = round(sp*feeRate*100)/100, netProfit =
     // round((sp-fees-cost)*100)/100 - so editing price or condition here
@@ -721,7 +735,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // without claiming a verdict this screen can't back up - real sell
     // data (the banner above) plus a correctly-computed Max Buy (below)
     // are the only honest things to lead with until a price is entered.
-    const outcome = enteredBp > 0
+    // VERDICT GATE (2026-10-04, decision 5): a big verdict (HOT BUY/SKIP/
+    // JUDGMENT CALL, with a real ROI%/"excellent margin" framing) now also
+    // requires result.confirmedByMoat - the sell price must be item-level
+    // evidence (server-side: >=5 agreeing rows of the SAME item type, see
+    // lib/profitOracle.ts), not just "a buy price was entered." Measured
+    // live: a Reebok fitness kit with ZERO moat confirmation
+    // (confirmedByMoat:false, agreeingCount:0 - a pure LLM guess) showed
+    // "HOT BUY, 95% ROI, excellent margin" once $17.50 was entered - the
+    // buy side was real, but the sell side backing that verdict was not.
+    const hasItemLevelSellEvidence = !!result.confirmedByMoat;
+    const outcome = (enteredBp > 0 && hasItemLevelSellEvidence)
       ? classifyOutcome({
           noFlipMargin: !!result.noFlipMargin,
           netProfit: heroProfit,
@@ -733,7 +757,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           sellPrice: sellPriceForProfit || null,
           sellTimeLabel,
         })
-      : {
+      : (enteredBp > 0 ? {
+          // PRICED BUT UNCONFIRMED (2026-10-04, decision 5): a price WAS
+          // entered, but the sell side is still a market estimate, not
+          // item-level evidence - same "estimate" tier/layout as the
+          // no-price branch below (no hero verdict, no ROI%), with copy
+          // that reflects the price already being in rather than asking
+          // for it again.
+          tier: "estimate" as const,
+          emoji: "🏷️",
+          label: "ESTIMATE",
+          copy: `Sells for about $${sellPriceForProfit} (market estimate, not yet confirmed by real sales of this exact item) — verify before buying at $${enteredBp}.`,
+          accent: C.yellow,
+          adjustedROI: 0,
+          daysUsed: 0,
+        } : {
           // NO PRICE ENTERED (2026-09-10, item 8): the OLD "ADD PRICE" skip-
           // styled dead-end is gone - price now lives on THIS screen (see
           // above), so having none yet is the common, honest starting
@@ -767,7 +805,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           accent: C.yellow,
           adjustedROI: 0,
           daysUsed: 0,
-        };
+        });
     const isSkip = outcome.tier === "skip";
     // Hero number: real profit once a price exists, the estimate itself
     // before that - ProfitFlexHero just renders whatever it's handed under
@@ -775,22 +813,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // Reads sellPriceForProfit (canonical, rounded), not adjustedResaleValue.
     const heroDisplayValue = enteredBp > 0 ? heroProfit : sellPriceForProfit;
 
-    // HONESTY SWEEP (2026-09-18): this used to prepend "On {bestPlatform} —"
-    // whenever a price was entered, where bestPlatform was ALWAYS the
-    // scan-time fee-argmax guess (lens/route.ts picks the lowest fee, e.g.
-    // Facebook's 5% vs eBay's 13.27%) - a user could see "On Facebook — 29%
-    // ROI" with no way to tell that platform was a fee guess, not a real
-    // claim about where this item sells. Now: only prepended when
-    // result.realPlatformClaim clears the server-side majority floor (see
-    // lib/crowdPlatform.ts) - a real, sourced claim, worded as a claim
-    // ("Most sold on X"), not a location assertion ("On X"). When no real
-    // claim exists, outcome.copy is left exactly as classifyOutcome wrote
-    // it - every non-noFlipMargin tier already leads with "{roi}% ROI..."
-    // (see src/lib/outcomeTier.ts), which IS the honest, platform-free
-    // framing the fallback needs - no separate ROI line has to be built.
-    const heroOutcome = (enteredBp > 0 && result.realPlatformClaim)
-      ? { ...outcome, copy: `Most sold on ${result.realPlatformClaim.platform} — ${outcome.copy}` }
-      : outcome;
+    // REMOVED (2026-10-04, decision 8, Walmart-aisle testing): this used to
+    // prepend "Most sold on {platform} —" from result.realPlatformClaim - a
+    // brand+category-WIDE stat (lib/crowdPlatform.ts's getRealPlatformClaim),
+    // never item-specific, stitched onto a specific item's verdict as if it
+    // were evidence about THIS item. Measured: a Reebok fitness kit with
+    // ZERO item-level confirmation showed a "Most sold on eBay"-style claim
+    // next to its verdict. The server no longer surfaces this claim inside
+    // dataQualityMessage either (see app/api/lens/route.ts) - outcome.copy
+    // is shown exactly as classifyOutcome wrote it, always.
+    const heroOutcome = outcome;
 
     // CONDITION CONCEPT (2026-09-10, item 9): reads resultCondition
     // (conditionAssessment - editable via the dropdown below, the ONE
@@ -838,15 +870,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // is entered the badge becomes BUY/SKIP/etc. and this tag becomes a
     // genuinely different, useful signal ("this verdict rests on estimated
     // data") - so the suppression is scoped to enteredBp<=0, not blanket.
+    // REAL DATA GATE (2026-10-04, decision 4): server-side confirmedByMoat
+    // now already requires >=5 agreeing rows of the SAME item type (see
+    // lib/profitOracle.ts's MIN_CONFIRMED_AGREEING/itemTypeMatched) - this
+    // used to re-derive its OWN ">= 30 real / else small sample" threshold
+    // from agreeingCount client-side, which is exactly how a single
+    // unconfirmed row ever showed "REAL DATA · SMALL SAMPLE" in the first
+    // place. No small-sample variant below the server's own bar anymore -
+    // confirmedByMoat is binary: trust it, or it's a market estimate.
     const dataTag = result.confirmedByMoat
-      ? (result.agreeingCount >= 30 ? "● REAL DATA" : "● REAL DATA · SMALL SAMPLE")
+      ? "● REAL DATA"
       : (enteredBp > 0 ? "● ESTIMATE" : undefined);
-    const dataTagColor = result.confirmedByMoat
-      ? (result.agreeingCount >= 30 ? C.green : C.yellow)
-      : C.text4;
+    const dataTagColor = result.confirmedByMoat ? C.green : C.text4;
     const footNote = result.confirmedByMoat
-      ? (result.agreeingCount >= 30 ? "From real reseller outcomes." : "From real reseller outcomes — small sample, treat as a rough signal.")
-      : "Market estimate. Sharpens as more resellers log real sales.";
+      ? "From real reseller outcomes."
+      : "Market estimate. Sharpens as more resellers log real outcomes.";
     // sell price reads sellPriceForProfit (condition-adjusted), NOT
     // result.sellPrice directly - it sits right next to ROI in this same
     // row, and ROI is already computed off the adjusted number (see
@@ -919,8 +957,24 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   adjustedResale / heroProfit / outcome computation above)
                   - no new LLM call, no network round trip, instant. */}
               <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
-                {Number(result.retailPriceRead) > 0 ? "Price (from a detected tag)" : "What you paid (optional)"}
+                {Number(result.retailPriceRead) > 0
+                  ? (result.retailPriceReadConfidence === "low"
+                      ? `We read $${result.retailPriceRead} off the tag — correct?`
+                      : "Price (from a detected tag)")
+                  : "What you paid (optional)"}
               </Text>
+              {/* TAG CONFIDENCE (2026-10-04, decision 2): shows the exact
+                  text the low-confidence read came from, so the user can
+                  check it against the real tag instead of trusting a
+                  number the model itself wasn't sure about. Only renders
+                  for the low-confidence case - buyPrice is left blank by
+                  the scan-result handler above specifically so this isn't
+                  silently driving anything until confirmed/edited. */}
+              {Number(result.retailPriceRead) > 0 && result.retailPriceReadConfidence === "low" && result.retailPriceReadSourceText ? (
+                <Text style={s.priceLowConfidenceHint} numberOfLines={2}>
+                  Read from: "{result.retailPriceReadSourceText}" — tap above to confirm or enter the real price.
+                </Text>
+              ) : null}
               <View style={s.priceFieldWrap}>
                 <Text style={s.priceFieldDollar}>$</Text>
                 <TextInput
@@ -1001,8 +1055,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   crowdBits.push(`${cv.sellThroughPct}% of these actually sold` + (cv.medianDaysToSale != null ? `, in ~${cv.medianDaysToSale}d` : ""));
                 }
                 if (cv.medianSoldPrice != null) crowdBits.push(`$${cv.medianSoldPrice} median`);
-                const crowdHeadline = (cv.scope === "category" ? "Category trend — " : "") + crowdBits.join(" — ");
-                const crowdCredential = `from ${cv.sampleSize} real reseller sales`;
+                // ALWAYS "Category trend —" now (2026-10-04, decisions 8/10):
+                // cv.scope "item" vs "category" is set server-side by
+                // lib/crowdVerdict.ts purely on brand+category sample size,
+                // with NO item-type/condition matching the way
+                // lib/profitOracle.ts's Oracle requires for confirmedByMoat -
+                // "item" scope here does NOT mean "confirmed for this exact
+                // item," only "this brand+category has enough rows." Always
+                // labeled as category context so it can never read as
+                // item-level evidence next to this item's own price.
+                const crowdHeadline = "Category trend — " + crowdBits.join(" — ");
+                const crowdCredential = `from ${cv.sampleSize} real reseller outcomes`;
                 const disagrees = (outcome.label === "HOT BUY" || outcome.label === "BUY") && cv.call === "PASS";
                 // CROWD-OWN COLOR (2026-09-17): this box's tint follows
                 // cv.call, NOT outcome.accent (the ROI verdict's color,
@@ -1745,6 +1808,7 @@ const s = StyleSheet.create({
   // (green border, 26pt digits) so it reads as THE primary field, not one
   // of three equally-weighted optional boxes.
   priceLabel:      { color: C.text2, fontSize: 13, fontWeight: "800", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 },
+  priceLowConfidenceHint: { color: C.yellow, fontSize: 11, marginBottom: 8, fontStyle: "italic" },
   priceFieldWrap:  { flexDirection: "row", alignItems: "center", backgroundColor: C.greenBg, borderWidth: 1.5, borderColor: C.greenBorder, borderRadius: 14, paddingHorizontal: 16 },
   priceFieldDollar:{ color: C.green, fontSize: 26, fontWeight: "800", marginRight: 4 },
   priceFieldInput: { flex: 1, color: C.text1, fontSize: 26, fontWeight: "700", paddingVertical: 14 },
