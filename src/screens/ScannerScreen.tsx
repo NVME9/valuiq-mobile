@@ -1114,6 +1114,23 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 </View>
               ) : null}
 
+              {result?.refinePending && (
+                // DEFERRED SEARCH-GATE REFINE (2026-10-06, Option A): mirrors
+                // deal-ai-pro's ScanBox.tsx note - the server scheduled a
+                // background search-enabled re-check (see lens/route.ts's
+                // after() block) instead of making this response wait on it.
+                // Purely informational; nothing here polls or re-fetches -
+                // the updated value is just already there next time History
+                // is opened. Deliberately NOT wired to refineScan()/
+                // needsRefine (that's the OLDER client-driven two-stage
+                // mechanism, currently dead since the server stopped sending
+                // needsRefine - see maybeRefineInBackground above) - this is
+                // the newer, purely-server-side pass, no client call needed.
+                <Text style={{ marginTop: 10, color: C.text3, fontSize: 12.5, fontWeight: "600", textAlign: "center" }}>
+                  Still checking — final result appears in History.
+                </Text>
+              )}
+
               {/* CONDITION DROPDOWN (2026-09-10, item 9): pre-filled from
                   the scan's own read (conditionAssessment); changing it
                   applies the SAME fixed multiplier the backend uses (item
