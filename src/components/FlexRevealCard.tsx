@@ -26,6 +26,8 @@ import ViewShot from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
 import Svg, { Defs, RadialGradient, Stop, Rect } from "react-native-svg";
 import { C } from "../lib/theme";
+import ValuIQLogo from "./ValuIQLogo";
+import Wordmark from "./Wordmark";
 import { FlexStat, money } from "../lib/flexReveal";
 import { buildDisplayTitle } from "../lib/saleCapture";
 
@@ -228,8 +230,10 @@ export function FlexRevealContent({ stat, itemName, brand, animate = true, loadi
       </View>
 
       <View style={s.brandRow}>
-        <View style={s.brandDot} />
-        <Text style={s.brandWord}>VALUIQ</Text>
+        <View style={s.brandBadge}>
+          <ValuIQLogo accent={C.green} size={14} />
+        </View>
+        <Wordmark style={s.wordmark} />
       </View>
 
       <View style={s.body}>
@@ -504,6 +508,12 @@ const s = StyleSheet.create({
   brandRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 30 },
   brandDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: C.green, shadowColor: C.green, shadowOpacity: 0.9, shadowRadius: 8, shadowOffset: { width: 0, height: 0 } },
   brandWord: { color: C.text2, fontSize: 15, fontWeight: "800", letterSpacing: 3 },
+  brandBadge: {
+    width: 22, height: 22, borderRadius: 7, borderWidth: 1.2,
+    borderColor: C.green + "30", backgroundColor: C.bgDeep,
+    alignItems: "center", justifyContent: "center",
+  },
+  wordmark: { color: C.text2, fontSize: 15, fontWeight: "800", letterSpacing: 3 },
   body: { alignItems: "center" },
   eyebrow: { color: C.green, fontSize: 13, fontWeight: "800", letterSpacing: 2, marginBottom: 10, textTransform: "uppercase" },
   // Muted gray instead of the celebratory green - even neutral "LOGGED" copy

@@ -53,8 +53,12 @@ export interface OutcomeTierInfo {
 // these ever change).
 const UNKNOWN_DAYS_FALLBACK = 45;   // conservative default when velocity data is missing - assume slower, not faster, for display purposes only
 const MIN_DAYS_FLOOR = 3;           // days-to-sell floored here before display, so a 1-day flash sale doesn't produce a meaningless "~1 day" copy line
-export const PROFIT_JUDGMENT_FLOOR = 5; // $, rule 2 - net profit below this caps the verdict at JUDGMENT CALL regardless of ROI
-export const ROI_SKIP_MAX = 10;         // %, rule 3 - after-fees ROI below this is a hard SKIP
+export const PROFIT_JUDGMENT_FLOOR = 5; // $, rule 3 - net profit below this caps the verdict at JUDGMENT CALL, but only once rule 2's ROI floor is already cleared
+export const ROI_PASS_MIN = 10;         // %, rule 2 - after-fees ROI below this is a hard SKIP at ANY profit level (was ROI_SKIP_MAX -
+                                         // renamed 2026-09-22, mirroring deal-ai-pro/lib/profitMath.ts's classifyTier reorder fix: this
+                                         // used to run AFTER the profit floor below, so a trivial-but-positive dollar profit on trash ROI
+                                         // (e.g. $0.61 on $15, 4% ROI) capped out at JUDGMENT CALL instead of SKIP - the profit floor
+                                         // granted a pass ROI hadn't earned. See classifyOutcome's rule comments below.
 export const ROI_BUY_MIN = 30;          // %, rule 5 - after-fees ROI at/above this (and clear of the profit floor) is a confident BUY; this is the "target ROI" max-buy solves for
 export const ROI_HOT_MIN = 75;          // %, rule 6 - after-fees ROI at/above this is a HOT BUY
 
@@ -83,31 +87,42 @@ export function classifyOutcome(input: OutcomeTierInput): OutcomeTierInfo {
     };
   }
 
-  // 6-LINE PRECEDENCE (2026-09-10) — first match wins, top to bottom.
-  // Boundaries are exact: netProfit < 0 is the ONLY thing that hits rule 1;
-  // netProfit === 0 falls through to rule 2 (judgment call, not skip).
+  // 6-LINE PRECEDENCE — first match wins, top to bottom. Boundaries are
+  // exact: netProfit < 0 is the ONLY thing that hits rule 1; netProfit === 0
+  // falls through past rule 1.
+  //
+  // RULE-ORDER FIX (2026-09-22, mirrors deal-ai-pro/lib/profitMath.ts's
+  // classifyTier): rules 2 and 3 used to run in the opposite order (profit
+  // floor before ROI floor), so a trivial-but-positive dollar profit on
+  // trash ROI (e.g. $0.61 on $15, 4% ROI) capped out at JUDGMENT CALL - the
+  // profit floor granted a pass ROI hadn't earned, before ROI was ever
+  // consulted. The ROI floor now runs FIRST (right after the unconditional-
+  // loss check) and applies at every profit level: a flip is a hard SKIP
+  // whenever netProfit < 0 OR roi < ROI_PASS_MIN, full stop. The profit-
+  // judgment-floor rule only ever sees flips that already cleared the ROI
+  // floor - a real judgment call (decent % on too few dollars), not a
+  // hiding place for bad ROI.
 
   // Rule 1 — a real loss, unconditional.
   if (netProfit < 0) {
     return { tier: "skip", emoji: "❌", label: "SKIP", copy: `You'd lose ${money(netProfit)}. Skip it.`, accent: C.red, adjustedROI, daysUsed: days };
   }
 
-  // Rule 2 — net profit under the judgment floor caps the verdict here,
-  // REGARDLESS of ROI. A high-ROI-but-tiny-dollar flip is the reseller's
-  // own call to make, never an auto-buy or an auto-skip. Checked BEFORE any
-  // ROI band, so it overrides ROI downward (a 90%-ROI, $3-profit item lands
-  // here) but never upward.
+  // Rule 2 — ROI too thin to buy, at ANY profit level. Checked before the
+  // dollar-profit floor now, so it can't be shadowed by rule 3 below.
+  if (roi < ROI_PASS_MIN) {
+    return { tier: "skip", emoji: "❌", label: "SKIP", copy: `${roiRounded}% ROI — margin too thin to buy.`, accent: C.red, adjustedROI, daysUsed: days };
+  }
+
+  // Rule 3 — net profit under the judgment floor caps the verdict here,
+  // but only once ROI has already cleared rule 2. A high-ROI-but-tiny-
+  // dollar flip is the reseller's own call to make, never an auto-buy.
   if (netProfit < PROFIT_JUDGMENT_FLOOR) {
     return {
       tier: "thin", emoji: "⚖️", label: "JUDGMENT CALL",
       copy: `Only ${money(netProfit)} profit — too small to call a clear buy, whatever the ROI says. Your call.`,
       accent: C.yellow, adjustedROI, daysUsed: days,
     };
-  }
-
-  // Rule 3 — ROI too thin to buy, dollars aside (already cleared rule 2).
-  if (roi < ROI_SKIP_MAX) {
-    return { tier: "skip", emoji: "❌", label: "SKIP", copy: `${roiRounded}% ROI — margin too thin to buy.`, accent: C.red, adjustedROI, daysUsed: days };
   }
 
   // Rule 4 — ROI in the judgment-call zone.

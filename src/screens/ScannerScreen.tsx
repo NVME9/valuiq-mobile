@@ -1016,15 +1016,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 const crowdAccent = cv.call === "BUY" ? C.green : cv.call === "PASS" ? C.red : C.yellow;
                 return (
                   <View style={[s.rangeBanner, { backgroundColor: crowdAccent + "1a", borderColor: crowdAccent + "55" }]}>
-                    <Text>{"👥"}</Text>
-                    <FlashHighlight flashSeq={refineSeq}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: crowdAccent, fontSize: 13, fontWeight: "800", marginBottom: 2 }}>
+                    <View style={s.rangeBannerIcon}>
+                      <Text>{"👥"}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <FlashHighlight flashSeq={refineSeq}>
+                        <Text style={{ color: crowdAccent, fontSize: 13, fontWeight: "800", marginBottom: 2, flexWrap: "wrap" }}>
                           {disagrees ? "⚠️ but real resellers move these slowly" : crowdHeadline}
                         </Text>
                         <Text style={s.rangeBannerSub}>{disagrees ? `${crowdHeadline} — ${crowdCredential}` : crowdCredential}</Text>
-                      </View>
-                    </FlashHighlight>
+                      </FlashHighlight>
+                    </View>
                   </View>
                 );
               })() : null}
@@ -1757,8 +1759,18 @@ const s = StyleSheet.create({
   // Fix 3 (2026-09-10): color/border set inline per-render from
   // outcome.accent (hot/solid=green, thin=yellow, skip=red, estimate=
   // yellow) - this base style only carries the fixed layout.
-  rangeBanner:      { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1.5, borderRadius: 12, padding: 12, marginBottom: 12 },
-  rangeBannerSub:   { color: C.text3, fontSize: 12 },
+  // CROWD-BOX OVERFLOW FIX (2026-09-22): padding made explicitly symmetric
+  // (paddingHorizontal, not a single `padding` shorthand easy to mis-edit
+  // asymmetrically later) and a dedicated fixed-width icon column added
+  // (rangeBannerIcon) so a long headline (worst case: the "Category trend —
+  // ..." variant) wraps within the remaining flex:1 text column instead of
+  // running past the right border. See the crowd-box render below for why
+  // the real width-collapse was FlashHighlight's Animated.View sitting
+  // between this row and the flex:1 text column with no flex of its own -
+  // the flex:1 View now wraps FlashHighlight instead of the reverse.
+  rangeBanner:      { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12, marginBottom: 12 },
+  rangeBannerIcon:  { width: 22, flexShrink: 0, alignItems: "center" },
+  rangeBannerSub:   { color: C.text3, fontSize: 12, flexWrap: "wrap" },
   noDataBanner:   { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#1a0808", borderWidth: 1, borderColor: C.red + "30", borderRadius: 12, padding: 12, marginBottom: 12 },
   noDataText:     { color: C.red, fontSize: 13, fontWeight: "700", flex: 1 },
   profitCard:     { backgroundColor: "rgba(0,0,0,0.35)", borderWidth: 2, borderRadius: 20, padding: 20, marginBottom: 10, alignItems: "center" },

@@ -1,6 +1,8 @@
 import React from "react";
 import { View, Text, StyleSheet, Image } from "react-native";
 import { C } from "../lib/theme";
+import ValuIQLogo from "./ValuIQLogo";
+import Wordmark from "./Wordmark";
 
 // Rendered off-screen at this width and captured with react-native-view-shot,
 // which defaults to the device's native pixel density (no width/height
@@ -76,7 +78,17 @@ export default function ShareCard({ result, oracle, photoBase64, photoUri, onPho
   return (
     <View style={s.card}>
       <View style={s.header}>
-        <Text style={s.wordmark}>VALUIQ</Text>
+        <View style={s.brandRow}>
+          {/* Same V-badge + split-color wordmark treatment as HeaderLogo/
+              LogoBadge on every other screen (Dashboard, Scanner, Onboarding,
+              etc.) - SVG, not the raster app-icon PNG ScannerMark uses, so
+              there's no new async image load for view-shot to race against
+              when it captures this card off-screen. */}
+          <View style={s.badge}>
+            <ValuIQLogo accent={C.green} size={20} />
+          </View>
+          <Wordmark style={s.wordmark} />
+        </View>
         <Text style={s.tagline}>what resellers actually made</Text>
       </View>
 
@@ -172,8 +184,23 @@ const s = StyleSheet.create({
     paddingBottom: 16,
     alignItems: "center",
   },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  badge: {
+    width: 32,
+    height: 32,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    borderColor: C.green + "30",
+    backgroundColor: C.bgDeep,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   wordmark: {
-    color: C.green,
+    color: C.text1,
     fontSize: 26,
     fontWeight: "900",
     letterSpacing: 3,
