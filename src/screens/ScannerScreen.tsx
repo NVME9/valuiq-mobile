@@ -584,17 +584,39 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // recompute from (a path that skipped identify entirely - barcode/
     // description-only - never had a model resale judgment to begin with;
     // the condition dropdown is a display-only no-op there).
-    const hasRawModelResale = Number(result.resaleFromModel) > 0;
+    // STALE-ANCHOR FIX (2026-10-05, MEASURED: real Walmart-aisle scans - a
+    // Minnie Mouse plush and an Under Armour polo): resaleFromModel is the
+    // model's RAW, PRE-oracle/PRE-Browse anchor - it exists on every scan
+    // that ran identify at all, confirmed by real data or not. hasRawModelResale
+    // used to gate on resaleFromModel alone, so this local recompute fired
+    // UNCONDITIONALLY whenever identify ran, silently discarding whatever
+    // the server's real final price actually was: the Minnie Mouse scan
+    // showed a $22 sell price with a "6 active New-condition eBay listings
+    // (median $38)" badge right next to it - $22 was resaleFromModel*1.0,
+    // completely ignoring the server's real anchorSource:"ebay-active-new"
+    // sellPrice of $34. The Under Armour polo showed "$10 ESTIMATED SELL
+    // PRICE" next to a "● REAL DATA" badge - $10 was resaleFromModel(18)*
+    // conditionFactor(0.55), ignoring confirmedByMoat:true's real
+    // moat-blended sellPrice of $15. In both cases the "condition dropdown"
+    // recompute is only a correct mirror of the server when the server's
+    // own price WAS the bare model anchor (no moat blend, no Browse
+    // override) - that's exactly !confirmedByMoat && anchorSource !==
+    // "ebay-active-new". Any other case: result.sellPrice/priceRange IS
+    // the authoritative number (already condition-aware server-side), and
+    // the local recompute must defer to it instead of recomputing from a
+    // pre-correction anchor.
+    const resaleIsAuthoritative = !result.confirmedByMoat && result.anchorSource !== "ebay-active-new";
+    const hasRawModelResale = Number(result.resaleFromModel) > 0 && resaleIsAuthoritative;
     const conditionFactor = CONDITION_MULTIPLIER[resultCondition] ?? DEFAULT_CONDITION_MULTIPLIER;
     const adjustedResaleValue = hasRawModelResale
       ? Math.round(Number(result.resaleFromModel) * conditionFactor)
-      : (Number(result.estimatedResaleValue) || Number(result.sellPrice) || 0);
+      : (Number(result.sellPrice) || Number(result.estimatedResaleValue) || 0);
     const adjustedResaleLow = hasRawModelResale && Number(result.resaleModelLow) > 0
       ? Math.round(Number(result.resaleModelLow) * conditionFactor)
-      : (Number(result.estimatedResaleRange?.low) || null);
+      : (Number(result.priceRange?.low) || Number(result.estimatedResaleRange?.low) || null);
     const adjustedResaleHigh = hasRawModelResale && Number(result.resaleModelHigh) > 0
       ? Math.round(Number(result.resaleModelHigh) * conditionFactor)
-      : (Number(result.estimatedResaleRange?.high) || null);
+      : (Number(result.priceRange?.high) || Number(result.estimatedResaleRange?.high) || null);
 
     // FEE RATE - parsed from the best platform's own breakdown (already
     // computed server-side, e.g. "13.3%") rather than duplicating a second
@@ -807,6 +829,27 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           daysUsed: 0,
         });
     const isSkip = outcome.tier === "skip";
+    // PROFIT-HONESTY FIX (2026-10-05, MEASURED: the Minnie Mouse plush
+    // scan): tier "estimate" already means "not item-level confirmed" (see
+    // the VERDICT GATE comment above - it's the branch used whenever
+    // !hasItemLevelSellEvidence, i.e. !confirmedByMoat, OR no price is
+    // entered yet) and its own copy ALREADY says the honest thing ("market
+    // estimate, not yet confirmed... verify before buying at $X" / "range
+    // $Y-$Z... enter what you paid for your real profit"). But isSkip only
+    // ever covered tier==="skip", so ProfitFlexHero's isSkip prop was still
+    // getting false for "estimate" - and the NON-skip branch renders the
+    // real money hero + profitLabel ("actual profit after fees") +
+    // secondaryStats (ROI%) UNCONDITIONALLY. Observed live: a $26 Minnie
+    // Mouse with !confirmedByMoat showed "-$5.10 ACTUAL PROFIT AFTER FEES"
+    // and "-20% ROI" as if that were real money math, when the sell side
+    // was a Browse-active-listings estimate the whole time. Passing this
+    // broader flag into ProfitFlexHero's isSkip prop instead of the
+    // narrower `isSkip` (still used unchanged everywhere else below -
+    // skipDetail, the buy-oriented {!isSkip} section) routes "estimate"
+    // through the SAME reason-copy layout as a real skip, so the money
+    // hero/profitLabel/ROI stat never render for unconfirmed data - only
+    // outcome.copy's already-honest range + "verify before buying" text.
+    const hideProfitHero = outcome.tier === "skip" || outcome.tier === "estimate";
     // Hero number: real profit once a price exists, the estimate itself
     // before that - ProfitFlexHero just renders whatever it's handed under
     // `profitLabel`, no component change needed for this to work.
@@ -1014,9 +1057,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     setDescription(result.itemName||"");
                     setStep("review");
                   }}
-                  isSkip={isSkip}
+                  isSkip={hideProfitHero}
                   heroProfit={heroDisplayValue}
-                  profitLabel={enteredBp > 0 ? profitLabel : "estimated sell price"}
+                  // WORDING FIX (2026-10-05): calling a confirmedByMoat price
+                  // "estimated" (while the dataTag right next to it says
+                  // "● REAL DATA") was the Under Armour polo's exact
+                  // contradiction - "estimated" now only applies when the
+                  // price genuinely isn't confirmed.
+                  profitLabel={enteredBp > 0 ? profitLabel : (result.confirmedByMoat ? "sell price" : "estimated sell price")}
                   maxBuy={maxBuy}
                   maxBuyReasoning={maxBuyReasoning}
                   dataTag={dataTag}
