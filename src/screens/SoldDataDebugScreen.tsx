@@ -6,30 +6,38 @@
 // instrument panel.
 //
 // Plain fetch() + regex parsing (ebaySoldFetch.ts) - no native modules,
-// OTA-safe. See that file's header for why (the earlier WebView approach
-// is parked on branch spike/ebay-sold-webview: react-native-webview isn't
-// in the current production native binary) and for today's diagnostic
-// finding that even a real headless browser got blocked identically to
-// curl from the owner's home IP - this screen is what finds out whether a
-// real phone (and especially cellular, a different IP/ASN) fares better.
+// OTA-safe. See that file's header for the WebView-vs-fetch history.
+//
+// ROUND 2 (same day, real device result): HTTP 200, ~43KB, not the Akamai
+// block page, but 0 listings parsed on BOTH wifi and 5G - a real sold-
+// search results page is normally hundreds of KB, so this is NOT the
+// network block from before, it's a parsing/markup problem. Added:
+//   - "Send page to server" per scrape result - uploads the raw HTML to
+//     deal-ai-pro's new owner-gated /api/debug-capture so it can be
+//     inspected and the parser fixed against real bytes.
+//   - A/B: the title query now runs with BOTH the mobile Safari UA and a
+//     desktop Chrome UA, shown side by side, to see whether either
+//     actually returns real listings.
 //
 // Two independent modes per row, chosen by what the owner fills in:
-//   - UPC mode: resolve the UPC through the EXISTING barcode pipeline
-//     (scanBarcode -> /api/lens -> lookupUPC) to get the exact product
-//     title, then fetch+parse eBay's sold-listings search TWICE (once by
-//     that title, once by the raw UPC), and pull the active-listing count
-//     by GTIN.
-//   - Name-only mode (UPC left blank): skips the barcode lookup entirely
-//     and scrapes/analyzes directly off a typed product title - for items
-//     the owner doesn't physically have. Active-listing count falls back
-//     to the keyword Browse search.
+//   - UPC mode: resolve the UPC through the FAST lookup-only endpoint
+//     (lookupUpcFast -> /api/upc-lookup -> lookupUPC, no pricing/oracle/
+//     scan-save - see api.ts's own comment on why: the real /api/lens
+//     path measured 6.2s for this and silently wrote a test scan row
+//     every run), then fetch+parse eBay's sold-listings search (title x2
+//     UAs, plus the raw UPC on the mobile UA), and pull the active-
+//     listing count by GTIN.
+//   - Name-only mode (UPC left blank): skips the lookup entirely and
+//     scrapes/analyzes directly off a typed product title - for items the
+//     owner doesn't physically have. Active-listing count falls back to
+//     the keyword Browse search.
 import React, { useState } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
-import { scanBarcode, getEbayActiveCount } from "../lib/api";
+import { lookupUpcFast, getEbayActiveCount, sendDebugCapture } from "../lib/api";
 import BarcodeScanModal from "../components/BarcodeScanModal";
-import { fetchAndParseSoldListings, FetchScrapeResult } from "../lib/ebaySoldFetch";
+import { fetchAndParseSoldListings, FetchScrapeResult, MOBILE_SAFARI_UA, DESKTOP_CHROME_UA } from "../lib/ebaySoldFetch";
 import { cleanAndAnalyze, AnalysisResult, sellThroughPct } from "../lib/ebaySoldAnalysis";
 
 interface Props {
@@ -46,21 +54,25 @@ type RowState = {
   error?: string;
   mode?: "upc" | "name";
   identifiedTitle?: string;
-  titleScrape?: FetchScrapeResult;
+  titleScrapeMobile?: FetchScrapeResult;
+  titleScrapeDesktop?: FetchScrapeResult;
   upcScrape?: FetchScrapeResult;
-  titleAnalysis?: AnalysisResult;
+  titleAnalysisMobile?: AnalysisResult;
+  titleAnalysisDesktop?: AnalysisResult;
   upcAnalysis?: AnalysisResult;
   activeCount?: number | null;
   activeSource?: string;
-  timing: { identifyMs?: number; titleScrapeMs?: number; upcScrapeMs?: number; activeCountMs?: number; totalMs?: number };
+  timing: { identifyMs?: number; titleScrapeMobileMs?: number; titleScrapeDesktopMs?: number; upcScrapeMs?: number; activeCountMs?: number; totalMs?: number };
   rawExpanded: boolean;
+  sendingCapture?: string | null; // which capture key is mid-upload, for the per-button spinner
+  sentCaptures: Record<string, string>; // capture key -> saved row id
 };
 
 // Seeded from the test list. UPC left blank for items the owner has in hand
 // (scan the real box on-device). titleQuery is prefilled for the Walmart
 // items the owner does NOT physically have - those run in name-only mode
 // straight off this string. Both fields stay editable either way.
-const SEED_ROWS: Omit<RowState, "status" | "timing" | "rawExpanded">[] = [
+const SEED_ROWS: Omit<RowState, "status" | "timing" | "rawExpanded" | "sentCaptures">[] = [
   { id: "1", label: "Dyson PencilVac Fluffy", upc: "", titleQuery: "" },
   { id: "2", label: 'HART 20V 3/8" Impact Wrench', upc: "", titleQuery: "HART 20V 3/8 impact wrench" },
   { id: "3", label: "Cuisinart Elemental 8-Cup Food Processor", upc: "", titleQuery: "Cuisinart Elemental 8 cup food processor" },
@@ -75,7 +87,7 @@ const SEED_ROWS: Omit<RowState, "status" | "timing" | "rawExpanded">[] = [
 
 export default function SoldDataDebugScreen({ token, onBack }: Props) {
   const [rows, setRows] = useState<RowState[]>(
-    SEED_ROWS.map((r) => ({ ...r, status: "idle", timing: {}, rawExpanded: false }))
+    SEED_ROWS.map((r) => ({ ...r, status: "idle", timing: {}, rawExpanded: false, sentCaptures: {} }))
   );
   const [runningAll, setRunningAll] = useState(false);
   const [scanTargetId, setScanTargetId] = useState<string | null>(null);
@@ -84,31 +96,47 @@ export default function SoldDataDebugScreen({ token, onBack }: Props) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
 
-  // UPC mode: resolve through the real barcode pipeline, then fetch+parse
-  // BOTH the resolved title and the raw UPC so the two can be compared.
+  async function sendCapture(rowId: string, key: string, label: string, s: FetchScrapeResult) {
+    patchRow(rowId, { sendingCapture: key });
+    const res = await sendDebugCapture(token, {
+      label, url: s.url, userAgent: s.userAgent, httpStatus: s.httpStatus, bytes: s.bytes, isBlockedPage: s.isBlockedPage, html: s.html,
+    });
+    setRows((prev) => prev.map((r) => r.id === rowId ? {
+      ...r,
+      sendingCapture: null,
+      sentCaptures: res.success && res.id ? { ...r.sentCaptures, [key]: res.id } : r.sentCaptures,
+      error: res.success ? r.error : `Capture upload failed: ${res.error}`,
+    } : r));
+  }
+
+  // UPC mode: fast lookup-only title resolution, then fetch+parse the
+  // title (both UAs) and the raw UPC (mobile UA), plus the active count.
   async function runUpcRow(id: string, upc: string) {
-    patchRow(id, { status: "running", mode: "upc", error: undefined, timing: {} });
+    patchRow(id, { status: "running", mode: "upc", error: undefined, timing: {}, sentCaptures: {} });
     const t0 = Date.now();
     try {
       const identifyT0 = Date.now();
-      const identified = await scanBarcode(token, upc);
+      const identified = await lookupUpcFast(token, upc);
       const identifyMs = Date.now() - identifyT0;
-      const title: string | null =
-        identified?.listingTitle ||
-        (identified?.itemName ? `${identified.brand && identified.brand !== "Unknown" ? identified.brand + " " : ""}${identified.itemName}`.trim() : null);
-      if (!title) {
-        patchRow(id, { status: "error", error: "Barcode lookup found no product", timing: { identifyMs } });
+      const title = identified?.listingTitle || identified?.itemName || null;
+      if (!identified?.success || !title) {
+        patchRow(id, { status: "error", error: identified?.error || "UPC lookup found no product", timing: { identifyMs } });
         return;
       }
       patchRow(id, { identifiedTitle: title, timing: { identifyMs } });
 
-      const titleT0 = Date.now();
-      const titleScrape = await fetchAndParseSoldListings(title);
-      const titleScrapeMs = Date.now() - titleT0;
-      const titleAnalysis = titleScrape.ok ? cleanAndAnalyze(titleScrape.listings, title) : undefined;
+      const mobT0 = Date.now();
+      const titleScrapeMobile = await fetchAndParseSoldListings(title, MOBILE_SAFARI_UA);
+      const titleScrapeMobileMs = Date.now() - mobT0;
+      const titleAnalysisMobile = titleScrapeMobile.ok ? cleanAndAnalyze(titleScrapeMobile.listings, title) : undefined;
+
+      const deskT0 = Date.now();
+      const titleScrapeDesktop = await fetchAndParseSoldListings(title, DESKTOP_CHROME_UA);
+      const titleScrapeDesktopMs = Date.now() - deskT0;
+      const titleAnalysisDesktop = titleScrapeDesktop.ok ? cleanAndAnalyze(titleScrapeDesktop.listings, title) : undefined;
 
       const upcT0 = Date.now();
-      const upcScrape = await fetchAndParseSoldListings(upc);
+      const upcScrape = await fetchAndParseSoldListings(upc, MOBILE_SAFARI_UA);
       const upcScrapeMs = Date.now() - upcT0;
       const upcAnalysis = upcScrape.ok ? cleanAndAnalyze(upcScrape.listings, title) : undefined;
 
@@ -118,27 +146,32 @@ export default function SoldDataDebugScreen({ token, onBack }: Props) {
 
       patchRow(id, {
         status: "done",
-        titleScrape, upcScrape, titleAnalysis, upcAnalysis,
+        titleScrapeMobile, titleScrapeDesktop, upcScrape, titleAnalysisMobile, titleAnalysisDesktop, upcAnalysis,
         activeCount: activeRes.success ? (activeRes.count ?? null) : null,
         activeSource: activeRes.source,
-        timing: { identifyMs, titleScrapeMs, upcScrapeMs, activeCountMs, totalMs: Date.now() - t0 },
+        timing: { identifyMs, titleScrapeMobileMs, titleScrapeDesktopMs, upcScrapeMs, activeCountMs, totalMs: Date.now() - t0 },
       });
     } catch (e: any) {
       patchRow(id, { status: "error", error: e?.message || "Unknown error" });
     }
   }
 
-  // Name-only mode: no barcode, no identify call - fetch+parse straight off
-  // the typed title. Active-listing count uses the keyword fallback (no
+  // Name-only mode: no lookup call - fetch+parse straight off the typed
+  // title, both UAs. Active-listing count uses the keyword fallback (no
   // GTIN available without a UPC).
   async function runNameRow(id: string, title: string) {
-    patchRow(id, { status: "running", mode: "name", error: undefined, timing: {}, identifiedTitle: title });
+    patchRow(id, { status: "running", mode: "name", error: undefined, timing: {}, identifiedTitle: title, sentCaptures: {} });
     const t0 = Date.now();
     try {
-      const titleT0 = Date.now();
-      const titleScrape = await fetchAndParseSoldListings(title);
-      const titleScrapeMs = Date.now() - titleT0;
-      const titleAnalysis = titleScrape.ok ? cleanAndAnalyze(titleScrape.listings, title) : undefined;
+      const mobT0 = Date.now();
+      const titleScrapeMobile = await fetchAndParseSoldListings(title, MOBILE_SAFARI_UA);
+      const titleScrapeMobileMs = Date.now() - mobT0;
+      const titleAnalysisMobile = titleScrapeMobile.ok ? cleanAndAnalyze(titleScrapeMobile.listings, title) : undefined;
+
+      const deskT0 = Date.now();
+      const titleScrapeDesktop = await fetchAndParseSoldListings(title, DESKTOP_CHROME_UA);
+      const titleScrapeDesktopMs = Date.now() - deskT0;
+      const titleAnalysisDesktop = titleScrapeDesktop.ok ? cleanAndAnalyze(titleScrapeDesktop.listings, title) : undefined;
 
       const activeT0 = Date.now();
       const activeRes = await getEbayActiveCount(token, { query: title });
@@ -146,10 +179,10 @@ export default function SoldDataDebugScreen({ token, onBack }: Props) {
 
       patchRow(id, {
         status: "done",
-        titleScrape, upcScrape: undefined, titleAnalysis, upcAnalysis: undefined,
+        titleScrapeMobile, titleScrapeDesktop, upcScrape: undefined, titleAnalysisMobile, titleAnalysisDesktop, upcAnalysis: undefined,
         activeCount: activeRes.success ? (activeRes.count ?? null) : null,
         activeSource: activeRes.source,
-        timing: { titleScrapeMs, activeCountMs, totalMs: Date.now() - t0 },
+        timing: { titleScrapeMobileMs, titleScrapeDesktopMs, activeCountMs, totalMs: Date.now() - t0 },
       });
     } catch (e: any) {
       patchRow(id, { status: "error", error: e?.message || "Unknown error" });
@@ -204,6 +237,7 @@ export default function SoldDataDebugScreen({ token, onBack }: Props) {
             onScan={() => setScanTargetId(row.id)}
             onRun={() => runRow(row.id)}
             onToggleRaw={() => patchRow(row.id, { rawExpanded: !row.rawExpanded })}
+            onSendCapture={(key, label, s) => sendCapture(row.id, key, label, s)}
           />
         ))}
       </ScrollView>
@@ -216,13 +250,14 @@ function fmtStats(label: string, s?: { count: number; median: number | null; p25
   return `${label}: n=${s.count}  median $${s.median?.toFixed(2)}  p25-p75 $${s.p25?.toFixed(2)}-$${s.p75?.toFixed(2)}`;
 }
 
-function RowCard({ row, onChangeUpc, onChangeTitle, onScan, onRun, onToggleRaw }: {
+function RowCard({ row, onChangeUpc, onChangeTitle, onScan, onRun, onToggleRaw, onSendCapture }: {
   row: RowState;
   onChangeUpc: (v: string) => void;
   onChangeTitle: (v: string) => void;
   onScan: () => void;
   onRun: () => void;
   onToggleRaw: () => void;
+  onSendCapture: (key: string, label: string, s: FetchScrapeResult) => void;
 }) {
   return (
     <View style={styles.card}>
@@ -259,27 +294,16 @@ function RowCard({ row, onChangeUpc, onChangeTitle, onScan, onRun, onToggleRaw }
         <View style={styles.results}>
           <Text style={styles.resultLine}>Mode: {row.mode} · Title: {row.identifiedTitle}</Text>
 
-          <Text style={styles.sectionHdr}>By title query</Text>
-          <ScrapeSummary s={row.titleScrape} />
-          {row.titleAnalysis && (
-            <>
-              <Text style={styles.resultLine}>kept {row.titleAnalysis.kept.length} / dropped {row.titleAnalysis.dropped.length} (raw {row.titleAnalysis.totalRaw})</Text>
-              <Text style={styles.resultLine}>{fmtStats("overall", row.titleAnalysis.overall)}</Text>
-              <Text style={styles.resultLine}>{fmtStats("new", row.titleAnalysis.byCondition.new)}</Text>
-              <Text style={styles.resultLine}>{fmtStats("used", row.titleAnalysis.byCondition.used)}</Text>
-            </>
-          )}
+          <Text style={styles.sectionHdr}>Title query — mobile Safari UA</Text>
+          <ScrapeBlock s={row.titleScrapeMobile} a={row.titleAnalysisMobile} captureKey="titleMobile" label={`${row.label} - title - mobile UA`} sending={row.sendingCapture === "titleMobile"} sentId={row.sentCaptures.titleMobile} onSendCapture={onSendCapture} />
+
+          <Text style={styles.sectionHdr}>Title query — desktop Chrome UA</Text>
+          <ScrapeBlock s={row.titleScrapeDesktop} a={row.titleAnalysisDesktop} captureKey="titleDesktop" label={`${row.label} - title - desktop UA`} sending={row.sendingCapture === "titleDesktop"} sentId={row.sentCaptures.titleDesktop} onSendCapture={onSendCapture} />
 
           {row.mode === "upc" && (
             <>
-              <Text style={styles.sectionHdr}>By raw UPC query</Text>
-              <ScrapeSummary s={row.upcScrape} />
-              {row.upcAnalysis && (
-                <>
-                  <Text style={styles.resultLine}>kept {row.upcAnalysis.kept.length} / dropped {row.upcAnalysis.dropped.length} (raw {row.upcAnalysis.totalRaw})</Text>
-                  <Text style={styles.resultLine}>{fmtStats("overall", row.upcAnalysis.overall)}</Text>
-                </>
-              )}
+              <Text style={styles.sectionHdr}>Raw UPC query — mobile Safari UA</Text>
+              <ScrapeBlock s={row.upcScrape} a={row.upcAnalysis} captureKey="upcMobile" label={`${row.label} - upc - mobile UA`} sending={row.sendingCapture === "upcMobile"} sentId={row.sentCaptures.upcMobile} onSendCapture={onSendCapture} />
             </>
           )}
 
@@ -287,16 +311,16 @@ function RowCard({ row, onChangeUpc, onChangeTitle, onScan, onRun, onToggleRaw }
           <Text style={styles.resultLine}>
             {row.activeCount == null ? "unavailable" : `${row.activeCount} listed now (${row.activeSource})`}
           </Text>
-          {row.titleAnalysis && row.activeCount != null && (
+          {row.titleAnalysisMobile && row.activeCount != null && (
             <Text style={styles.resultLine}>
-              sell-through ≈ {sellThroughPct(row.titleAnalysis.overall.count, row.activeCount) ?? "n/a"}%
+              sell-through ≈ {sellThroughPct(row.titleAnalysisMobile.overall.count, row.activeCount) ?? "n/a"}%
             </Text>
           )}
 
           <Text style={styles.sectionHdr}>Timing</Text>
           <Text style={styles.resultLine}>
             {row.timing.identifyMs != null ? `identify ${row.timing.identifyMs}ms · ` : ""}
-            title-scrape {row.timing.titleScrapeMs}ms
+            mobile-scrape {row.timing.titleScrapeMobileMs}ms · desktop-scrape {row.timing.titleScrapeDesktopMs}ms
             {row.timing.upcScrapeMs != null ? ` · upc-scrape ${row.timing.upcScrapeMs}ms` : ""}
             {" "}· active-count {row.timing.activeCountMs}ms · TOTAL {row.timing.totalMs}ms
           </Text>
@@ -306,12 +330,20 @@ function RowCard({ row, onChangeUpc, onChangeTitle, onScan, onRun, onToggleRaw }
           </TouchableOpacity>
           {row.rawExpanded && (
             <View style={styles.rawDump}>
-              <Text style={styles.rawHdr}>— title query, kept —</Text>
-              {row.titleAnalysis?.kept.map((k, i) => (
+              <Text style={styles.rawHdr}>— mobile UA title query, kept —</Text>
+              {row.titleAnalysisMobile?.kept.map((k, i) => (
                 <Text key={i} style={styles.rawLine}>[{k.condition}] ${k.price.toFixed(2)} — {k.title}</Text>
               ))}
-              <Text style={styles.rawHdr}>— title query, dropped —</Text>
-              {row.titleAnalysis?.dropped.map((d, i) => (
+              <Text style={styles.rawHdr}>— mobile UA title query, dropped —</Text>
+              {row.titleAnalysisMobile?.dropped.map((d, i) => (
+                <Text key={i} style={styles.rawLineDrop}>[{d.reason}] {d.listing.title}</Text>
+              ))}
+              <Text style={styles.rawHdr}>— desktop UA title query, kept —</Text>
+              {row.titleAnalysisDesktop?.kept.map((k, i) => (
+                <Text key={i} style={styles.rawLine}>[{k.condition}] ${k.price.toFixed(2)} — {k.title}</Text>
+              ))}
+              <Text style={styles.rawHdr}>— desktop UA title query, dropped —</Text>
+              {row.titleAnalysisDesktop?.dropped.map((d, i) => (
                 <Text key={i} style={styles.rawLineDrop}>[{d.reason}] {d.listing.title}</Text>
               ))}
             </View>
@@ -322,12 +354,34 @@ function RowCard({ row, onChangeUpc, onChangeTitle, onScan, onRun, onToggleRaw }
   );
 }
 
-function ScrapeSummary({ s }: { s?: FetchScrapeResult }) {
+function ScrapeBlock({ s, a, captureKey, label, sending, sentId, onSendCapture }: {
+  s?: FetchScrapeResult;
+  a?: AnalysisResult;
+  captureKey: string;
+  label: string;
+  sending: boolean;
+  sentId?: string;
+  onSendCapture: (key: string, label: string, s: FetchScrapeResult) => void;
+}) {
   if (!s) return null;
   return (
-    <Text style={styles.resultLine}>
-      HTTP {s.httpStatus} · {s.bytes}b · {s.isBlockedPage ? "⚠️ BLOCKED/CHALLENGE PAGE" : s.ok ? "parsed ✓" : `FAILED (${s.error})`} · {s.rawNodeCount} listings found · {s.ms}ms
-    </Text>
+    <View style={{ marginBottom: 4 }}>
+      <Text style={styles.resultLine}>
+        HTTP {s.httpStatus} · {s.bytes}b · {s.isBlockedPage ? "⚠️ BLOCKED/CHALLENGE PAGE" : s.ok ? "parsed ✓" : `FAILED (${s.error})`} · {s.rawNodeCount} listings found · {s.ms}ms
+      </Text>
+      {a && <Text style={styles.resultLine}>kept {a.kept.length} / dropped {a.dropped.length} (raw {a.totalRaw}) · {fmtStats("overall", a.overall)}</Text>}
+      <TouchableOpacity
+        style={styles.sendBtn}
+        onPress={() => onSendCapture(captureKey, label, s)}
+        disabled={sending || !!sentId}
+      >
+        {sending ? (
+          <ActivityIndicator color={C.bg} size="small" />
+        ) : (
+          <Text style={styles.sendBtnTxt}>{sentId ? `Sent ✓ (${sentId.slice(0, 8)})` : "Send page to server"}</Text>
+        )}
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -357,4 +411,6 @@ const styles = StyleSheet.create({
   rawHdr: { color: C.text4, fontSize: 11, fontWeight: "700", marginTop: 6 },
   rawLine: { color: C.text2, fontSize: 11, marginTop: 2 },
   rawLineDrop: { color: C.text4, fontSize: 11, marginTop: 2, fontStyle: "italic" },
+  sendBtn: { marginTop: 4, alignSelf: "flex-start", backgroundColor: C.surfaceHigh, borderColor: C.border, borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 },
+  sendBtnTxt: { color: C.yellow, fontSize: 11, fontWeight: "600" },
 });

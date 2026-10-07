@@ -359,6 +359,43 @@ export async function getEbayActiveCount(token: string, opts: { upc?: string; qu
     return { success: false, error: "Network error" };
   }
 }
+// SPIKE (2026-10-07): fast UPC->title lookup for the debug screen - does
+// ONLY lookupUPC() server-side (see deal-ai-pro's app/api/upc-lookup/
+// route.ts), skipping the full /api/lens pricing-oracle/scan-save
+// pipeline a real scan needs but a debug title lookup doesn't. Measured
+// motivation: scanBarcode() through /api/lens took 6.2s for "identify"
+// alone on a real device and silently wrote a test row to scan history
+// on every debug run.
+export async function lookupUpcFast(token: string, upc: string): Promise<{ success: boolean; itemName?: string; brand?: string; listingTitle?: string; ms?: number; error?: string }> {
+  try {
+    const r = await fetch(`${API_BASE}/api/upc-lookup`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userToken: token, upc }),
+    });
+    return await r.json();
+  } catch {
+    return { success: false, error: "Network error" };
+  }
+}
+// SPIKE (2026-10-07): uploads the raw HTML a debug fetch received so the
+// owner can inspect it server-side (see deal-ai-pro's app/api/debug-
+// capture/route.ts + supabase/migrations/add_debug_html_captures.sql) -
+// a 200/not-blocked/~43KB response with 0 parsed listings needs the real
+// bytes to diagnose, not just the parsed-side summary this screen already
+// shows.
+export async function sendDebugCapture(token: string, payload: {
+  label: string; url: string; userAgent: string; httpStatus: number; bytes: number; isBlockedPage: boolean; html: string;
+}): Promise<{ success: boolean; id?: string; error?: string }> {
+  try {
+    const r = await fetch(`${API_BASE}/api/debug-capture`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userToken: token, ...payload }),
+    });
+    return await r.json();
+  } catch {
+    return { success: false, error: "Network error" };
+  }
+}
 export async function analyzeSales(token: string, csvText: string, targetProfit?: number): Promise<any> {
   let r: Response;
   try {

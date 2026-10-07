@@ -43,6 +43,14 @@ export type FetchScrapeResult = {
   rawNodeCount: number;
   error: string | null;
   ms: number;
+  url: string;
+  userAgent: string;
+  // Full response body - ONLY kept because this is a debug pipeline (the
+  // owner's "Send page to server" capture needs the real bytes). Never
+  // carry this into the real result-screen path if/when this spike lands
+  // there - a ~43KB-200KB string per request has no business sitting in
+  // normal app state.
+  html: string;
 };
 
 export function buildSoldSearchUrl(query: string): string {
@@ -52,6 +60,14 @@ export function buildSoldSearchUrl(query: string): string {
 
 export const MOBILE_SAFARI_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+
+// A/B probe (2026-10-07): the phone's own fetch() got 200/~43KB/not-blocked
+// but 0 listings on the mobile Safari UA above - genuinely unknown yet
+// whether that's markup drift on mobile specifically, or something that
+// also happens on desktop. SoldDataDebugScreen runs both and reports which
+// (if either) returns real listings.
+export const DESKTOP_CHROME_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36";
 
 // Covers both the generic Akamai "Error Page | eBay" static block (what
 // this specific IP got on every single attempt today) and the more
@@ -105,7 +121,11 @@ function extractListings(html: string): RawSoldListing[] {
   return out;
 }
 
-export async function fetchAndParseSoldListings(query: string, timeoutMs = 10000): Promise<FetchScrapeResult> {
+export async function fetchAndParseSoldListings(
+  query: string,
+  userAgent: string = MOBILE_SAFARI_UA,
+  timeoutMs = 10000
+): Promise<FetchScrapeResult> {
   const t0 = Date.now();
   const url = buildSoldSearchUrl(query);
   const ctrl = new AbortController();
@@ -113,7 +133,7 @@ export async function fetchAndParseSoldListings(query: string, timeoutMs = 10000
   try {
     const r = await fetch(url, {
       headers: {
-        "User-Agent": MOBILE_SAFARI_UA,
+        "User-Agent": userAgent,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
       },
@@ -131,12 +151,16 @@ export async function fetchAndParseSoldListings(query: string, timeoutMs = 10000
       rawNodeCount: listings.length,
       error: isBlockedPage ? "Blocked/challenge page" : (!r.ok ? `HTTP ${r.status}` : null),
       ms: Date.now() - t0,
+      url,
+      userAgent,
+      html,
     };
   } catch (e: any) {
     return {
       ok: false, httpStatus: 0, bytes: 0, isBlockedPage: false, listings: [], rawNodeCount: 0,
       error: e?.name === "AbortError" ? `Timed out after ${timeoutMs}ms` : (e?.message || "Network error"),
       ms: Date.now() - t0,
+      url, userAgent, html: "",
     };
   } finally {
     clearTimeout(timer);
