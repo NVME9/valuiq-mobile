@@ -46,6 +46,18 @@ import AICoachScreen from "./src/screens/AICoachScreen";
 import HistoryScreen from "./src/screens/HistoryScreen";
 import FAQScreen from "./src/screens/FAQScreen";
 import AdminScreen from "./src/screens/AdminScreen";
+// SPIKE (branch spike/ebay-sold-fetch, 2026-10-07) - owner-only debug
+// screen for the eBay-sold-data-via-fetch pipeline (no native modules -
+// plain fetch() + regex HTML parsing, see ebaySoldFetch.ts). Deferred via
+// require() rather than a static top-level import purely as a hygiene
+// habit (this screen has no native-module dependency today, so nothing
+// here is OTA-unsafe the way the earlier WebView-based spike was - see
+// spike/ebay-sold-webview - but keeping debug-only code out of the eager
+// import graph costs nothing and holds if that ever changes).
+function renderSoldDataDebugScreen(props: { token: string; onBack?: () => void }) {
+  const SoldDataDebugScreen = require("./src/screens/SoldDataDebugScreen").default;
+  return <SoldDataDebugScreen {...props} />;
+}
 import BusinessApp from "./src/screens/business/BusinessApp";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
@@ -53,7 +65,7 @@ export type Screen =
   "scanner"|"dashboard"|"thrift-run"|
   "specialty"|"manifest"|"deathpile"|"community"|
   "profile"|"relist"|"hot-now"|"arbitrage"|"upgrade"|
-  "bundle"|"alerts"|"leaderboard"|"inventory"|"profit-tracker"|"deal-hunter"|"ai-coach"|"history"|"faq"|"admin"|"titan"|"import-sales";
+  "bundle"|"alerts"|"leaderboard"|"inventory"|"profit-tracker"|"deal-hunter"|"ai-coach"|"history"|"faq"|"admin"|"titan"|"import-sales"|"sold-data-debug";
 
 const { height } = Dimensions.get("window");
 
@@ -684,6 +696,7 @@ export default function App() {
     "history":      <HistoryScreen {...props} />,
     "faq":          <FAQScreen {...props} />,
     "admin":        <AdminScreen {...props} />,
+    "sold-data-debug": screen === "sold-data-debug" ? renderSoldDataDebugScreen({ token, onBack: goBack }) : null,
     "titan":     hasProAccess(plan) ? <BusinessApp token={token} plan={plan} userEmail={session?.user?.email || ""} scansLeft={scansLeft} setScansLeft={setScansLeft} onLogout={handleLogout} /> : <UpgradeScreen {...props} />,
   };
 

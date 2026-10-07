@@ -344,6 +344,21 @@ export async function scanBarcode(token: string, upc: string): Promise<any> {
   const r = await fetch(`${API_BASE}/api/lens`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, upc}) });
   return r.json();
 }
+// SPIKE (2026-10-07): the "M listed now" half of sell-through for the
+// eBay-sold-webview debug screen - owner-gated server-side (see
+// deal-ai-pro's app/api/ebay-active-count/route.ts) via a real user JWT,
+// not a shared secret, since this call originates from the app bundle.
+export async function getEbayActiveCount(token: string, opts: { upc?: string; query?: string }): Promise<{ success: boolean; count?: number; source?: string; error?: string }> {
+  try {
+    const r = await fetch(`${API_BASE}/api/ebay-active-count`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userToken: token, upc: opts.upc, query: opts.query }),
+    });
+    return await r.json();
+  } catch {
+    return { success: false, error: "Network error" };
+  }
+}
 export async function analyzeSales(token: string, csvText: string, targetProfit?: number): Promise<any> {
   let r: Response;
   try {

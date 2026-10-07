@@ -21,7 +21,7 @@ import * as Updates from "expo-updates";
 // is the ground truth: if BUILD_TAG on-device doesn't match what you just
 // published, the update didn't land (see App.tsx's init() for the
 // check-and-reload-immediately fix that was missing).
-const BUILD_TAG = "2026-10-06.6";
+const BUILD_TAG = "2026-10-07.1";
 
 // The single owner/dev allowlist for anything real users must never see -
 // dev-only tools (Reset onboarding, Preview new-user flow) and the build
@@ -856,6 +856,16 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
           <TouchableOpacity style={[ps.navRow,{borderColor:C.orange+"40",backgroundColor:C.orange+"08"}]} onPress={() => onNavigate("admin")}>
             <Text style={ps.navIcon}>⚙️</Text>
             <Text style={[ps.navLabel,{color:C.orange}]}>Admin Panel</Text>
+            <Text style={ps.navArrow}>›</Text>
+          </TouchableOpacity>
+        )}
+        {isOwner && (
+          // SPIKE (branch spike/ebay-sold-webview, 2026-10-07) - owner-only
+          // instrument panel for the eBay-sold-via-WebView scrape, remove
+          // (or promote) once the spike is resolved.
+          <TouchableOpacity style={[ps.navRow,{borderColor:C.orange+"40",backgroundColor:C.orange+"08"}]} onPress={() => onNavigate("sold-data-debug")}>
+            <Text style={ps.navIcon}>🧪</Text>
+            <Text style={[ps.navLabel,{color:C.orange}]}>Sold Data Spike (Debug)</Text>
             <Text style={ps.navArrow}>›</Text>
           </TouchableOpacity>
         )}
