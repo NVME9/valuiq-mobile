@@ -12,6 +12,7 @@ import {
 import { C } from "../lib/theme";
 import { recordSaleOutcome, defaultDaysToSale, buildDisplayTitle, PendingScan } from "../lib/saleCapture";
 import { fetchFlexStat, concreteLine, cacheFlexStat, FlexStat } from "../lib/flexReveal";
+import { CONDITION_OPTIONS } from "../lib/condition";
 
 // Same enum the scraper (valuiq-scraper/scraper.js EXTRACTION_SYSTEM) and
 // the admin log-sale route validate against - keeps every sold_platform
@@ -46,6 +47,10 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal, onRevea
   // actual tap. "unspecified" (the Rather-not-say chip) and never tapping
   // anything both resolve to sending nothing - see save() below.
   const [platform, setPlatform] = useState<string>("");
+  // Same "deliberate blank default, real data requires an actual tap" rule
+  // platform above already follows - no pre-selection, not even carried
+  // forward from whatever condition the scan was originally identified at.
+  const [condition, setCondition] = useState<string>("");
 
   async function save(withPrice: boolean) {
     setSaving(true);
@@ -54,7 +59,8 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal, onRevea
     const soldPlatform = platform && platform !== "unspecified" ? platform : undefined;
     const result = await recordSaleOutcome(
       token, scan.id, "sold", "in_app", scan.created_at,
-      isNaN(p) ? undefined : p, isNaN(d) ? undefined : d, soldPlatform
+      isNaN(p) ? undefined : p, isNaN(d) ? undefined : d, soldPlatform,
+      condition || undefined
     );
     setSaving(false);
 
@@ -154,6 +160,19 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal, onRevea
         >
           <Text style={[s.chipText, platform === "unspecified" && s.chipTextActive]}>Rather not say</Text>
         </TouchableOpacity>
+      </View>
+
+      <Text style={s.platformPrompt}>Condition when sold? <Text style={s.optionalTag}>optional</Text></Text>
+      <View style={s.chipRow}>
+        {CONDITION_OPTIONS.map((opt) => (
+          <TouchableOpacity
+            key={opt.value}
+            style={[s.chip, condition === opt.value && s.chipActive]}
+            onPress={() => setCondition(condition === opt.value ? "" : opt.value)}
+          >
+            <Text style={[s.chipText, condition === opt.value && s.chipTextActive]}>{opt.label}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       <View style={s.btnRow}>

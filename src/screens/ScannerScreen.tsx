@@ -21,9 +21,11 @@ import * as Notifications from "expo-notifications";
 import { matchSpecialtyCategory } from "./SpecialtyScreen";
 import ProfitFlexHero from "../components/ProfitFlexHero";
 import FlashHighlight from "../components/FlashHighlight";
+import SegmentOutcomesBlock from "../components/SegmentOutcomesBlock";
 import { classifyOutcome, ROI_BUY_MIN, PROFIT_JUDGMENT_FLOOR } from "../lib/outcomeTier";
 import LogSaleModal from "../components/LogSaleModal";
 import { toPendingScan } from "../lib/saleCapture";
+import { CONDITION_OPTIONS } from "../lib/condition";
 
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
@@ -58,12 +60,9 @@ const CONDITION_MULTIPLIER: Record<string, number> = {
   "used-heavy": 0.30,
 };
 const DEFAULT_CONDITION_MULTIPLIER = 0.70;
-const CONDITION_OPTIONS: { value: string; label: string }[] = [
-  { value: "new-in-box", label: "New / Sealed" },
-  { value: "new-no-tags", label: "New, No Tags" },
-  { value: "used-good", label: "Used - Good" },
-  { value: "used-heavy", label: "Used - Heavy Wear" },
-];
+// CONDITION_OPTIONS moved to lib/condition.ts (2026-10-06) - shared with
+// SaleCaptureCard.tsx/HistoryScreen.tsx now that a chip selection there is
+// actually persisted, not just used for this screen's own pre-sale pricing.
 
 type Step = "camera" | "barcode" | "review" | "loading" | "result" | "upgrade";
 
@@ -158,6 +157,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // edits (see the results-step render below).
   const [resultCondition, setResultCondition] = useState("");
   const [result, setResult] = useState<any>(null);
+  // TAG CONFIRM GATE (2026-10-06): true while THIS result's tag read needs
+  // an explicit Confirm/Edit tap before it drives anything - set whenever a
+  // new result comes in with retailPriceNeedsConfirmation (see the
+  // setBuyPrice/seed block below), cleared the moment the user taps either
+  // button. Server-side (app/api/lens/route.ts's sanity gate) already
+  // withholds this number from its own verdict/dealReasoning while
+  // retailPriceNeedsConfirmation is true - this just makes that hold
+  // visible and actionable instead of a blank field + hint text.
+  const [tagConfirmPending, setTagConfirmPending] = useState(false);
+  const priceInputRef = useRef<TextInput>(null);
   // TWO-STAGE SCAN RENDER (2026-09-11): bumped once per successful
   // background /refine merge (never on a normal price/condition edit) -
   // passed to ProfitFlexHero/the range card as flashSeq so the updated
@@ -378,10 +387,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       // below (near the price input) shows what was read, asking the user
       // to confirm or correct it before any verdict leans on it.
       setBuyPrice(
-        Number(d.retailPriceRead) > 0 && d.retailPriceReadConfidence !== "low"
+        Number(d.retailPriceRead) > 0 && !d.retailPriceNeedsConfirmation
           ? String(d.retailPriceRead)
           : ""
       );
+      setTagConfirmPending(Number(d.retailPriceRead) > 0 && !!d.retailPriceNeedsConfirmation);
       setResultCondition(d.conditionAssessment || "");
       // SALE-CAPTURE MOAT: on a BUY, either schedule (if already allowed) or
       // surface the soft in-app ask. Never fire Apple's cold prompt directly.
@@ -600,12 +610,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // moat-blended sellPrice of $15. In both cases the "condition dropdown"
     // recompute is only a correct mirror of the server when the server's
     // own price WAS the bare model anchor (no moat blend, no Browse
-    // override) - that's exactly !confirmedByMoat && anchorSource !==
-    // "ebay-active-new". Any other case: result.sellPrice/priceRange IS
-    // the authoritative number (already condition-aware server-side), and
-    // the local recompute must defer to it instead of recomputing from a
-    // pre-correction anchor.
-    const resaleIsAuthoritative = !result.confirmedByMoat && result.anchorSource !== "ebay-active-new";
+    // override) - that's exactly !confirmedByMoat. (The server's
+    // "ebay-active-new" anchorSource override this comment used to also
+    // check for was removed 2026-10-06 along with eBay active listings as a
+    // price source entirely - anchorSource can no longer take that value.)
+    // Any other case: result.sellPrice/priceRange IS the authoritative
+    // number (already condition-aware server-side), and the local recompute
+    // must defer to it instead of recomputing from a pre-correction anchor.
+    const resaleIsAuthoritative = !result.confirmedByMoat;
     const hasRawModelResale = Number(result.resaleFromModel) > 0 && resaleIsAuthoritative;
     const conditionFactor = CONDITION_MULTIPLIER[resultCondition] ?? DEFAULT_CONDITION_MULTIPLIER;
     const adjustedResaleValue = hasRawModelResale
@@ -641,9 +653,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // impossible for the two cards to disagree - they render off the same
     // OutcomeTierInfo object. This value is now used ONLY to display the
     // range numbers, never to independently decide good/bad framing.
+    // TAG CONFIRM GATE: an unconfirmed tag read must not drive this display
+    // either, same reasoning as the server's own dealCompareValue gate -
+    // without this, the range card could still show the unconfirmed number
+    // while the confirm card above was asking about that exact number.
     const dealCompareValue = enteredBp > 0
       ? enteredBp
-      : (Number(result.retailPriceRead) > 0 ? Number(result.retailPriceRead) : null);
+      : (!tagConfirmPending && Number(result.retailPriceRead) > 0 ? Number(result.retailPriceRead) : null);
 
     // ONE CANONICAL SELL PRICE (2026-09-17, REVERTED 2026-10-04 - decision
     // 3/10, Walmart-aisle testing): the single sell-price figure every
@@ -767,6 +783,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // "HOT BUY, 95% ROI, excellent margin" once $17.50 was entered - the
     // buy side was real, but the sell side backing that verdict was not.
     const hasItemLevelSellEvidence = !!result.confirmedByMoat;
+    // Used only by the two ESTIMATE-LABEL-BUG copy branches below (real
+    // data, no verdict yet) - the actual confirmedByMoat gate everywhere
+    // else still reads result.agreeingCount directly, this is purely for
+    // the sentence text.
+    const agreeingCountForCopy = Number(result.agreeingCount) || 0;
     const outcome = (enteredBp > 0 && hasItemLevelSellEvidence)
       ? classifyOutcome({
           noFlipMargin: !!result.noFlipMargin,
@@ -786,11 +807,23 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           // no-price branch below (no hero verdict, no ROI%), with copy
           // that reflects the price already being in rather than asking
           // for it again.
+          //
+          // ESTIMATE-LABEL BUG (2026-10-06, MEASURED: real Under Armour polo
+          // scan - confirmedByMoat:true, agreeingCount:11, sellPrice:$15,
+          // all correct - still showed a yellow "ESTIMATE" label): this
+          // branch used to hardcode label:"ESTIMATE"/accent:yellow
+          // UNCONDITIONALLY, for every enteredBp>0 case, even when
+          // hasItemLevelSellEvidence (confirmedByMoat) was true - conflating
+          // "no verdict yet" (genuinely true without knowing margin) with
+          // "the price itself is unconfirmed" (false here). The number
+          // itself is real moat data; only the BUY/SKIP verdict is pending.
           tier: "estimate" as const,
-          emoji: "🏷️",
-          label: "ESTIMATE",
-          copy: `Sells for about $${sellPriceForProfit} (market estimate, not yet confirmed by real sales of this exact item) — verify before buying at $${enteredBp}.`,
-          accent: C.yellow,
+          emoji: hasItemLevelSellEvidence ? "✅" : "🏷️",
+          label: hasItemLevelSellEvidence ? "REAL DATA" : "ESTIMATE",
+          copy: hasItemLevelSellEvidence
+            ? `Sells for about $${sellPriceForProfit} (real data from ${agreeingCountForCopy} resale outcomes) — verdict needs your buy price.`
+            : `Sells for about $${sellPriceForProfit} (market estimate, not yet confirmed by real sales of this exact item) — verify before buying at $${enteredBp}.`,
+          accent: hasItemLevelSellEvidence ? C.green : C.yellow,
           adjustedROI: 0,
           daysUsed: 0,
         } : {
@@ -802,9 +835,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           // verdict (isSkip stays false below), showing the estimate +
           // range as the hero number instead of a profit figure - see
           // heroDisplayValue below and its ProfitFlexHero prop.
+          //
+          // Same ESTIMATE-LABEL BUG fix as the branch above - see its
+          // comment. No buy price entered yet means no VERDICT, not that
+          // the sell price itself is unconfirmed.
           tier: "estimate" as const,
-          emoji: "🏷️",
-          label: "ESTIMATE",
+          emoji: hasItemLevelSellEvidence ? "✅" : "🏷️",
+          label: hasItemLevelSellEvidence ? "REAL DATA" : "ESTIMATE",
           // ONE RESALE REALITY (2026-09-17): the range clause only ever
           // appears in THIS branch (priced tiers' copy comes from
           // outcomeTier.ts's own strings, which never mention a range) -
@@ -821,10 +858,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           // the no-price "sells for about $X" figure matches the exact
           // number the "sell price" stat and maxBuy ceiling use once a
           // price IS entered, instead of a separately-rounded one.
-          copy: (adjustedResaleLow != null && adjustedResaleHigh != null && !crowdMedianAvailable)
+          copy: hasItemLevelSellEvidence
+            ? `Sells for about $${sellPriceForProfit} (real data from ${agreeingCountForCopy} resale outcomes). Enter what you paid above for your real profit and verdict.`
+            : (adjustedResaleLow != null && adjustedResaleHigh != null && !crowdMedianAvailable)
             ? `Sells for about $${sellPriceForProfit} (range $${adjustedResaleLow}-$${adjustedResaleHigh}). Enter what you paid above for your real profit and verdict.`
             : `Sells for about $${sellPriceForProfit}. Enter what you paid above for your real profit and verdict.`,
-          accent: C.yellow,
+          accent: hasItemLevelSellEvidence ? C.green : C.yellow,
           adjustedROI: 0,
           daysUsed: 0,
         });
@@ -892,7 +931,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // in footNote below. Dropping the generic fallback here, not the real
     // value - a genuine "confirmed by N real sales" agreementBadge is live
     // information, not clutter, and still leads this line when present.
-    const maxBuyPrefix = result.agreementBadge ? `${result.agreementBadge}. ` : "";
+    // SAY IT ONCE (2026-10-06, MEASURED: real UA polo scan - "Based on 11
+    // real reseller outcomes" appeared THREE times: hero copy ("real data
+    // from 11 resale outcomes"), here, and the green box title below).
+    // outcome.copy ALREADY states the count whenever tier==="estimate" (the
+    // no-verdict-yet state - see hasItemLevelSellEvidence's two branches
+    // above) - suppressed here in exactly that case so the count-bearing
+    // sentence shows once, in the hero. Once a real verdict (BUY/SKIP/
+    // JUDGMENT) is reached, hero no longer restates it, so this prefix is
+    // new information again and stays.
+    const maxBuyPrefix = (result.agreementBadge && !(hasItemLevelSellEvidence && outcome.tier === "estimate"))
+      ? `${result.agreementBadge}. ` : "";
     // The claim must match the number: maxBuy (recomputed above off the
     // CURRENT condition-adjusted resale, not a frozen scan-time value) is
     // the price where this clears the verdict's own BUY floor - so it's
@@ -906,25 +955,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         : `${maxBuyPrefix}Pay $${maxBuy} or less to make this a real flip (≥${ROI_BUY_MIN}% ROI, ≥$${PROFIT_JUDGMENT_FLOOR} profit after fees).`
     );
 
-    // DECLUTTER (2026-09-16): "● ESTIMATE" here duplicates the tier badge
-    // above ONLY in the specific state where that badge ALSO says ESTIMATE
-    // (no price entered yet, tier:"estimate") AND the data itself is
-    // unconfirmed - both true at once is the redundant case. Once a price
-    // is entered the badge becomes BUY/SKIP/etc. and this tag becomes a
-    // genuinely different, useful signal ("this verdict rests on estimated
-    // data") - so the suppression is scoped to enteredBp<=0, not blanket.
-    // REAL DATA GATE (2026-10-04, decision 4): server-side confirmedByMoat
-    // now already requires >=5 agreeing rows of the SAME item type (see
-    // lib/profitOracle.ts's MIN_CONFIRMED_AGREEING/itemTypeMatched) - this
-    // used to re-derive its OWN ">= 30 real / else small sample" threshold
-    // from agreeingCount client-side, which is exactly how a single
-    // unconfirmed row ever showed "REAL DATA · SMALL SAMPLE" in the first
-    // place. No small-sample variant below the server's own bar anymore -
-    // confirmedByMoat is binary: trust it, or it's a market estimate.
-    const dataTag = result.confirmedByMoat
-      ? "● REAL DATA"
-      : (enteredBp > 0 ? "● ESTIMATE" : undefined);
-    const dataTagColor = result.confirmedByMoat ? C.green : C.text4;
+    // ONE BADGE PER RESULT (2026-10-06, MEASURED: both badges stacked -
+    // "✅ REAL DATA" + "● REAL DATA", "🏷️ ESTIMATE" + "● ESTIMATE"): the
+    // DECLUTTER pass above this only suppressed the one case it named
+    // (enteredBp<=0, unconfirmed) - it missed that outcome.tier==="estimate"
+    // ALWAYS carries this exact same REAL DATA/ESTIMATE label up top
+    // (lines ~807-831), for every combination of enteredBp/confirmedByMoat,
+    // so "● ESTIMATE" below it was ALWAYS a duplicate and "● REAL DATA" was
+    // a duplicate in 2 of its 3 reachable states too. This tag is only a
+    // genuinely NEW signal in the one case the top badge becomes an actual
+    // verdict (BUY/SKIP/JUDGMENT CALL from classifyOutcome, tier!=="estimate")
+    // instead of restating REAL DATA/ESTIMATE - which only happens when a
+    // price is entered AND the data is confirmed. footNote below already
+    // states the estimate/real distinction in prose either way.
+    const dataTag = (enteredBp > 0 && hasItemLevelSellEvidence) ? "● REAL DATA" : undefined;
+    const dataTagColor = C.green;
     const footNote = result.confirmedByMoat
       ? "From real reseller outcomes."
       : "Market estimate. Sharpens as more resellers log real outcomes.";
@@ -999,41 +1044,71 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   string. Editing re-runs the verdict LOCALLY (see the
                   adjustedResale / heroProfit / outcome computation above)
                   - no new LLM call, no network round trip, instant. */}
-              <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
-                {Number(result.retailPriceRead) > 0
-                  ? (result.retailPriceReadConfidence === "low"
-                      ? `We read $${result.retailPriceRead} off the tag — correct?`
-                      : "Price (from a detected tag)")
-                  : "What you paid (optional)"}
-              </Text>
-              {/* TAG CONFIDENCE (2026-10-04, decision 2): shows the exact
-                  text the low-confidence read came from, so the user can
-                  check it against the real tag instead of trusting a
-                  number the model itself wasn't sure about. Only renders
-                  for the low-confidence case - buyPrice is left blank by
-                  the scan-result handler above specifically so this isn't
-                  silently driving anything until confirmed/edited. */}
-              {Number(result.retailPriceRead) > 0 && result.retailPriceReadConfidence === "low" && result.retailPriceReadSourceText ? (
-                <Text style={s.priceLowConfidenceHint} numberOfLines={2}>
-                  Read from: "{result.retailPriceReadSourceText}" — tap above to confirm or enter the real price.
-                </Text>
-              ) : null}
-              <View style={s.priceFieldWrap}>
-                <Text style={s.priceFieldDollar}>$</Text>
-                <TextInput
-                  style={s.priceFieldInput}
-                  value={buyPrice}
-                  onChangeText={setBuyPrice}
-                  placeholder="0.00"
-                  placeholderTextColor={C.text4}
-                  keyboardType="decimal-pad"
-                />
-              </View>
-              <Text style={s.priceFieldHint} numberOfLines={2}>
-                {Number(result.retailPriceRead) > 0
-                  ? "Read off a price tag in your photo — edit if it's wrong."
-                  : "No price tag detected — enter what you paid to see your real profit and verdict."}
-              </Text>
+              {/* TAG CONFIRM GATE (2026-10-06): replaces the price field
+                  entirely while retailPriceNeedsConfirmation is true and
+                  unresolved - a Walmart-aisle test run measured the OLD
+                  "blank field + hint text" version letting 3 real misreads
+                  (Cuisinart $171, Carote $198, Spawn $50) through with no
+                  confirmation shown at all, because the server was self-
+                  reporting high confidence on all three. The server's
+                  sanity gate (app/api/lens/route.ts) now catches those AND
+                  the flag below is the one thing this screen trusts - no
+                  separate confidence check needed here any more. Server
+                  already withholds this number from its own dealReasoning
+                  while the flag is true, so nothing downstream acts on it
+                  until one of these two buttons is tapped. */}
+              {tagConfirmPending ? (
+                <View style={s.tagConfirmCard}>
+                  <Text style={s.tagConfirmTitle}>We read ${result.retailPriceRead} off the tag — correct?</Text>
+                  {result.retailPriceReadSourceText ? (
+                    <Text style={s.tagConfirmSource} numberOfLines={2}>Read from: "{result.retailPriceReadSourceText}"</Text>
+                  ) : null}
+                  <View style={s.tagConfirmRow}>
+                    <TouchableOpacity
+                      style={s.tagConfirmBtn}
+                      onPress={() => {
+                        setBuyPrice(String(result.retailPriceRead));
+                        setTagConfirmPending(false);
+                      }}
+                    >
+                      <Text style={s.tagConfirmBtnText}>Confirm ${result.retailPriceRead}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={s.tagEditBtn}
+                      onPress={() => {
+                        setBuyPrice("");
+                        setTagConfirmPending(false);
+                        setTimeout(() => priceInputRef.current?.focus(), 50);
+                      }}
+                    >
+                      <Text style={s.tagEditBtnText}>Edit</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <>
+                  <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                    {Number(result.retailPriceRead) > 0 ? "Price (from a detected tag)" : "What you paid (optional)"}
+                  </Text>
+                  <View style={s.priceFieldWrap}>
+                    <Text style={s.priceFieldDollar}>$</Text>
+                    <TextInput
+                      ref={priceInputRef}
+                      style={s.priceFieldInput}
+                      value={buyPrice}
+                      onChangeText={setBuyPrice}
+                      placeholder="0.00"
+                      placeholderTextColor={C.text4}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <Text style={s.priceFieldHint} numberOfLines={2}>
+                    {Number(result.retailPriceRead) > 0
+                      ? "Read off a price tag in your photo — edit if it's wrong."
+                      : "No price tag detected — enter what you paid to see your real profit and verdict."}
+                  </Text>
+                </>
+              )}
 
               {/* THE hero: verdict + profit + max-buy (with reasoning) + key
                   stats, reconciled into one card instead of a separate
@@ -1076,90 +1151,43 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 />
               </View>
 
-              {/* ONE RESALE REALITY (2026-09-17, split into two
-                  independent gates 2026-09-17): this used to be a single
-                  crowdHasRealData ? crowdBox : aiRangeBanner ternary - but
-                  crowdHasRealData (tier strong/limited) and
-                  crowdMedianAvailable (a real, positive median to actually
-                  price off) can diverge: a strong-tier cluster with n>=8
-                  resolved outcomes and ZERO sold (honest 0% sell-through)
-                  has crowdHasRealData=true but no median at all. In that
-                  state the crowd box (below) correctly shows the
-                  sell-through warning with NO dollar figure of its own
-                  (medianSoldPrice null skips that clause entirely - see
-                  crowdBits), and the AI range banner (further below) is
-                  the ONLY $ figure on screen, matching what the math
-                  actually falls back to (sellPriceForProfit's
-                  crowdMedianAvailable branch, see above) - not a
-                  disagreement, since only one of the two ever states a
-                  price. The two normal cases stay exactly one-box-only:
-                  real median -> crowd box (with its $ line) only, AI
-                  range gated off; thin -> AI range only, crowd box gated
-                  off (crowdHasRealData false). */}
-              {crowdHasRealData ? (() => {
-                const cv = result.crowdVerdict;
-                const crowdBits: string[] = [];
-                if (cv.sellThroughPct != null) {
-                  crowdBits.push(`${cv.sellThroughPct}% of these actually sold` + (cv.medianDaysToSale != null ? `, in ~${cv.medianDaysToSale}d` : ""));
-                }
-                if (cv.medianSoldPrice != null) crowdBits.push(`$${cv.medianSoldPrice} median`);
-                // ALWAYS "Category trend —" now (2026-10-04, decisions 8/10):
-                // cv.scope "item" vs "category" is set server-side by
-                // lib/crowdVerdict.ts purely on brand+category sample size,
-                // with NO item-type/condition matching the way
-                // lib/profitOracle.ts's Oracle requires for confirmedByMoat -
-                // "item" scope here does NOT mean "confirmed for this exact
-                // item," only "this brand+category has enough rows." Always
-                // labeled as category context so it can never read as
-                // item-level evidence next to this item's own price.
-                const crowdHeadline = "Category trend — " + crowdBits.join(" — ");
-                const crowdCredential = `from ${cv.sampleSize} real reseller outcomes`;
-                const disagrees = (outcome.label === "HOT BUY" || outcome.label === "BUY") && cv.call === "PASS";
-                // CROWD-OWN COLOR (2026-09-17): this box's tint follows
-                // cv.call, NOT outcome.accent (the ROI verdict's color,
-                // still used everywhere else on this card, including the
-                // AI-range fallback below) - so the color always agrees
-                // with the message actually printed inside THIS box. A
-                // crowd PASS is red here even when the ROI badge above is
-                // green BUY - that color disagreement between the two
-                // boxes IS the signal (see the disagrees branch), not a
-                // bug to reconcile.
-                const crowdAccent = cv.call === "BUY" ? C.green : cv.call === "PASS" ? C.red : C.yellow;
-                return (
-                  <View style={[s.rangeBanner, { backgroundColor: crowdAccent + "1a", borderColor: crowdAccent + "55" }]}>
-                    <View style={s.rangeBannerIcon}>
-                      <Text>{"👥"}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <FlashHighlight flashSeq={refineSeq}>
-                        <Text style={{ color: crowdAccent, fontSize: 13, fontWeight: "800", marginBottom: 2, flexWrap: "wrap" }}>
-                          {disagrees ? "⚠️ but real resellers move these slowly" : crowdHeadline}
-                        </Text>
-                        <Text style={s.rangeBannerSub}>{disagrees ? `${crowdHeadline} — ${crowdCredential}` : crowdCredential}</Text>
-                      </FlashHighlight>
-                    </View>
-                  </View>
-                );
-              })() : null}
+              {/* SEGMENT OUTCOMES (replaces the old crowdVerdict "Category
+                  trend" banner, 2026-10-06 - that banner read
+                  result.crowdVerdict, which the server no longer sends;
+                  crowdHasRealData/crowdMedianAvailable below are now always
+                  false via optional chaining, inert rather than broken, but
+                  the banner itself was removed rather than left dead).
+                  "What resellers actually made" - a real aggregate for the
+                  broader segment, always labeled with the real segment name,
+                  never presented as this item's own price. Shown whenever
+                  the server found a segment with 15+ resolved outcomes,
+                  independent of whether this item ALSO has its own
+                  item-level REAL DATA above - that stays the top tier. */}
+              <SegmentOutcomesBlock segment={result.segmentOutcomes} />
 
-              {/* AI range banner - gated on !crowdMedianAvailable (NOT
-                  !crowdHasRealData - see the comment above): shows
-                  whenever the math is actually using the AI/Oracle
-                  estimate, whether that's because tier is thin OR because
-                  it's the 0-sold strong-tier edge case above. Part 1/5:
-                  identify's retail-arbitrage read, only shown when there's
-                  a price to compare against the resale range, never
-                  invented. Reads outcome.tier/label/emoji/accent directly
-                  - the SAME OutcomeTierInfo the verdict card renders (FIX
-                  3, 2026-09-10) - so this can't contradict the verdict
-                  card. Tier label dropped (2026-09-16) - it repeated the
-                  card's own badge; only the range NUMBERS are new
-                  information. */}
-              {!crowdMedianAvailable && dealCompareValue != null && adjustedResaleLow != null ? (
+              {/* AI range banner - MEASURED BUG (2026-10-06, real $26 Minnie
+                  Mouse scan): gate used to be !crowdMedianAvailable, which
+                  the SEGMENT OUTCOMES comment above already notes is dead
+                  (result.crowdVerdict no longer exists server-side, so this
+                  was always true) - meaning the gate had silently stopped
+                  restricting this banner to "only when using the AI/model
+                  estimate" at all; it could show next to REAL confirmedByMoat
+                  data too. Now gated directly on !hasItemLevelSellEvidence
+                  (confirmedByMoat false), the actual condition that makes
+                  adjustedResaleLow/High an AI estimate (resaleModelLow/High
+                  or identify's own estimatedResaleRange - see their
+                  definitions above) rather than real sold-comp data.
+                  ALSO MEASURED: the sentence itself stated the range as
+                  flat fact ("resale range is $X-$Y") with no estimate/AI
+                  qualifier anywhere in it - now says so explicitly. Reads
+                  outcome.tier/label/emoji/accent directly - the SAME
+                  OutcomeTierInfo the verdict card renders (FIX 3,
+                  2026-09-10) - so this can't contradict the verdict card. */}
+              {!hasItemLevelSellEvidence && dealCompareValue != null && adjustedResaleLow != null ? (
                 <View style={[s.rangeBanner, { backgroundColor: outcome.accent + "1a", borderColor: outcome.accent + "55" }]}>
                   <Text></Text>
                   <FlashHighlight flashSeq={refineSeq}>
-                    <Text style={[s.rangeBannerSub, { flex: 1 }]}>{`At $${dealCompareValue}, resale range is $${adjustedResaleLow}-$${adjustedResaleHigh}.`}</Text>
+                    <Text style={[s.rangeBannerSub, { flex: 1 }]}>{`At $${dealCompareValue}, AI-estimated resale range is $${adjustedResaleLow}-$${adjustedResaleHigh} (not yet confirmed by real sales).`}</Text>
                   </FlashHighlight>
                 </View>
               ) : null}
@@ -1231,7 +1259,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 <TouchableOpacity style={[s.goodBanner, { marginTop: 16 }]} onPress={()=>Linking.openURL(result.priceData.ebaySearchUrl)}>
                   <Text></Text>
                   <View style={{flex:1}}>
-                    <Text style={s.goodBannerTitle}>{result.agreementBadge}</Text>
+                    {/* SAY IT ONCE - same fix as maxBuyPrefix above: when
+                        tier==="estimate", the hero copy already states
+                        "Based on N real reseller outcomes" - repeating it
+                        here too (same string, both visible at once) was
+                        the measured UA-polo triple-repeat's third copy.
+                        The avg/range line below is still new information
+                        either way. */}
+                    <Text style={s.goodBannerTitle}>{outcome.tier === "estimate" ? "Real sold data" : result.agreementBadge}</Text>
                     <Text style={s.goodBannerSub}>avg ${result.priceData.avgPrice} · range ${result.priceData.minPrice}–${result.priceData.maxPrice}</Text>
                   </View>
                   <Text style={{color:C.green}}>{'>'}</Text>
@@ -1876,6 +1911,17 @@ const s = StyleSheet.create({
   // of three equally-weighted optional boxes.
   priceLabel:      { color: C.text2, fontSize: 13, fontWeight: "800", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 },
   priceLowConfidenceHint: { color: C.yellow, fontSize: 11, marginBottom: 8, fontStyle: "italic" },
+  // TAG CONFIRM GATE (2026-10-06) - same yellow-warning treatment as
+  // tipCard below, sized as the primary above-the-fold element it replaces
+  // (the price field) rather than a small inline hint.
+  tagConfirmCard:   { backgroundColor: "#1a1200", borderWidth: 1.5, borderColor: C.yellow, borderRadius: 14, padding: 14, marginBottom: 12 },
+  tagConfirmTitle:  { color: C.text1, fontSize: 16, fontWeight: "800", marginBottom: 4 },
+  tagConfirmSource: { color: C.text3, fontSize: 12, fontStyle: "italic", marginBottom: 12 },
+  tagConfirmRow:    { flexDirection: "row", gap: 10 },
+  tagConfirmBtn:    { flex: 1, backgroundColor: C.yellow, borderRadius: 12, paddingVertical: 13, alignItems: "center" },
+  tagConfirmBtnText:{ color: "#1a1200", fontSize: 14, fontWeight: "800" },
+  tagEditBtn:       { flex: 1, borderWidth: 1.5, borderColor: C.yellow, borderRadius: 12, paddingVertical: 13, alignItems: "center" },
+  tagEditBtnText:   { color: C.yellow, fontSize: 14, fontWeight: "800" },
   priceFieldWrap:  { flexDirection: "row", alignItems: "center", backgroundColor: C.greenBg, borderWidth: 1.5, borderColor: C.greenBorder, borderRadius: 14, paddingHorizontal: 16 },
   priceFieldDollar:{ color: C.green, fontSize: 26, fontWeight: "800", marginRight: 4 },
   priceFieldInput: { flex: 1, color: C.text1, fontSize: 26, fontWeight: "700", paddingVertical: 14 },

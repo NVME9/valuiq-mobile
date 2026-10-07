@@ -136,15 +136,36 @@ export async function sendMagicLink(email: string): Promise<void> {
 // refresh_token while a request is already in flight gets the SAME promise
 // instead of firing a duplicate request that can only lose the race.
 let _refreshInFlight: { token: string; promise: Promise<Session> } | null = null;
+// Thrown when the refresh attempt couldn't get a real verdict from Supabase
+// at all - a timeout/abort, a plain network failure, or Supabase itself
+// returning 5xx (Auth service unhealthy, as in the 2026-10-06 outage). None
+// of these say anything about whether refresh_token is actually valid - only
+// an explicit 4xx (invalid_grant/expired/revoked) does. App.tsx's init()
+// relies on this distinction: a NetworkError must never clear a stored
+// session or drop the user onto the sign-in screen - only a genuine
+// rejection may.
+export class SessionRestoreNetworkError extends Error {}
+
 export async function refreshToken(refresh_token: string): Promise<Session> {
   if (_refreshInFlight && _refreshInFlight.token === refresh_token) {
     return _refreshInFlight.promise;
   }
   const promise = (async () => {
-    const r = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, { method:"POST", headers:SB, body:JSON.stringify({refresh_token}) });
-    const d = await r.json();
+    let r: Response;
+    try {
+      r = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, { method:"POST", headers:SB, body:JSON.stringify({refresh_token}) });
+    } catch (e: any) {
+      throw new SessionRestoreNetworkError(e?.message || "Network error");
+    }
+    const d = await r.json().catch(() => ({}));
     console.log("[DIAG refreshToken] status=" + r.status + " ok=" + r.ok + " resp=" + JSON.stringify(d).slice(0,300));
-    if (!r.ok) throw new Error("Session expired");
+    if (!r.ok) {
+      // Only a 4xx is Supabase actually telling us the token is bad - a 5xx
+      // (or anything else) means the Auth service itself is unhealthy, which
+      // is a server problem, not a verdict on this refresh_token.
+      if (r.status >= 400 && r.status < 500) throw new Error("Session expired");
+      throw new SessionRestoreNetworkError(`Supabase auth returned ${r.status}`);
+    }
     return d;
   })();
   _refreshInFlight = { token: refresh_token, promise };

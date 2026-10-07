@@ -18,6 +18,7 @@ import { toPendingScan } from "../lib/saleCapture";
 import { fetchFlexStat, cacheFlexStat, readCachedFlexStat, concreteLine, FlexStat } from "../lib/flexReveal";
 import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty, getWinsSummary, peekProfileData, getScanHistory, peekScanHistory, invalidateScanHistoryCache, getThriftRuns, peekThriftRuns, invalidateThriftRunsCache } from "../lib/api";
 import { classifyOutcome, OutcomeTierInfo } from "../lib/outcomeTier";
+import { CONDITION_OPTIONS, CONDITION_TO_DB } from "../lib/condition";
 
 // Maps either row shape History renders to ShareCard's expected props -
 // the DB-row shape (scans/specialty, snake_case: item_name, net_profit,
@@ -157,6 +158,10 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   const [editCategory, setEditCat]  = useState("");
   const [editDesc, setEditDesc]     = useState("");
   const [editPrice, setEditPrice]   = useState("");
+  // Chip VALUE from lib/condition.ts (e.g. "used-good"), blank = untouched -
+  // see openEditor/doRerun below for the deliberate "don't send what the
+  // user didn't actually pick" handling, same rule SaleCaptureCard follows.
+  const [editCondition, setEditCondition] = useState("");
   const [editThriftItem, setEditThriftItem] = useState<{runId:string; itemId:string}|null>(null);
   const [editPhotos, setEditPhotos] = useState<string[]>([]);
   const [rerunning, setRerunning]   = useState(false);
@@ -234,11 +239,19 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
     setEditCat(scan.category || "");
     setEditDesc("");
     setEditPrice(scan.buy_price ? String(scan.buy_price) : "");
+    // DELIBERATE BLANK DEFAULT (same rule as SaleCaptureCard's condition/
+    // platform chips) - never pre-select a chip from the scan's existing
+    // `condition`, which is usually just identify's own scan-time guess,
+    // not a real confirmed condition. Leaving it untouched means doRerun
+    // below correctly sends nothing and never overwrites that guess with
+    // itself disguised as a user-entered value.
+    setEditCondition("");
     setEditPhotos([]);
   }
 
   function closeEditor() {
     setEditingId(null);
+    setEditCondition("");
     setEditPhotos([]);
   }
 
@@ -304,7 +317,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
         // same card. `data` here IS the full fresh scanResult (same shape
         // lens/route.ts saves at scan time) - re-saving it keeps the prose
         // in sync with the stats it's describing.
-        const updates = {
+        const updates: any = {
           item_name: editName.trim(),
           brand: editBrand.trim() || "Unknown",
           category: editCategory.trim() || scan.category,
@@ -317,6 +330,13 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
           roi: data.roi ?? scan.roi,
           specialty_data: JSON.stringify(data),
         };
+        // Only sent when the user actually tapped a chip (see openEditor's
+        // blank-default comment) - app/api/scan-history/route.ts stamps
+        // condition_source: 'user-entered' automatically whenever
+        // `condition` is present, so that never needs to be sent from here.
+        if (editCondition && CONDITION_TO_DB[editCondition]) {
+          updates.condition = CONDITION_TO_DB[editCondition];
+        }
         // Persist to DB (PATCH preserves image_url / thumbnail)
         try { await updateScan(token, scan.id, updates); } catch {}
         invalidateScanHistoryCache(token);
@@ -917,6 +937,21 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                             <TextInput style={s.editInput} value={editDesc} onChangeText={setEditDesc} placeholder="Model, condition notes, etc." placeholderTextColor={C.text4}/>
                             <Text style={s.editLabel}>What you paid (optional)</Text>
                             <TextInput style={s.editInput} value={editPrice} onChangeText={setEditPrice} placeholder="0.00" placeholderTextColor={C.text4} keyboardType="decimal-pad"/>
+                            <Text style={s.editLabel}>Condition (optional)</Text>
+                            <View style={{flexDirection:"row", flexWrap:"wrap", gap:8, marginBottom:8}}>
+                              {CONDITION_OPTIONS.map((opt) => {
+                                const sel = editCondition === opt.value;
+                                return (
+                                  <TouchableOpacity
+                                    key={opt.value}
+                                    style={{paddingVertical:8, paddingHorizontal:14, borderRadius:20, backgroundColor: sel ? C.green : C.surfaceHigh, borderColor: sel ? C.green : C.border, borderWidth:1}}
+                                    onPress={() => setEditCondition(sel ? "" : opt.value)}
+                                  >
+                                    <Text style={{color: sel ? C.greenDark : C.text2, fontSize:13, fontWeight: sel ? "800" : "600"}}>{opt.label}</Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </View>
                             {editPhotos.length > 0 && (
                               <ScrollView horizontal style={{marginTop:8}} showsHorizontalScrollIndicator={false}>
                                 {editPhotos.map((ph, pi) => (

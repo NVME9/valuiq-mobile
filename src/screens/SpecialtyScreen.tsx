@@ -9,6 +9,7 @@ import { analyzeSpecialty } from "../lib/api";
 import ShareButton from "../components/ShareButton";
 import StagedProgress from "../components/StagedProgress";
 import ProfitFlexHero from "../components/ProfitFlexHero";
+import SegmentOutcomesBlock from "../components/SegmentOutcomesBlock";
 import { classifyOutcome } from "../lib/outcomeTier";
 
 // Reusable collapsed-by-default section - local to this screen (not shared
@@ -327,6 +328,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
     // "SKIP - only $X profit" off the max-buy ceiling. Reuses the skip
     // TIER'S LAYOUT (no big profit hero; Max Buy always ships) without
     // claiming a verdict this screen can't back up.
+    const hasItemLevelSellEvidence = !!result.confirmedByMoat;
     const outcome = suppressed
       ? {
           tier: "skip" as const,
@@ -337,7 +339,20 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
           adjustedROI: 0,
           daysUsed: 0,
         }
-      : enteredBp > 0
+      // VERDICT GATE + ESTIMATE-LABEL BUG (2026-10-06): this screen never
+      // had ScannerScreen.tsx's confirmedByMoat gate at all - a price
+      // entered against an UNCONFIRMED sell price (confirmedByMoat:false,
+      // a pure LLM guess) called classifyOutcome() straight, producing a
+      // big verdict (HOT BUY/SKIP, real ROI% framing) the data couldn't
+      // back up. AND the no-price branch below hardcoded label:"REAL DATA"
+      // UNCONDITIONALLY - the live opposite of the bug ScannerScreen.tsx
+      // had (which hardcoded "ESTIMATE" unconditionally) - both wrong for
+      // the same reason: the label must reflect result.confirmedByMoat,
+      // never a fixed string. See ScannerScreen.tsx's identical fix for the
+      // measured real-scan case (UA polo, confirmedByMoat:true, correct
+      // $15, still showed "ESTIMATE" there - the complementary bug lives
+      // here).
+      : (enteredBp > 0 && hasItemLevelSellEvidence)
       ? classifyOutcome({
           noFlipMargin: !!result.noFlipMargin,
           netProfit: heroProfit,
@@ -351,12 +366,16 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
         })
       : {
           tier: "skip" as const,
-          emoji: "💵",
-          label: "REAL DATA",
-          copy: Number(result.sellPrice) > 0
-            ? `Sells for about $${Math.round(Number(result.sellPrice))}. Enter what you'd pay to see your real profit and verdict.`
-            : "Enter what you'd pay to see your real profit and verdict.",
-          accent: C.yellow,
+          emoji: hasItemLevelSellEvidence ? "✅" : "🏷️",
+          label: hasItemLevelSellEvidence ? "REAL DATA" : "ESTIMATE",
+          copy: hasItemLevelSellEvidence
+            ? (Number(result.sellPrice) > 0
+                ? `Sells for about $${Math.round(Number(result.sellPrice))} (real data) — verdict needs your buy price.`
+                : "Enter what you'd pay to see your real profit and verdict.")
+            : (Number(result.sellPrice) > 0
+                ? `Sells for about $${Math.round(Number(result.sellPrice))} (market estimate, not yet confirmed by real sales of this exact item) — verify before buying.`
+                : "Enter what you'd pay to see your real profit and verdict."),
+          accent: hasItemLevelSellEvidence ? C.green : C.yellow,
           adjustedROI: 0,
           daysUsed: 0,
         };
@@ -374,7 +393,14 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
     // (buildBadge, keyed on agreeingCount) - never re-derived from
     // dataQuality/crowdConfidence tiers here, so this screen can't drift
     // from what the web scanner or ShareCard say about the identical scan.
-    const dataPhrase = result.agreementBadge || "Based on market estimate";
+    // SAY IT ONCE (2026-10-06) - same fix as ScannerScreen.tsx's identical
+    // repeat: the goodBanner below ALSO shows result.agreementBadge
+    // verbatim as its title whenever confirmedByMoat+priceData (its own
+    // avg/range line is the new information there) - showing the same
+    // "Based on N real reseller outcomes" string a second time here, right
+    // above it, was a duplicate in exactly that case.
+    const dataPhraseShownInBanner = !suppressed && result.confirmedByMoat && !!result.priceData;
+    const dataPhrase = dataPhraseShownInBanner ? "Real sold data" : (result.agreementBadge || "Based on market estimate");
     // The claim must match the number: maxBuy is now the price where this
     // clears a genuine ~$10 profit floor (lib/profitMath.ts's computeMaxBuy)
     // - same fix as ScannerScreen.tsx.
@@ -385,17 +411,18 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
             : `${dataPhrase}. You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
         : `${dataPhrase}. Pay $${maxBuy} or less to make this a real flip (≥$10 profit after fees).`
     );
-    // Suppressed items get no tag at all - real for anything else now,
-    // since confirmedByMoat/agreeingCount is the actual honesty signal
-    // (never dataQuality tiers, which only describe identification
-    // confidence, not moat agreement).
-    // REAL DATA GATE (2026-10-04, decision 4) - same fix as ScannerScreen.tsx:
-    // server confirmedByMoat already requires >=5 same-item-type agreeing
-    // rows now, no small-sample variant needed below that bar.
-    const dataTag = suppressed ? undefined :
-      result.confirmedByMoat ? "● REAL DATA" : "● ESTIMATE";
-    const dataTagColor = suppressed ? undefined :
-      result.confirmedByMoat ? C.green : C.text4;
+    // ONE BADGE PER RESULT (2026-10-06) - same fix as ScannerScreen.tsx's
+    // identical bug: the "skip"-tier branch above (suppressed, AND the
+    // REAL DATA/ESTIMATE no-verdict branch) already shows that exact label
+    // as the top badge, so a bottom "● REAL DATA"/"● ESTIMATE" tag always
+    // duplicated it. This screen never even routes through a real
+    // BUY/SKIP/JUDGMENT verdict unless confirmedByMoat is true (the
+    // classifyOutcome branch requires hasItemLevelSellEvidence) - so the
+    // tag is only ever a genuinely NEW signal in that one case, same as
+    // ScannerScreen.tsx. footNote-equivalent copy inside outcome.copy
+    // already states the estimate/real distinction in prose either way.
+    const dataTag = (!suppressed && enteredBp > 0 && hasItemLevelSellEvidence) ? "● REAL DATA" : undefined;
+    const dataTagColor = C.green;
     const secondaryStats = [
       { label: "sell price", value: result.sellPrice != null ? "$" + Math.round(result.sellPrice) : "—" },
       { label: "ROI", value: result.roi ? result.roi + "%" : "—" },
@@ -464,6 +491,10 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
           secondaryStats={secondaryStats}
           skipDetail={skipDetail}
         />
+
+        {/* "What resellers actually made" (Part 3B, 2026-10-06) - same
+            shared component/wording as ScannerScreen.tsx. */}
+        <SegmentOutcomesBlock segment={result.segmentOutcomes} />
 
         {result.brandTagPrompt ? (
           <View style={[s.infoCard, { borderColor: C.yellow + "30", backgroundColor: "#1a1508" }]}>

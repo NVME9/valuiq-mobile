@@ -2,6 +2,7 @@
 // Routes through the web API (same pattern as updateScan/getScanHistory),
 // which uses the service-role key server-side. No direct Supabase, no RLS issues.
 import { API_BASE } from "./api";
+import { CONDITION_TO_DB } from "./condition";
 
 export type SaleOutcome = "sold" | "passed" | "not_yet";
 
@@ -76,13 +77,24 @@ export async function recordSaleOutcome(
   createdAt?: string,
   actualPrice?: number,
   daysOverride?: number,
-  soldPlatform?: string
+  soldPlatform?: string,
+  // Chip VALUE from lib/condition.ts's CONDITION_OPTIONS (e.g. "used-good"),
+  // not the DB string - mapped via CONDITION_TO_DB below. Omitted entirely
+  // (not sent as null/empty) when the user never tapped a chip, same
+  // "don't send what you don't mean" pattern soldPlatform already uses -
+  // app/api/scan-history/route.ts stamps condition_source: 'user-entered'
+  // automatically whenever `condition` is present, so that never needs to
+  // be sent explicitly from here.
+  conditionChip?: string
 ): Promise<RecordSaleResult> {
   const updates: any = {
     sold_status: outcome,
     capture_prompted_at: new Date().toISOString(),
     capture_channel: channel,
   };
+  if (conditionChip && CONDITION_TO_DB[conditionChip]) {
+    updates.condition = CONDITION_TO_DB[conditionChip];
+  }
   if (outcome === "sold") {
     const soldDate = new Date();
     updates.sold_date = soldDate.toISOString();

@@ -6,7 +6,7 @@ import {
 import { C } from "./src/lib/theme";
 import LogoBadge from "./src/components/LogoBadge";
 import ScopeBackground from "./src/components/ScopeBackground";
-import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache, getScanById, invalidateScanHistoryCache } from "./src/lib/api";
+import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache, getScanById, invalidateScanHistoryCache, SessionRestoreNetworkError } from "./src/lib/api";
 import { supabase } from "./src/lib/supabase";
 import { addSaleCheckInTapListener } from "./src/lib/notifications";
 import LogSaleModal from "./src/components/LogSaleModal";
@@ -67,6 +67,12 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
     new Promise<T>((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
   ]);
 }
+
+// Mirrors ProfileScreen.tsx's OWNER_EMAILS - gates the session-restore debug
+// readout below (elapsed time on the connecting/splash screen) the same way
+// that file gates its dev-only tools: an account allowlist, not __DEV__,
+// since this ships to real users over OTA where __DEV__ is always false.
+const OWNER_EMAILS = ["natev9@comcast.net", "nvisionsinc@gmail.com", "nathanrussell9@outlook.com"];
 
 // MEASURED BUG: LoginScreen's biometric quick-login reads its OWN separately-
 // stored refresh token (biometrics.ts's saveBiometricRefreshToken), written
@@ -175,6 +181,54 @@ function SplashScreen({ onDone }: { onDone:()=>void }) {
   );
 }
 
+// ── LOADING GATE ─────────────────────────────────────────────
+// Covers the gap between SplashScreen's own fixed-length brand animation
+// finishing and session restore actually resolving - WITHOUT this, that gap
+// rendered nothing (SplashScreen's own opacity had already animated to 0,
+// and the main content's fadeIn hadn't started yet), i.e. a blank screen,
+// on any cold restore slower than the splash animation. Only ever shown for
+// a few seconds at most - see App()'s MAX_ATTEMPTS (bounded to one silent
+// retry) below.
+function LoadingGate({ elapsedMs, showDebug }: { elapsedMs: number; showDebug: boolean }) {
+  return (
+    <View style={ss.splash}>
+      <StatusBar barStyle="light-content" backgroundColor={C.bgDeep} />
+      <View style={ss.content}>
+        <ActivityIndicator size="large" color={C.green} />
+        {showDebug && (
+          <Text style={ss.debugLine}>session restore: {elapsedMs}ms</Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
+// ── RECONNECTING (small, non-blocking) ──────────────────────
+// COLD-LAUNCH FIX (2026-10-06): this used to be a full-screen gate shown
+// INSTEAD OF the main app while a stored session's refresh was in flight
+// or failing - on a slow backend (measured: 8019ms, backfill write load
+// hammering the same DB auth sits on) that meant a real, valid session sat
+// on "Connecting…" for 8+ seconds, which read as a hang and took a third
+// force-close to escape. Restore is now OPTIMISTIC (attemptSessionRestore
+// below renders Home immediately with the stored session, refreshes in
+// the background) - this badge is just a small, non-blocking corner
+// indicator for "the background refresh hasn't confirmed yet / is having
+// network trouble," never a thing the user has to wait out to use the app.
+function ReconnectingBadge({ elapsedMs, retrying, onRetry, showDebug }:
+  { elapsedMs: number; retrying: boolean; onRetry: () => void; showDebug: boolean }) {
+  return (
+    <SafeAreaView style={ss.reconnectWrap} pointerEvents="box-none">
+      <TouchableOpacity style={ss.reconnectPill} onPress={onRetry} disabled={retrying} activeOpacity={0.8}>
+        <ActivityIndicator size="small" color={C.text2} style={{ marginRight: 8 }} />
+        <Text style={ss.reconnectText}>{retrying ? "Reconnecting…" : "Reconnecting — tap to retry"}</Text>
+      </TouchableOpacity>
+      {showDebug && (
+        <Text style={[ss.debugLine, { marginTop: 4 }]}>session restore: {elapsedMs}ms{retrying ? " (retrying…)" : ""}</Text>
+      )}
+    </SafeAreaView>
+  );
+}
+
 const ss = StyleSheet.create({
   splash:   { position:"absolute" as any, top:0, left:0, right:0, bottom:0, zIndex:100, backgroundColor:C.bgDeep },
   content:  { flex:1, alignItems:"center", justifyContent:"center", paddingHorizontal:32 },
@@ -185,6 +239,15 @@ const ss = StyleSheet.create({
   pill:     { flexDirection:"row", alignItems:"center", gap:12 },
   pillIcon: { fontSize:22, width:34, lineHeight:28, textAlign:"center" as any },
   pillText: { color:C.text2, fontSize:14, lineHeight:20, flex:1 },
+  retryBtn: { backgroundColor:C.green, paddingHorizontal:36, paddingVertical:13, borderRadius:12, minWidth:120, alignItems:"center" },
+  retryBtnText: { color:C.bgDeep, fontSize:15, fontWeight:"800" },
+  // Owner-only (OWNER_EMAILS) - Nate can't see console logs on a device
+  // build, this is the only way to see how long a restore attempt actually
+  // took without plugging into a debugger.
+  debugLine: { color:C.text4, fontSize:11, marginTop:18, fontFamily:Platform.OS==="ios"?"Menlo":"monospace" },
+  reconnectWrap: { position:"absolute" as any, top:0, left:0, right:0, zIndex:90, alignItems:"center" },
+  reconnectPill: { flexDirection:"row", alignItems:"center", backgroundColor:C.surface, paddingHorizontal:14, paddingVertical:8, borderRadius:20, marginTop:6, shadowColor:"#000", shadowOpacity:0.15, shadowRadius:6, shadowOffset:{width:0,height:2}, elevation:3 },
+  reconnectText: { color:C.text2, fontSize:12, fontWeight:"600" },
 });
 
 // ── MAIN, APP ─────────────────────────────────────────────────
@@ -201,6 +264,20 @@ export default function App() {
   const [navData, setNavData]       = useState<any>(null);
   const [appReady, setAppReady]     = useState(false);
   const [splashDone, setSplashDone] = useState(false);
+  // See attemptSessionRestore() below: true whenever a background refresh
+  // (cold-launch restore OR foreground-resume) is failing for a reason that
+  // says nothing about whether the session is actually valid (timeout/
+  // network/5xx) - never set on a genuine rejection, which clears the
+  // session and routes to sign-in instead. Purely cosmetic (ReconnectingBadge)
+  // - never blocks rendering the main app, which is already showing.
+  const [reconnecting, setReconnecting] = useState(false);
+  const [retrying, setRetrying]     = useState(false);
+  const [restoreElapsedMs, setRestoreElapsedMs] = useState(0);
+  const restoreStartRef = useRef<number | null>(null);
+  const restoreTickRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  // The stored (pre-refresh) session kept around purely so the Retry button
+  // on ReconnectingBadge has a refresh_token to retry with.
+  const savedSessionRef = useRef<Session | null>(null);
   const [onboarded, setOnboarded] = useState(false);
   const [aiConsented, setAiConsented] = useState(false);
   const [firstScanNudge, setFirstScanNudge] = useState(false); // one-line prompt shown on the Scan screen, first launch only
@@ -262,17 +339,29 @@ export default function App() {
         try {
           const saved = await loadSession();
           if (saved && saved.refresh_token) {
+            savedSessionRef.current = saved;
             if (!isTokenNearExpiry(saved.access_token)) return;
             const refreshed = await refreshToken(saved.refresh_token);
             await saveSession(refreshed);
             await syncBiometricToken(refreshed);
             setSession(refreshed);
+            setReconnecting(false);
             await loadUserData(refreshed.access_token);
           }
         } catch (e) {
-          // On failure, do NOT clear the session here â€” a transient refresh
-          // failure on resume must not log the user out or drop them to free.
-          console.log("[DIAG resume] refresh skipped:", String(e));
+          // On a genuine rejection, the session really is dead - same rule
+          // as attemptSessionRestore. On anything network-shaped, do NOT
+          // clear the session - a transient refresh failure on resume must
+          // never log the user out or drop them to free; surface the small
+          // badge instead.
+          if (e instanceof SessionRestoreNetworkError) {
+            console.log("[DIAG resume] refresh network trouble:", String(e));
+            setReconnecting(true);
+          } else {
+            console.log("[DIAG resume] refresh rejected, signing out:", String(e));
+            await clearSession();
+            setSession(null);
+          }
         }
       }
     });
@@ -284,6 +373,96 @@ export default function App() {
       Animated.timing(fadeIn, { toValue:1, duration:300, useNativeDriver:true }).start();
     }
   }, [splashDone, appReady]);
+
+  // ── SESSION RESTORE TIMER (owner-only debug readout) ────────────────────
+  function startRestoreTimer() {
+    restoreStartRef.current = Date.now();
+    setRestoreElapsedMs(0);
+    if (restoreTickRef.current) clearInterval(restoreTickRef.current);
+    restoreTickRef.current = setInterval(() => {
+      if (restoreStartRef.current != null) setRestoreElapsedMs(Date.now() - restoreStartRef.current);
+    }, 200);
+  }
+  function stopRestoreTimer() {
+    if (restoreTickRef.current) { clearInterval(restoreTickRef.current); restoreTickRef.current = null; }
+    if (restoreStartRef.current != null) setRestoreElapsedMs(Date.now() - restoreStartRef.current);
+  }
+
+  // INCIDENT (2026-10-06): Supabase Auth going unhealthy made refreshToken()
+  // time out on every cold launch - the old code BLOCKED first paint on
+  // that refresh (LoadingGate, then a full-screen "Connecting…" gate),
+  // so a slow backend (measured: 8019ms, the moat backfill's write load
+  // hammering the same DB auth sits on) looked exactly like a hang and
+  // took a third force-close to escape. Fix, two parts:
+  //   1. OPTIMISTIC RESTORE - a stored session renders Home IMMEDIATELY
+  //      (setSession+setAppReady before any network call), never blocked
+  //      on refreshToken() resolving at all. The refresh still happens,
+  //      just in the background.
+  //   2. Only a GENUINE rejection (expired/revoked/invalid refresh token)
+  //      ever signs the user out. Anything network-shaped (timeout,
+  //      unreachable, 5xx - refreshToken() throws SessionRestoreNetworkError
+  //      for all of these, never for a real rejection) leaves the already-
+  //      rendered session exactly as it is and shows the small, non-
+  //      blocking ReconnectingBadge instead - never routes to sign-in.
+  //
+  // Bounded to ONE silent retry, never more - see HOUSEKEEPING.md's
+  // "Refresh now" retry-loop incident for why an uncapped auto-retry here
+  // would be the same mistake again, just moved to a different button.
+  async function attemptSessionRestore(saved: Session) {
+    savedSessionRef.current = saved;
+    // Render NOW, optimistically, with whatever's on disk - a stale access
+    // token for a few seconds is a far better failure mode than a blocked
+    // launch. loadUserData/hydrateAvatarCache below re-fire once the
+    // refresh actually confirms, correcting anything that was stale.
+    setSession(saved);
+    setAppReady(true);
+    setReconnecting(false);
+    startRestoreTimer();
+    const MAX_ATTEMPTS = 2;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const refreshed = await refreshToken(saved.refresh_token);
+        console.log("[DIAG init] refresh OK len=", refreshed?.access_token?.length || 0);
+        await saveSession(refreshed);
+        await syncBiometricToken(refreshed);
+        setSession(refreshed);
+        setReconnecting(false);
+        // Deliberately NOT awaited: plan/scan-count are UI-fill-in data, not
+        // launch-blocking data - see loadUserData's own comment.
+        loadUserData(refreshed.access_token);
+        hydrateAvatarCache(refreshed.access_token);
+        stopRestoreTimer();
+        return;
+      } catch (e) {
+        const networkTrouble = e instanceof SessionRestoreNetworkError;
+        console.log(`[DIAG init] refresh attempt ${attempt} failed (networkTrouble=${networkTrouble}):`, String(e));
+        if (networkTrouble && attempt < MAX_ATTEMPTS) continue; // one silent retry, no delay needed - fetchWithTimeout already spent 4s
+        stopRestoreTimer();
+        if (networkTrouble) {
+          // Can't reach the server - NOT a verdict on this session, and
+          // Home is already showing (optimistic render above). Small badge
+          // only, never a route to sign-in.
+          setReconnecting(true);
+        } else {
+          // Genuine rejection - the ONLY case that signs the user out.
+          setReconnecting(false);
+          await clearSession();
+          setSession(null);
+        }
+        return;
+      }
+    }
+  }
+
+  async function handleRetryConnect() {
+    if (!savedSessionRef.current || retrying) return;
+    setRetrying(true);
+    try {
+      await attemptSessionRestore(savedSessionRef.current);
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   async function init() {
     // MEASURED BUG: this app had zero custom expo-updates code anywhere,
@@ -346,25 +525,10 @@ export default function App() {
         const lastPlan = await AsyncStorage.getItem(LAST_PLAN_KEY);
         if (lastPlan) { setPlan(lastPlan); setPlanLoaded(true); }
       } catch {}
-      try {
-        // refreshToken is timeout-bounded (see api.ts) so this can never hang
-        // the launch screen on a cold/slow backend.
-        const refreshed = await refreshToken(saved.refresh_token); console.log("[DIAG init] refresh OK len=", (refreshed && refreshed.access_token ? refreshed.access_token.length : 0));
-        await saveSession(refreshed);
-        await syncBiometricToken(refreshed);
-        setSession(refreshed);
-        // Deliberately NOT awaited: plan/scan-count are UI-fill-in data, not
-        // launch-blocking data. The main UI must render as soon as the
-        // session itself is known - loadUserData resolves in the background
-        // and updates plan/scansLeft in place once it lands (or times out).
-        loadUserData(refreshed.access_token);
-        // Also not awaited - warms the synchronous avatar mirror from disk
-        // so Dashboard's very first mount this session (before any
-        // /api/profile fetch has landed) can still show a real avatar
-        // instead of the generic placeholder. See peekAvatar/
-        // hydrateAvatarCache in lib/api.ts.
-        hydrateAvatarCache(refreshed.access_token);
-      } catch (e) { console.log("[DIAG init] refresh FAILED -> clearSession. error=", String(e)); await clearSession(); }
+      // Sets appReady itself once it reaches a verdict (signed in, really
+      // logged out, or connecting-trouble) - see attemptSessionRestore above.
+      await attemptSessionRestore(saved);
+      return;
     }
     setAppReady(true);
   }
@@ -539,17 +703,37 @@ export default function App() {
     { id:"profile"   as Screen, icon:"👤", label:"Profile" },
   ];
 
+  // Gates the owner-only elapsed-time readout on LoadingGate/ReconnectingBadge
+  // - checked against whichever session we actually know about right now
+  // (the stored pre-refresh one while still restoring, the live one once
+  // signed in).
+  const isOwner = OWNER_EMAILS.includes((savedSessionRef.current?.user?.email || session?.user?.email || "").toLowerCase());
+
   return (
     <SafeAreaProvider>
     <View style={s.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-      {/* Gated on splashDone/appReady ONLY - never on planLoaded. planLoaded
-          depends on a backend call (getPlan/getScanCount) that can be slow
-          on a cold start; the main UI must render with default plan="free"/
-          scansLeft=null and fill in once loadUserData resolves, instead of
-          holding a black screen (the splash animation itself fades to
-          opacity 0 well before appReady could ever depend on the network). */}
-      {(!splashDone || !appReady) && <SplashScreen onDone={()=>setSplashDone(true)} />}
+      {/* SplashScreen only for its own fixed-length brand animation; once
+          that's done, if session restore is STILL not resolved, LoadingGate
+          takes over instead of going blank (SplashScreen's own opacity has
+          already animated to 0 by the time its animation completes,
+          independent of appReady) - see LoadingGate's comment. Neither is
+          gated on planLoaded: that depends on a backend call (getPlan/
+          getScanCount) that can be slow on a cold start, and the main UI
+          must render with default plan="free"/scansLeft=null, filling in
+          once loadUserData resolves. */}
+      {!splashDone && <SplashScreen onDone={()=>setSplashDone(true)} />}
+      {splashDone && !appReady && <LoadingGate elapsedMs={restoreElapsedMs} showDebug={isOwner} />}
+      {/* Non-blocking - a background refresh having trouble never hides the
+          app underneath it (see attemptSessionRestore's optimistic restore). */}
+      {reconnecting && (
+        <ReconnectingBadge
+          elapsedMs={restoreElapsedMs}
+          retrying={retrying}
+          onRetry={handleRetryConnect}
+          showDebug={isOwner}
+        />
+      )}
       <Animated.View style={[{flex:1}, {opacity:fadeIn}]}>
         {previewNewUser && previewStep === "value" && session && aiConsented ? (
           // PREVIEW: the real value screen, shown on top of an already-
