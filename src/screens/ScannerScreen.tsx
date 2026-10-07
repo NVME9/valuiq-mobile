@@ -788,7 +788,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // else still reads result.agreeingCount directly, this is purely for
     // the sentence text.
     const agreeingCountForCopy = Number(result.agreeingCount) || 0;
-    const outcome = (enteredBp > 0 && hasItemLevelSellEvidence)
+    let outcome = (enteredBp > 0 && hasItemLevelSellEvidence)
       ? classifyOutcome({
           noFlipMargin: !!result.noFlipMargin,
           netProfit: heroProfit,
@@ -867,6 +867,57 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           adjustedROI: 0,
           daysUsed: 0,
         });
+
+    // RESULT-SCREEN HERO VERDICT (2026-10-06, per spec): mirrors deal-ai-
+    // pro's server-side heroVerdict (app/api/lens/route.ts) exactly, but
+    // recomputed LOCALLY here for the same reason heroProfit/heroRoi
+    // already are - a price Confirm/Edit on THIS screen has to update the
+    // headline instantly with no network round trip, and the server's own
+    // result.heroVerdict (computed when this scan's buyPrice was still
+    // 0/unconfirmed, before the tag-confirm gate resolved) is stale the
+    // instant a price is entered. Needs result.segmentOutcomes.
+    // medianSoldPrice (the raw number, not just the baked-in summaryLine
+    // string) - see lib/profitOracle.ts's buildSegmentOutcomesDisplay.
+    // Overrides outcome's tier/label/emoji/accent/copy IN PLACE (not a
+    // separate variable) so every existing downstream read of `outcome`/
+    // `heroOutcome` below picks this up automatically, no renaming needed.
+    // REPLACES the old multi-paragraph hedge copy ("not yet confirmed by
+    // real sales... verify before buying at $X" / "AI-estimated resale
+    // range... not yet confirmed") with ONE evidence line - the single
+    // "estimate" caveat still lives in footNote below, not repeated here.
+    if (enteredBp > 0) {
+      const segOut: any = result.segmentOutcomes;
+      const heroMedian: number | null = segOut?.medianSoldPrice ?? null;
+      const heroSellThroughPct: number | null = segOut?.sellThroughRate ?? null;
+      const headline: "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" =
+        (heroMedian != null && enteredBp >= heroMedian) ? "PASS"
+        : (heroRoi < ROI_BUY_MIN) ? "THIN"
+        : (heroRoi >= 50 && heroSellThroughPct != null && heroSellThroughPct >= 50) ? "WORTH A LOOK"
+        : "SOLID";
+      const evidenceLine = segOut
+        ? [
+            heroMedian != null ? `${segOut.label} resell ~$${Math.round(heroMedian)}` : null,
+            heroSellThroughPct != null ? `${Math.round(heroSellThroughPct)}% sell` : null,
+            segOut.resolvedCount > 0 ? `${segOut.resolvedCount} resale outcomes` : null,
+          ].filter(Boolean).join(" · ") || null
+        : null;
+      const META: Record<string, { emoji: string; accent: string; tier: "hot" | "solid" | "thin" | "skip" }> = {
+        "PASS": { emoji: "🚫", accent: C.red, tier: "skip" },
+        "THIN": { emoji: "🤏", accent: C.yellow, tier: "thin" },
+        "SOLID": { emoji: "✅", accent: C.green, tier: "solid" },
+        "WORTH A LOOK": { emoji: "🔥", accent: C.green, tier: "hot" },
+      };
+      const meta = META[headline];
+      outcome = {
+        tier: meta.tier,
+        emoji: meta.emoji,
+        label: headline,
+        accent: meta.accent,
+        copy: evidenceLine || outcome.copy,
+        adjustedROI: outcome.adjustedROI,
+        daysUsed: outcome.daysUsed,
+      };
+    }
     const isSkip = outcome.tier === "skip";
     // PROFIT-HONESTY FIX (2026-10-05, MEASURED: the Minnie Mouse plush
     // scan): tier "estimate" already means "not item-level confirmed" (see
@@ -970,9 +1021,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // states the estimate/real distinction in prose either way.
     const dataTag = (enteredBp > 0 && hasItemLevelSellEvidence) ? "● REAL DATA" : undefined;
     const dataTagColor = C.green;
-    const footNote = result.confirmedByMoat
-      ? "From real reseller outcomes."
-      : "Market estimate. Sharpens as more resellers log real outcomes.";
+    // ONE CAVEAT MAX (2026-10-06, per spec): the single place this screen
+    // ever hedges - real data gets no caveat at all (the evidence line in
+    // outcome.copy above already says WHY it's confident), an AI estimate
+    // gets exactly one short line here, never restated elsewhere (the old
+    // multi-paragraph "not yet confirmed by real sales... verify before
+    // buying" / "AI-estimated resale range... not yet confirmed" copy is
+    // gone from outcome.copy and the range banner below).
+    const footNote = result.confirmedByMoat ? undefined : "AI-estimated — verify before buying.";
     // sell price reads sellPriceForProfit (condition-adjusted), NOT
     // result.sellPrice directly - it sits right next to ROI in this same
     // row, and ROI is already computed off the adjusted number (see
@@ -1187,7 +1243,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 <View style={[s.rangeBanner, { backgroundColor: outcome.accent + "1a", borderColor: outcome.accent + "55" }]}>
                   <Text></Text>
                   <FlashHighlight flashSeq={refineSeq}>
-                    <Text style={[s.rangeBannerSub, { flex: 1 }]}>{`At $${dealCompareValue}, AI-estimated resale range is $${adjustedResaleLow}-$${adjustedResaleHigh} (not yet confirmed by real sales).`}</Text>
+                    {/* ONE CAVEAT MAX: the "not yet confirmed" qualifier
+                        lives once, in ProfitFlexHero's footNote above - not
+                        repeated here. */}
+                    <Text style={[s.rangeBannerSub, { flex: 1 }]}>{`At $${dealCompareValue}, AI-estimated range is $${adjustedResaleLow}-$${adjustedResaleHigh}.`}</Text>
                   </FlashHighlight>
                 </View>
               ) : null}
@@ -1740,10 +1799,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             <TouchableOpacity onPress={() => onNavigate("thrift-run")} style={s.camModeBtn}>
               <Text style={s.camModeBtnText}>Thrift Run</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setMode("barcode")} style={s.camModeBtn}>
-              <Text style={s.camModeBtnText}> Barcode</Text>
-            </TouchableOpacity>
           </View>
+          {/* BARCODE-FIRST (2026-10-06, per spec - "most prominent option
+              on the scan screen"): a barcode scan skips Vision/Claude
+              identify entirely server-side (see app/api/lens/route.ts's
+              upc short-circuit) - exact brand/model, no AI guessing, and
+              now a real eBay GTIN fallback when upcitemdb misses. Used to
+              be a small outlined pill with equal visual weight to "Thrift
+              Run" - this is the fast, exact path for any retail/clearance
+              item with a barcode, so it gets the filled accent treatment
+              and its own full-width row, not buried as one of several
+              same-weight top-bar buttons. */}
+          <TouchableOpacity onPress={() => setMode("barcode")} style={s.camBarcodeBtn} activeOpacity={0.85}>
+            <Text style={s.camBarcodeBtnIcon}>▥</Text>
+            <Text style={s.camBarcodeBtnText}>Scan Barcode — fastest, most accurate</Text>
+          </TouchableOpacity>
           {/* Scan frame */}
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
             <View style={{ width: FRAME, height: FRAME, position: "relative" }}>
@@ -1856,6 +1926,12 @@ const s = StyleSheet.create({
   camScanBadge:   { borderWidth: 1, borderRadius: 100, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: "rgba(0,0,0,0.5)" },
   camModeBtn:     { backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)", borderRadius: 100, paddingHorizontal: 12, paddingVertical: 6 },
   camModeBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  // BARCODE-FIRST (2026-10-06): filled accent, full-width, its own row -
+  // see the render-site comment for why this is deliberately heavier than
+  // every other mode button on this screen.
+  camBarcodeBtn:     { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginHorizontal: 16, marginTop: 4, backgroundColor: C.green, borderRadius: 12, paddingVertical: 11 },
+  camBarcodeBtnIcon: { fontSize: 16, color: C.greenDark },
+  camBarcodeBtnText: { color: C.greenDark, fontSize: 14, fontWeight: "900" },
   corner:         { position: "absolute", width: 28, height: 28, borderColor: C.green, borderWidth: 3 },
   camHint:        { color: "rgba(255,255,255,0.6)", fontSize: 13, marginTop: 14, fontWeight: "600", paddingHorizontal: 24, textAlign: "center" },
   // Same single instruction line as camHint, just wrapped in a highlighted

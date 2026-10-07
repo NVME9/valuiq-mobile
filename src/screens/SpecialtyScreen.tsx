@@ -329,7 +329,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
     // TIER'S LAYOUT (no big profit hero; Max Buy always ships) without
     // claiming a verdict this screen can't back up.
     const hasItemLevelSellEvidence = !!result.confirmedByMoat;
-    const outcome = suppressed
+    let outcome = suppressed
       ? {
           tier: "skip" as const,
           emoji: "🔍",
@@ -379,6 +379,49 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
           adjustedROI: 0,
           daysUsed: 0,
         };
+
+    // RESULT-SCREEN HERO VERDICT (2026-10-06, per spec) - mirrors
+    // ScannerScreen.tsx's identical override exactly (see its own header
+    // comment for the full rationale: recomputed LOCALLY so an Edit &
+    // Rerun's new price updates the headline instantly, same reason
+    // heroProfit/roi already work this way). Overrides outcome in place so
+    // every downstream read (isSkip, heroOutcome, ProfitFlexHero) picks it
+    // up with no renaming. Never fires on the suppressed ("couldn't
+    // identify") branch above - tier stays "skip"/"NO VERDICT" there.
+    if (!suppressed && enteredBp > 0) {
+      const segOut: any = result.segmentOutcomes;
+      const heroMedian: number | null = segOut?.medianSoldPrice ?? null;
+      const heroSellThroughPct: number | null = segOut?.sellThroughRate ?? null;
+      const heroRoiVal = Number(result.roi) || 0;
+      const headline: "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" =
+        (heroMedian != null && enteredBp >= heroMedian) ? "PASS"
+        : (heroRoiVal < 30) ? "THIN" // mirrors deal-ai-pro/lib/profitMath.ts's ROI_BUY_MIN
+        : (heroRoiVal >= 50 && heroSellThroughPct != null && heroSellThroughPct >= 50) ? "WORTH A LOOK"
+        : "SOLID";
+      const evidenceLine = segOut
+        ? [
+            heroMedian != null ? `${segOut.label} resell ~$${Math.round(heroMedian)}` : null,
+            heroSellThroughPct != null ? `${Math.round(heroSellThroughPct)}% sell` : null,
+            segOut.resolvedCount > 0 ? `${segOut.resolvedCount} resale outcomes` : null,
+          ].filter(Boolean).join(" · ") || null
+        : null;
+      const META: Record<string, { emoji: string; accent: string; tier: "hot" | "solid" | "thin" | "skip" }> = {
+        "PASS": { emoji: "🚫", accent: C.red, tier: "skip" },
+        "THIN": { emoji: "🤏", accent: C.yellow, tier: "thin" },
+        "SOLID": { emoji: "✅", accent: C.green, tier: "solid" },
+        "WORTH A LOOK": { emoji: "🔥", accent: C.green, tier: "hot" },
+      };
+      const meta = META[headline];
+      outcome = {
+        tier: meta.tier,
+        emoji: meta.emoji,
+        label: headline,
+        accent: meta.accent,
+        copy: evidenceLine || outcome.copy,
+        adjustedROI: outcome.adjustedROI,
+        daysUsed: outcome.daysUsed,
+      };
+    }
     const isSkip = outcome.tier === "skip";
 
     // REMOVED (2026-10-04, decision 8/10) - same fix as ScannerScreen.tsx:
@@ -443,8 +486,14 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
           <Text style={s.catBadgeText}>{selectedCat.label}</Text>
         </View>
 
-        {/* Data confidence - driven by the SAME agreementBadge the
-            badge/reasoning above use, so this can never contradict them. */}
+        {/* Real comps, tap to verify on eBay - genuinely NEW information
+            (the actual avg/range of real listings) beyond what the hero
+            headline/evidence line below already states, so this stays.
+            REMOVED (2026-10-06, per spec - ONE caveat max): the "verify
+            before buying" no-comps fallback branch and the separate
+            isGoodDeal "💰 Good deal"/"⚠️ Thin margin" banner that used to
+            sit here - both repeated a caveat/verdict the new hero headline
+            + its single footNote below already state once. */}
         {!suppressed && result.confirmedByMoat && result.priceData ? (
           <TouchableOpacity style={s.goodBanner} onPress={() => result.priceData.ebaySearchUrl && Linking.openURL(result.priceData.ebaySearchUrl)}>
             <View style={{flex:1}}>
@@ -453,28 +502,13 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
             </View>
             <Text style={{color:C.green}}>{'>'}</Text>
           </TouchableOpacity>
-        ) : !suppressed ? (
-          <View style={s.limitedBanner}>
-            <Text style={s.limitedText}>{result.agreementBadge} — verify before buying.</Text>
-          </View>
-        ) : null}
-
-        {/* Part 1/5: identify's retail-arbitrage read - only shown when the
-            scan actually had a price to compare against the resale range. */}
-        {result.isGoodDeal != null ? (
-          <View style={result.isGoodDeal ? s.goodBanner : s.limitedBanner}>
-            <View style={{flex:1}}>
-              <Text style={result.isGoodDeal ? s.goodBannerTitle : s.limitedText}>
-                {result.isGoodDeal ? "💰 Good deal" : "⚠️ Thin margin"}
-              </Text>
-              <Text style={s.goodBannerSub}>{result.dealReasoning}</Text>
-            </View>
-          </View>
         ) : null}
 
         {/* THE hero: verdict + profit + max-buy (with reasoning) + key
             stats - the same ProfitFlexHero component and outcome (single
-            source of truth) ScannerScreen.tsx uses. */}
+            source of truth) ScannerScreen.tsx uses. footNote is the ONE
+            caveat this screen ever shows (per spec) - real data gets none
+            at all, an AI estimate gets exactly this one short line. */}
         <ProfitFlexHero
           outcome={heroOutcome}
           itemName={result.identification || selectedCat.label}
@@ -490,6 +524,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
           dataTagColor={dataTagColor}
           secondaryStats={secondaryStats}
           skipDetail={skipDetail}
+          footNote={(!suppressed && !result.confirmedByMoat) ? "AI-estimated — verify before buying." : undefined}
         />
 
         {/* "What resellers actually made" (Part 3B, 2026-10-06) - same
