@@ -549,8 +549,15 @@ export default function App() {
     // getPlan/getScanCount are independent reads - running them in parallel
     // (was sequential) roughly halves the common-case wait before the
     // dashboard's plan badge/scan counter can resolve.
-    let [p, count] = await Promise.all([getPlan(token), getScanCount(token)]);
-    if (p === null) { await new Promise(r=>setTimeout(r,1200)); p = await getPlan(token); }
+    //
+    // OUTAGE FIX (2026-10-07): this used to retry getPlan once after a
+    // 1200ms delay on a null result - a second request-fail-no-backoff
+    // round trip during exactly the moment the backend is already
+    // struggling. Fail once, show whatever's cached/stale (same honest-
+    // degradation rule getProfileData/getScanHistory already follow) -
+    // getPlan itself still gets deduped against any other in-flight call
+    // for the same user (see lib/api.ts's dedupedCall).
+    const [p, count] = await Promise.all([getPlan(token), getScanCount(token)]);
     if (p !== null) {
       setPlan(p);
       try { await AsyncStorage.setItem(LAST_PLAN_KEY, p); } catch {}

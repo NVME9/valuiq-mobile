@@ -4,10 +4,16 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
 import ScannerMark from "../components/ScannerMark";
-import { getCommunityFlips, peekCommunityFlips, CommunityFlip, reportWin } from "../lib/api";
+import { getCommunityFlips, peekCommunityFlips, CommunityFlip, reportWin, emailFromToken } from "../lib/api";
 import { formatFeedDetail, avatarForFlip } from "../lib/flipFormat";
 import FlexRevealCard from "../components/FlexRevealCard";
 import { FlexStat } from "../lib/flexReveal";
+import ApiDebugPanel from "../components/ApiDebugPanel";
+
+// Mirrors ProfileScreen.tsx's OWNER_EMAILS - gates the owner-only API
+// debug readout (outage hardening, 2026-10-07). See HistoryScreen.tsx's
+// identical comment for why this is computed off the token directly.
+const OWNER_EMAILS = ["natev9@comcast.net", "nvisionsinc@gmail.com", "nathanrussell9@outlook.com"];
 
 // A community flip's reveal never runs the real fetchFlexStat() crowd-
 // comparison (that needs a scanId the current user owns - a community row
@@ -50,6 +56,7 @@ interface Props {
 }
 
 export default function CommunityScreen({ token, onNavigate, onBack, navData }: Props) {
+  const isOwner = OWNER_EMAILS.includes(emailFromToken(token).toLowerCase());
   const [tab, setTab]           = useState<"wins"|"leaderboard">(navData?.tab === "leaderboard" ? "leaderboard" : "wins");
   const [filter, setFilter]     = useState<"profit"|"recent">("recent");
   // Real, anonymized flips only - see getCommunityFlips in lib/api.ts. No
@@ -278,6 +285,7 @@ export default function CommunityScreen({ token, onNavigate, onBack, navData }: 
         hideLeaderboardButton
         onClose={() => setRevealWin(null)}
       />
+      <ApiDebugPanel isOwner={isOwner} />
     </SafeAreaView>
   );
 }

@@ -9,6 +9,7 @@ import * as Clipboard from "expo-clipboard";
 import { C } from "../lib/theme";
 import HeaderLogo from "../components/HeaderLogo";
 import UserAvatar from "../components/UserAvatar";
+import ApiDebugPanel from "../components/ApiDebugPanel";
 import { isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric, getBiometricLabel } from "../lib/biometrics";
 import { API_BASE, deleteAccount, getProfileData, peekProfileData, invalidateProfileCache, setCachedAvatar } from "../lib/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -21,7 +22,7 @@ import * as Updates from "expo-updates";
 // is the ground truth: if BUILD_TAG on-device doesn't match what you just
 // published, the update didn't land (see App.tsx's init() for the
 // check-and-reload-immediately fix that was missing).
-const BUILD_TAG = "2026-10-07.2";
+const BUILD_TAG = "2026-10-07.3";
 
 // The single owner/dev allowlist for anything real users must never see -
 // dev-only tools (Reset onboarding, Preview new-user flow) and the build
@@ -963,6 +964,7 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
             </>
           )}
         </View>
+        <ApiDebugPanel isOwner={isOwner} />
 
       </ScrollView>
     </SafeAreaView>

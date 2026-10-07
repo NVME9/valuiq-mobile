@@ -16,9 +16,17 @@ import ShareCard from "../components/ShareCard";
 import WinsDemoCard from "../components/WinsDemoCard";
 import { toPendingScan } from "../lib/saleCapture";
 import { fetchFlexStat, cacheFlexStat, readCachedFlexStat, concreteLine, FlexStat } from "../lib/flexReveal";
-import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty, getWinsSummary, peekProfileData, getScanHistory, peekScanHistory, invalidateScanHistoryCache, getThriftRuns, peekThriftRuns, invalidateThriftRunsCache } from "../lib/api";
+import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty, getWinsSummary, peekProfileData, getScanHistory, peekScanHistory, invalidateScanHistoryCache, getThriftRuns, peekThriftRuns, invalidateThriftRunsCache, emailFromToken } from "../lib/api";
 import { classifyOutcome, OutcomeTierInfo } from "../lib/outcomeTier";
 import { CONDITION_OPTIONS, CONDITION_TO_DB } from "../lib/condition";
+import ApiDebugPanel from "../components/ApiDebugPanel";
+
+// Mirrors ProfileScreen.tsx's OWNER_EMAILS - gates the owner-only API
+// debug readout (outage hardening, 2026-10-07). This screen only receives
+// `token`, not a separately-tracked userEmail, so isOwner is computed
+// straight off the token's own `email` claim (emailFromToken, lib/api.ts) -
+// same account allowlist, not __DEV__ (ships to real users over OTA).
+const OWNER_EMAILS = ["natev9@comcast.net", "nvisionsinc@gmail.com", "nathanrussell9@outlook.com"];
 
 // Maps either row shape History renders to ShareCard's expected props -
 // the DB-row shape (scans/specialty, snake_case: item_name, net_profit,
@@ -105,6 +113,7 @@ function isThinData(full: any): boolean | null {
 }
 
 export default function HistoryScreen({ token, plan, onNavigate, onBack, previewNewUser }: Props) {
+  const isOwner = OWNER_EMAILS.includes(emailFromToken(token).toLowerCase());
   const [tab, setTab]               = useState<HistoryTab>("scans");
   // Instant-paint from cache if this exact list (same token/type/limit) was
   // already fetched this session (e.g. hopping Home -> Wins -> Home) -
@@ -1298,6 +1307,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
           </ViewShot>
         </View>
       )}
+      <ApiDebugPanel isOwner={isOwner} />
     </SafeAreaView>
   );
 }

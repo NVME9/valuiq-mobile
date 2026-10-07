@@ -204,10 +204,30 @@ export async function clearSession(): Promise<void> { await AsyncStorage.removeI
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ VALUIQ API ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 export async function getPlan(token: string): Promise<string | null> {
-  try { return (await fetchWithTimeout(`${API_BASE}/api/get-plan?token=${token}`, undefined, DATA_FETCH_TIMEOUT_MS).then(r=>r.json()))?.plan || "free"; } catch { return null; }
+  const key = `get-plan:${stableIdFromToken(token)}`;
+  try {
+    const d = await dedupedCall("getPlan", key, async () => {
+      const r = await fetchWithTimeout(`${API_BASE}/api/get-plan?token=${token}`, undefined, DATA_FETCH_TIMEOUT_MS);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return await r.json();
+    });
+    return d?.plan || "free";
+  } catch {
+    return null;
+  }
 }
 export async function getScanCount(token: string): Promise<number> {
-  try { return (await fetchWithTimeout(`${API_BASE}/api/scan-count?token=${token}`, undefined, DATA_FETCH_TIMEOUT_MS).then(r=>r.json()))?.count ?? 0; } catch { return 0; }
+  const key = `get-scan-count:${stableIdFromToken(token)}`;
+  try {
+    const d = await dedupedCall("getScanCount", key, async () => {
+      const r = await fetchWithTimeout(`${API_BASE}/api/scan-count?token=${token}`, undefined, DATA_FETCH_TIMEOUT_MS);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return await r.json();
+    });
+    return d?.count ?? 0;
+  } catch {
+    return 0;
+  }
 }
 export async function updateThriftItem(token: string, payload: any): Promise<any> {
   const r = await fetch(`${API_BASE}/api/thrift-run?token=${token}`, {
@@ -477,22 +497,28 @@ export interface CommunityFlip {
 // anonymized server-side (see deal-ai-pro's /api/community-flips):
 // username is always a generic "A reseller", never a real name, whether
 // the row is scraped/seed data or a real user's own submitted win.
-// Short TTL, not zero: the endpoint deliberately serves a random window of
-// the mined pool so a revisit sees genuine variety (see its own comment in
-// deal-ai-pro/app/api/community-flips/route.ts) - a long cache would defeat
-// that. This just absorbs the common case of Dashboard/Community mounting
-// and unmounting again within a few seconds of each other (no persistent
-// tab navigator - see the profile cache comment above), not repeat visits
-// minutes apart. Public data, no token, so one cache entry per limit.
-const COMMUNITY_FLIPS_TTL = 20000;
+// OUTAGE FIX (2026-10-07): was 20000 - under the 60s floor. The endpoint
+// deliberately serves a random window of the mined pool so a revisit sees
+// genuine variety (see its own comment in deal-ai-pro/app/api/community-
+// flips/route.ts); that variety now refreshes every 60s instead of 20s -
+// an acceptable tradeoff against hammering a degraded backend on every
+// tab switch, which is the higher-priority failure mode right now. This
+// just absorbs the common case of Dashboard/Community mounting and
+// unmounting again within the window (no persistent tab navigator - see
+// the profile cache comment above), not repeat visits minutes apart.
+// Public data, no token, so one cache entry per limit.
+const COMMUNITY_FLIPS_TTL = 60000;
 export async function getCommunityFlips(limit = 20): Promise<CommunityFlip[]> {
   const key = `community-flips:${limit}`;
   const cached = cacheGet<CommunityFlip[]>(key, COMMUNITY_FLIPS_TTL);
   if (cached) return cached;
   try {
-    const r = await fetchWithTimeout(`${API_BASE}/api/community-flips?limit=${limit}`, undefined, DATA_FETCH_TIMEOUT_MS);
-    const d = await r.json();
-    const flips = d?.success && Array.isArray(d.flips) ? d.flips : [];
+    const flips = await dedupedCall("getCommunityFlips", key, async () => {
+      const r = await fetchWithTimeout(`${API_BASE}/api/community-flips?limit=${limit}`, undefined, DATA_FETCH_TIMEOUT_MS);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      return d?.success && Array.isArray(d.flips) ? d.flips : [];
+    });
     cacheSet(key, flips);
     return flips;
   } catch {
@@ -543,6 +569,62 @@ function cacheGet<T>(key: string, ttlMs: number): T | undefined {
 }
 function cacheSet(key: string, data: any) { _cache.set(key, { data, ts: Date.now() }); }
 
+// ── CALL LOG + IN-FLIGHT DEDUP (2026-10-07 outage hardening) ──────────────
+// OUTAGE: Supabase went unhealthy whenever the app was used. Part of the
+// measured cause (see deal-ai-pro's matching fix) was duplicate requests -
+// logs showed the same 5000-row /api/profile query fired 2x within
+// seconds. A short cache TTL alone doesn't catch this: Wins' getWinsSummary
+// and Profile's own load() both call getProfileData, and if a user
+// switches tabs fast enough that the FIRST call hasn't resolved yet (so
+// nothing is cached yet for the second caller to find), both fire their
+// own independent request. dedupedCall fixes that directly: a second
+// caller arriving while a request for the same key is still in flight gets
+// the exact same promise, never a duplicate network call.
+//
+// This also backs the owner-only debug readout on Wins/Feed/Profile
+// (getCallLog) - name, status/error, ms, and whether a call was served by
+// dedup instead of firing its own request.
+// retries is always 0 today - none of the six functions this backs retry
+// internally anymore (see App.tsx's loadUserData header comment on the
+// getPlan retry this incident removed). Kept as a real field, not omitted,
+// so the owner-only panel can show "0 retries" as a direct, visible
+// confirmation that the fix held, rather than silently dropping the signal.
+export type CallLogEntry = { name: string; status: string; ms: number; deduped: boolean; retries: number; at: number };
+const CALL_LOG_MAX = 40;
+const _callLog: CallLogEntry[] = [];
+function recordCall(entry: CallLogEntry) {
+  _callLog.unshift(entry);
+  if (_callLog.length > CALL_LOG_MAX) _callLog.length = CALL_LOG_MAX;
+}
+// Most recent first. Owner-only debug panels read this directly - nothing
+// here is gated server-side, so the UI itself must only render it for
+// OWNER_EMAILS (same pattern ProfileScreen.tsx already uses).
+export function getCallLog(): CallLogEntry[] { return _callLog.slice(); }
+
+const _inFlight = new Map<string, Promise<any>>();
+async function dedupedCall<T>(logName: string, key: string, fn: () => Promise<T>): Promise<T> {
+  const existing = _inFlight.get(key);
+  if (existing) {
+    recordCall({ name: logName, status: "deduped (already in flight)", ms: 0, deduped: true, retries: 0, at: Date.now() });
+    return existing as Promise<T>;
+  }
+  const t0 = Date.now();
+  const p = (async () => {
+    try {
+      const result = await fn();
+      recordCall({ name: logName, status: "ok", ms: Date.now() - t0, deduped: false, retries: 0, at: Date.now() });
+      return result;
+    } catch (e: any) {
+      recordCall({ name: logName, status: e?.message || String(e), ms: Date.now() - t0, deduped: false, retries: 0, at: Date.now() });
+      throw e;
+    } finally {
+      _inFlight.delete(key);
+    }
+  })();
+  _inFlight.set(key, p);
+  return p;
+}
+
 // Decodes a JWT's payload without verifying the signature - purely a LOCAL
 // read of claims already trusted because we just got the token from
 // Supabase (verification happens server-side on every authenticated
@@ -556,6 +638,13 @@ function decodeJwtPayload(token: string): any {
   } catch {
     return null;
   }
+}
+// Local-only read of the token's own `email` claim - lets a screen that
+// only receives `token` (HistoryScreen/CommunityScreen) compute its own
+// OWNER_EMAILS check (same pattern ProfileScreen.tsx/App.tsx already use
+// off a separately-tracked userEmail) without a network round trip.
+export function emailFromToken(token: string): string {
+  return decodeJwtPayload(token)?.email || "";
 }
 
 // MEASURED BUG (2026-08-31): every cache below used to be keyed on the raw
@@ -701,24 +790,32 @@ export async function getProfileData(token: string): Promise<ProfileData | null>
   const key = `profile:${stableIdFromToken(token)}`;
   const cached = cacheGet<ProfileData>(key, PROFILE_TTL);
   if (cached) return cached;
+  // dedupedCall keyed on the SAME key as the cache above - a second caller
+  // (Wins and Profile both read this) arriving before the first request
+  // resolves gets that exact in-flight request instead of firing its own -
+  // see dedupedCall's own header comment for the measured bug this closes.
   try {
-    const r = await fetchWithTimeout(`${API_BASE}/api/profile?token=${token}`, undefined, DATA_FETCH_TIMEOUT_MS);
-    const d = await r.json();
-    if (d?.success) {
-      const data: ProfileData = { profile: d.profile || {}, stats: d.stats || {}, badges: d.badges || [] };
-      cacheSet(key, data);
-      setCachedAvatar(token, data.profile?.avatar_url ?? null, data.profile?.avatar_emoji ?? null);
-      return data;
-    }
-  } catch {}
-  // Timeout/network failure/non-success response - fall back to the last
-  // real value fetched THIS SESSION (even past its TTL) rather than null,
-  // which every caller renders as a zeroed-out "$0 made." A stale real
-  // number is more honest than a fabricated zero for a user who actually
-  // has real stats on file; only a genuinely cold cache (nothing fetched
-  // yet this session) falls through to null.
-  const stale = _cache.get(key);
-  return stale ? (stale.data as ProfileData) : null;
+    const d = await dedupedCall("getProfileData", key, async () => {
+      const r = await fetchWithTimeout(`${API_BASE}/api/profile?token=${token}`, undefined, DATA_FETCH_TIMEOUT_MS);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const body = await r.json();
+      if (!body?.success) throw new Error(body?.error || "profile fetch failed");
+      return body;
+    });
+    const data: ProfileData = { profile: d.profile || {}, stats: d.stats || {}, badges: d.badges || [] };
+    cacheSet(key, data);
+    setCachedAvatar(token, data.profile?.avatar_url ?? null, data.profile?.avatar_emoji ?? null);
+    return data;
+  } catch {
+    // Timeout/network failure/non-success response - fall back to the last
+    // real value fetched THIS SESSION (even past its TTL) rather than null,
+    // which every caller renders as a zeroed-out "$0 made." A stale real
+    // number is more honest than a fabricated zero for a user who actually
+    // has real stats on file; only a genuinely cold cache (nothing fetched
+    // yet this session) falls through to null.
+    const stale = _cache.get(key);
+    return stale ? (stale.data as ProfileData) : null;
+  }
 }
 // Synchronous cache peek - lets a screen paint its LAST-known data on the
 // very first render (no blank/spinner frame) before deciding whether it
@@ -759,9 +856,12 @@ export async function getScanHistory(token: string, type: string, limit: number)
   const cached = cacheGet<any[]>(key, SCAN_HISTORY_TTL);
   if (cached) return cached;
   try {
-    const r = await fetchWithTimeout(`${API_BASE}/api/scan-history?token=${encodeURIComponent(token)}&type=${type}&limit=${limit}`, undefined, DATA_FETCH_TIMEOUT_MS);
-    const d = await r.json();
-    const list = Array.isArray(d) ? d : [];
+    const list = await dedupedCall(`getScanHistory:${type}`, key, async () => {
+      const r = await fetchWithTimeout(`${API_BASE}/api/scan-history?token=${encodeURIComponent(token)}&type=${type}&limit=${limit}`, undefined, DATA_FETCH_TIMEOUT_MS);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      return Array.isArray(d) ? d : [];
+    });
     cacheSet(key, list);
     return list;
   } catch {
@@ -815,15 +915,22 @@ export async function getScanById(token: string, id: string): Promise<any | null
 // WHOLE screen even though the other three calls had already resolved (or
 // were being served from cache). Same timeout+cache+stale-fallback
 // treatment as getScanHistory now closes that gap.
-const THRIFT_RUNS_TTL = 30000;
+// OUTAGE FIX (2026-10-07): was 30000 - under the 60s floor. Bumped to match
+// SCAN_HISTORY_TTL's reasoning: this app fully unmounts/remounts every
+// screen on every tab switch, so a short TTL here meant a routine Wins ->
+// something -> Wins hop inside a minute still refetched from scratch.
+const THRIFT_RUNS_TTL = 60000;
 export async function getThriftRuns(token: string): Promise<any[]> {
   const key = `thrift-runs:${stableIdFromToken(token)}`;
   const cached = cacheGet<any[]>(key, THRIFT_RUNS_TTL);
   if (cached) return cached;
   try {
-    const r = await fetchWithTimeout(`${API_BASE}/api/thrift-run?token=${token}`, undefined, DATA_FETCH_TIMEOUT_MS);
-    const d = await r.json();
-    const list = d?.success && Array.isArray(d.runs) ? d.runs : [];
+    const list = await dedupedCall("getThriftRuns", key, async () => {
+      const r = await fetchWithTimeout(`${API_BASE}/api/thrift-run?token=${token}`, undefined, DATA_FETCH_TIMEOUT_MS);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      return d?.success && Array.isArray(d.runs) ? d.runs : [];
+    });
     cacheSet(key, list);
     return list;
   } catch {
