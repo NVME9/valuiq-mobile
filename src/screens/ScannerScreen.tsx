@@ -14,7 +14,7 @@ import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareCard from "../components/ShareCard";
-import { API_BASE, scanImage, scanBarcode , getProfitOracle, shareWin, refineScan, emailFromToken } from "../lib/api";
+import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast } from "../lib/api";
 import ApiDebugPanel from "../components/ApiDebugPanel";
 import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notifications";
 import StagedProgress from "../components/StagedProgress";
@@ -319,12 +319,51 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     }
   }
 
+  // BARCODE FAST PATH (2026-10-08): detect-to-lookup / lookup-to-result
+  // timing + raw UPC source/GTIN, surfaced in the owner debug readout once
+  // the result lands (see result._barcodeDebug below and ApiDebugPanel).
   async function handleBarcode({ data }: BarcodeScanningResult) {
     if (barcodeScanned) return;
     setBarcodeScanned(true);
-    await analyze(undefined, data);
+    if (firstScanNudge) onDismissFirstScanNudge && onDismissFirstScanNudge();
+    setStep("loading");
+    setBuyPrice("");
+    setResultCondition("");
+    const tDetect = Date.now();
+    try {
+      const lookup = await lookupUpcFast(token, data);
+      const detectToLookupMs = Date.now() - tDetect;
+      // NOT FOUND (per spec): no guessing - tell the user plainly and drop
+      // back to photo mode rather than attempting a scan with nothing real
+      // to identify it from.
+      if (!lookup.success || !lookup.itemName) {
+        setBarcodeScanned(false);
+        setMode("photo");
+        setStep("camera");
+        Alert.alert("Barcode not found", "Snap a photo instead.");
+        return;
+      }
+      const tLookupDone = Date.now();
+      const d = await scanBarcodeFast(token, data, {
+        itemName: lookup.itemName, brand: lookup.brand || "Unknown",
+        category: lookup.category || "Other", itemType: lookup.itemType || null,
+      });
+      const lookupToResultMs = Date.now() - tLookupDone;
+      if (d.success) {
+        d._barcodeDebug = {
+          detectToLookupMs, lookupToResultMs,
+          upcSource: lookup.upcSource || null, gtin: data,
+          retailPrice: lookup.retailPrice ?? null,
+        };
+      }
+      await finishAnalyze(d, [], true);
+    } catch (e: any) {
+      setBarcodeScanned(false);
+      setResult({ _error: e.message });
+      setStep("result");
+    }
   }
-  async function analyze(customPhotos?: string[], barcode?: string) {
+  async function analyze(customPhotos?: string[]) {
     if (firstScanNudge) onDismissFirstScanNudge && onDismissFirstScanNudge();
     setStep("loading");
     // PRICE-ON-RESULTS (item 8): clear BEFORE the request, not after - an
@@ -335,102 +374,105 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setResultCondition("");
     let photosForRefine: string[] = [];
     try {
-      let d: any;
-      if (barcode) {
-        d = await scanBarcode(token, barcode);
-      } else {
-        const p = customPhotos || photos;
-        if (!p.length && !description && !brandInput) {
-          setStep("review"); return;
-        }
-        photosForRefine = p;
-        // No price is ever collected pre-scan any more - the scan itself is
-        // what reads the price tag (retailPriceRead). See the results step
-        // below for where a price is now entered/edited.
-        d = await scanImage(token, p, (brandInput ? "Brand: " + brandInput + ". " : "") + description, undefined, compressMsTotalRef.current);
+      const p = customPhotos || photos;
+      if (!p.length && !description && !brandInput) {
+        setStep("review"); return;
       }
-      if (d.error === "scan_limit_reached") {
-        onNavigate("upgrade");
-        return;
-      }
-      if (!d.success) throw new Error(d.error || "Analysis failed");
-      setResult(d);
-      setRefineSeq(0);
-      // TWO-STAGE SCAN RENDER (2026-09-11): d IS the final, complete result
-      // already (identify now runs allowSearch:false on this path - see
-      // app/api/lens/route.ts) - this fires the deferred, search-enabled
-      // refinement ONLY when the scan's own needsRefine flag says the moat
-      // didn't confirm the price and the item is worth checking (see that
-      // flag's comment server-side). Fire-and-forget, un-awaited - never
-      // blocks the result from showing, never shows a spinner, and a
-      // failure/timeout is silently swallowed by refineScan's caller here:
-      // the card already stands on stage-1's numbers either way.
-      if (!barcode && d.needsRefine && d.id && photosForRefine.length) {
-        // Number(d.retailPriceRead), not the buyPrice state var - buyPrice
-        // was just cleared above (setBuyPrice("")) and won't reflect THIS
-        // scan's price until the setBuyPrice call below commits, so reading
-        // it here would race a stale/empty value. d.retailPriceRead is the
-        // same number that seeding is about to write into state.
-        refineScan(token, d.id, photosForRefine, (brandInput ? "Brand: " + brandInput + ". " : "") + description, Number(d.retailPriceRead) || 0, plan)
-          .then((refined) => {
-            if (refined?.success && refined?.updated) {
-              setResult((prev: any) => (prev && prev.id === d.id ? { ...prev, ...refined } : prev));
-              setRefineSeq((s) => s + 1);
-            }
-          })
-          .catch(() => {});
-      }
-      // PRICE-ON-RESULTS / CONDITION DROPDOWN (items 8/9): seed both from
-      // what THIS scan actually found - a detected tag price, and the
-      // model's own condition read - editable from here, never re-collected
-      // before a scan again.
-      // TAG CONFIDENCE (2026-10-04, decision 2): a low-confidence tag read
-      // (a shelf tag with multiple numbers - was/now, unit price - that the
-      // model wasn't sure about) is NOT auto-seeded into buyPrice anymore -
-      // measured live: a Disney Minnie item tagged $26 read as $15 (the
-      // SAME wrong number across two separate scans of it), which would
-      // have silently driven the whole verdict off a guess with no
-      // confirmation step. High-confidence reads still auto-seed exactly as
-      // before; a low-confidence one leaves the field blank and the hint
-      // below (near the price input) shows what was read, asking the user
-      // to confirm or correct it before any verdict leans on it.
-      setBuyPrice(
-        Number(d.retailPriceRead) > 0 && !d.retailPriceNeedsConfirmation
-          ? String(d.retailPriceRead)
-          : ""
-      );
-      setTagConfirmPending(Number(d.retailPriceRead) > 0 && !!d.retailPriceNeedsConfirmation);
-      setResultCondition(d.conditionAssessment || "");
-      // SALE-CAPTURE MOAT: on a BUY, either schedule (if already allowed) or
-      // surface the soft in-app ask. Never fire Apple's cold prompt directly.
-      try {
-        if (d && d.decision === "BUY") {
-          const sid = d.id || d.scanId || d.scan_id;
-          const nm = d.itemName || d.item_name || "your item";
-          if (sid) {
-            const { status } = await Notifications.getPermissionsAsync();
-            if (status === "granted") {
-              scheduleSaleCheckIn(String(sid), nm);
-            } else if (status !== "denied") {
-              // Not yet asked (OS-wise) — but only show OUR soft ask once
-              // ever per install, not once per scan. AsyncStorage (not just
-              // local `checkInAsked` state) so a decline sticks across
-              // remounts/relaunches instead of re-nagging next BUY scan.
-              const asked = await AsyncStorage.getItem(CHECKIN_ASKED_KEY);
-              if (asked !== "true") {
-                setPendingCheckIn({ scanId: String(sid), itemName: nm });
-                AsyncStorage.setItem(CHECKIN_ASKED_KEY, "true").catch(() => {});
-              }
-            }
-          }
-        }
-      } catch {}
-      setStep("result");
-      if (plan === "free") setScansLeft(n => n !== null ? Math.max(0, n - 1) : null);
+      photosForRefine = p;
+      // No price is ever collected pre-scan any more - the scan itself is
+      // what reads the price tag (retailPriceRead). See the results step
+      // below for where a price is now entered/edited.
+      const d = await scanImage(token, p, (brandInput ? "Brand: " + brandInput + ". " : "") + description, undefined, compressMsTotalRef.current);
+      await finishAnalyze(d, photosForRefine, false);
     } catch (e: any) {
       setResult({ _error: e.message });
       setStep("result");
     }
+  }
+  // SHARED RESULT HANDLING (2026-10-08 extraction): the photo path
+  // (analyze, above) and the barcode fast path (handleBarcode) both land
+  // here once `d` (the /api/lens response) is in hand - one place decides
+  // what happens with a finished scan result regardless of which path
+  // produced it, so the two can never silently diverge in post-processing.
+  async function finishAnalyze(d: any, photosForRefine: string[], isBarcode: boolean) {
+    if (d.error === "scan_limit_reached") {
+      onNavigate("upgrade");
+      return;
+    }
+    if (!d.success) throw new Error(d.error || "Analysis failed");
+    setResult(d);
+    setRefineSeq(0);
+    // TWO-STAGE SCAN RENDER (2026-09-11): d IS the final, complete result
+    // already (identify now runs allowSearch:false on this path - see
+    // app/api/lens/route.ts) - this fires the deferred, search-enabled
+    // refinement ONLY when the scan's own needsRefine flag says the moat
+    // didn't confirm the price and the item is worth checking (see that
+    // flag's comment server-side). Fire-and-forget, un-awaited - never
+    // blocks the result from showing, never shows a spinner, and a
+    // failure/timeout is silently swallowed by refineScan's caller here:
+    // the card already stands on stage-1's numbers either way.
+    if (!isBarcode && d.needsRefine && d.id && photosForRefine.length) {
+      // Number(d.retailPriceRead), not the buyPrice state var - buyPrice
+      // was just cleared above (setBuyPrice("")) and won't reflect THIS
+      // scan's price until the setBuyPrice call below commits, so reading
+      // it here would race a stale/empty value. d.retailPriceRead is the
+      // same number that seeding is about to write into state.
+      refineScan(token, d.id, photosForRefine, (brandInput ? "Brand: " + brandInput + ". " : "") + description, Number(d.retailPriceRead) || 0, plan)
+        .then((refined) => {
+          if (refined?.success && refined?.updated) {
+            setResult((prev: any) => (prev && prev.id === d.id ? { ...prev, ...refined } : prev));
+            setRefineSeq((s) => s + 1);
+          }
+        })
+        .catch(() => {});
+    }
+    // PRICE-ON-RESULTS / CONDITION DROPDOWN (items 8/9): seed both from
+    // what THIS scan actually found - a detected tag price, and the
+    // model's own condition read - editable from here, never re-collected
+    // before a scan again.
+    // TAG CONFIDENCE (2026-10-04, decision 2): a low-confidence tag read
+    // (a shelf tag with multiple numbers - was/now, unit price - that the
+    // model wasn't sure about) is NOT auto-seeded into buyPrice anymore -
+    // measured live: a Disney Minnie item tagged $26 read as $15 (the
+    // SAME wrong number across two separate scans of it), which would
+    // have silently driven the whole verdict off a guess with no
+    // confirmation step. High-confidence reads still auto-seed exactly as
+    // before; a low-confidence one leaves the field blank and the hint
+    // below (near the price input) shows what was read, asking the user
+    // to confirm or correct it before any verdict leans on it.
+    setBuyPrice(
+      Number(d.retailPriceRead) > 0 && !d.retailPriceNeedsConfirmation
+        ? String(d.retailPriceRead)
+        : ""
+    );
+    setTagConfirmPending(Number(d.retailPriceRead) > 0 && !!d.retailPriceNeedsConfirmation);
+    setResultCondition(d.conditionAssessment || "");
+    // SALE-CAPTURE MOAT: on a BUY, either schedule (if already allowed) or
+    // surface the soft in-app ask. Never fire Apple's cold prompt directly.
+    try {
+      if (d && d.decision === "BUY") {
+        const sid = d.id || d.scanId || d.scan_id;
+        const nm = d.itemName || d.item_name || "your item";
+        if (sid) {
+          const { status } = await Notifications.getPermissionsAsync();
+          if (status === "granted") {
+            scheduleSaleCheckIn(String(sid), nm);
+          } else if (status !== "denied") {
+            // Not yet asked (OS-wise) — but only show OUR soft ask once
+            // ever per install, not once per scan. AsyncStorage (not just
+            // local `checkInAsked` state) so a decline sticks across
+            // remounts/relaunches instead of re-nagging next BUY scan.
+            const asked = await AsyncStorage.getItem(CHECKIN_ASKED_KEY);
+            if (asked !== "true") {
+              setPendingCheckIn({ scanId: String(sid), itemName: nm });
+              AsyncStorage.setItem(CHECKIN_ASKED_KEY, "true").catch(() => {});
+            }
+          }
+        }
+      }
+    } catch {}
+    setStep("result");
+    if (plan === "free") setScansLeft(n => n !== null ? Math.max(0, n - 1) : null);
   }
 
   // Blocks ONLY while permission is unresolved AND we have no cached reason
@@ -1261,7 +1303,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   lib/priceBasis.ts. result.priceBasisDebug is absent on a
                   scan from before this field existed (ApiDebugPanel already
                   no-ops cleanly on undefined). */}
-              <ApiDebugPanel isOwner={isOwner} priceBasisDebug={result.priceBasisDebug} />
+              <ApiDebugPanel isOwner={isOwner} priceBasisDebug={result.priceBasisDebug} barcodeDebug={result._barcodeDebug} />
 
               {/* AI range banner - MEASURED BUG (2026-10-06, real $26 Minnie
                   Mouse scan): gate used to be !crowdMedianAvailable, which
@@ -1793,6 +1835,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             </TouchableOpacity>
           </View>
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+            {/* Clear mode label (per spec) - a first-timer landing on this
+                screen (via the new control-row Barcode button) should never
+                wonder which mode they're in. */}
+            <View style={s.barcodeModeLabel}><Text style={s.barcodeModeLabelText}>Barcode</Text></View>
             {/* Barcode frame - rectangular */}
             <View style={s.barcodeFrame}>
               {[
@@ -1842,20 +1888,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               <Text style={s.camModeBtnText}>Thrift Run</Text>
             </TouchableOpacity>
           </View>
-          {/* BARCODE-FIRST (2026-10-06, per spec - "most prominent option
-              on the scan screen"): a barcode scan skips Vision/Claude
-              identify entirely server-side (see app/api/lens/route.ts's
-              upc short-circuit) - exact brand/model, no AI guessing, and
-              now a real eBay GTIN fallback when upcitemdb misses. Used to
-              be a small outlined pill with equal visual weight to "Thrift
-              Run" - this is the fast, exact path for any retail/clearance
-              item with a barcode, so it gets the filled accent treatment
-              and its own full-width row, not buried as one of several
-              same-weight top-bar buttons. */}
-          <TouchableOpacity onPress={() => setMode("barcode")} style={s.camBarcodeBtn} activeOpacity={0.85}>
-            <Text style={s.camBarcodeBtnIcon}>▥</Text>
-            <Text style={s.camBarcodeBtnText}>Scan Barcode — fastest, most accurate</Text>
-          </TouchableOpacity>
+          {/* BARCODE ENTRY (2026-10-08, moved off the full-width banner
+              into the control row below, same size/style as "Library" -
+              see that row's Barcode button). A barcode scan still skips
+              Vision/Claude identify entirely (app/api/lens/route.ts's upc
+              short-circuit) and now runs the SAME price-basis hierarchy a
+              photo scan does (lib/priceBasis.ts), with a real eBay GTIN-
+              first search. */}
           {/* Scan frame */}
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
             <View style={{ width: FRAME, height: FRAME, position: "relative" }}>
@@ -1931,7 +1970,15 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 </Text>
               </TouchableOpacity>
             ) : (
-              <View style={s.camSecondBtn} />
+              // BARCODE (2026-10-08): same slot/size/style as Library -
+              // "Library | shutter | Barcode" per spec. Only shown before
+              // any photo is taken (once photos exist, this slot is "Next"
+              // instead, same as before) - entering barcode mode mid-photo-
+              // capture would discard those photos silently, so the control
+              // simply isn't offered there.
+              <TouchableOpacity style={s.camSecondBtn} onPress={() => setMode("barcode")}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={s.camSecondLabel}>Barcode</Text>
+              </TouchableOpacity>
             )}
           </View>
         </View>
@@ -1968,12 +2015,6 @@ const s = StyleSheet.create({
   camScanBadge:   { borderWidth: 1, borderRadius: 100, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: "rgba(0,0,0,0.5)" },
   camModeBtn:     { backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)", borderRadius: 100, paddingHorizontal: 12, paddingVertical: 6 },
   camModeBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
-  // BARCODE-FIRST (2026-10-06): filled accent, full-width, its own row -
-  // see the render-site comment for why this is deliberately heavier than
-  // every other mode button on this screen.
-  camBarcodeBtn:     { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginHorizontal: 16, marginTop: 4, backgroundColor: C.green, borderRadius: 12, paddingVertical: 11 },
-  camBarcodeBtnIcon: { fontSize: 16, color: C.greenDark },
-  camBarcodeBtnText: { color: C.greenDark, fontSize: 14, fontWeight: "900" },
   corner:         { position: "absolute", width: 28, height: 28, borderColor: C.green, borderWidth: 3 },
   camHint:        { color: "rgba(255,255,255,0.6)", fontSize: 13, marginTop: 14, fontWeight: "600", paddingHorizontal: 24, textAlign: "center" },
   // Same single instruction line as camHint, just wrapped in a highlighted
@@ -2014,6 +2055,8 @@ const s = StyleSheet.create({
   camBottomBar:   { paddingBottom: 40, paddingHorizontal: 24 },
 
   // Barcode,
+  barcodeModeLabel:     { backgroundColor: "rgba(168,230,61,0.15)", borderWidth: 1, borderColor: "rgba(168,230,61,0.3)", paddingHorizontal: 14, paddingVertical: 6, borderRadius: 100, marginBottom: 18 },
+  barcodeModeLabelText: { color: C.green, fontSize: 13, fontWeight: "800" },
   barcodeFrame:   { width: width * 0.8, height: 120, position: "relative", justifyContent: "center", alignItems: "center" },
   barcodeLine:    { width: "100%", height: 2, backgroundColor: C.green + "80" },
 

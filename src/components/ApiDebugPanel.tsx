@@ -44,9 +44,28 @@ interface PriceBasisDebug {
   itemMoatConditionMatchedCount?: number | null;
   segmentConditionMatchedCount?: number | null;
   segmentConditionVerified?: boolean | null;
+  segmentItemTypeMismatch?: boolean;
+  segmentSoldSampleTooThin?: boolean;
+  estShippingCost?: number | null;
+  shippingSizeClass?: string | null;
+  canonicalKey?: string | null;
+  canonicalKeyMethod?: string | null;
+  canonicalKeyConfidence?: string | null;
 }
 
-export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null }) {
+// barcodeDebug (optional, 2026-10-08): ScannerScreen's barcode fast path
+// (handleBarcode) attaches this to the scan result - detect-to-lookup is
+// the /api/upc-lookup round trip (target <1s), lookup-to-result is the
+// subsequent full-pricing /api/lens call via confirmedIdentification.
+interface BarcodeDebug {
+  detectToLookupMs: number;
+  lookupToResultMs: number;
+  upcSource: string | null;
+  gtin: string;
+  retailPrice: number | null;
+}
+
+export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null }) {
   const [expanded, setExpanded] = useState(false);
   if (!isOwner) return null;
   const log = expanded ? getCallLog() : [];
@@ -57,11 +76,20 @@ export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug }: {
       </TouchableOpacity>
       {expanded && (
         <View style={styles.list}>
+          {barcodeDebug && (
+            <View style={{ marginBottom: 8 }}>
+              <Text style={styles.row}>Barcode: GTIN {barcodeDebug.gtin}  (source: {barcodeDebug.upcSource || "?"})</Text>
+              <Text style={styles.row}>Detect→lookup: {barcodeDebug.detectToLookupMs}ms  ·  Lookup→priced result: {barcodeDebug.lookupToResultMs}ms</Text>
+              {barcodeDebug.retailPrice != null && <Text style={styles.row}>Retail ${barcodeDebug.retailPrice} (a retail fact, never a sale price)</Text>}
+            </View>
+          )}
           {priceBasisDebug && (
             <View style={{ marginBottom: 8 }}>
               <Text style={styles.row}>Price basis: {priceBasisDebug.tierUsed}{priceBasisDebug.basisPrice != null ? ` ($${priceBasisDebug.basisPrice})` : ""}  [condition: {priceBasisDebug.conditionTier || "unknown"}]</Text>
+              {!!priceBasisDebug.canonicalKey && <Text style={styles.row}>Canonical key: {priceBasisDebug.canonicalKey}  (via {priceBasisDebug.canonicalKeyMethod}, confidence: {priceBasisDebug.canonicalKeyConfidence})</Text>}
               {!!priceBasisDebug.evidenceLine && <Text style={styles.row}>Evidence: {priceBasisDebug.evidenceLine}</Text>}
               {!!priceBasisDebug.contextLine && <Text style={styles.row}>Context (not basis): {priceBasisDebug.contextLine}</Text>}
+              {priceBasisDebug.estShippingCost != null && <Text style={styles.row}>Est. shipping: -${priceBasisDebug.estShippingCost} ({priceBasisDebug.shippingSizeClass}) - already subtracted from profit/ROI above</Text>}
               <Text style={styles.row}>Exact-item eBay: {priceBasisDebug.exactItemUnitsSold ?? "?"} units / {priceBasisDebug.exactItemListings ?? "?"} listings / {priceBasisDebug.exactItemMs ?? "?"}ms{priceBasisDebug.whyNotExactItem ? ` — ${priceBasisDebug.whyNotExactItem}` : " — qualified"}</Text>
               <Text style={styles.row}>Item-moat: {priceBasisDebug.itemMoatConditionMatchedCount ?? "?"} condition-matched agreeing — {priceBasisDebug.whyNotItemMoat ? priceBasisDebug.whyNotItemMoat : "qualified"}</Text>
               <Text style={styles.row}>Segment: {priceBasisDebug.segmentConditionMatchedCount ?? "?"} condition-matched outcomes{priceBasisDebug.conditionTier === "new" ? ` (verified-New: ${priceBasisDebug.segmentConditionVerified ? "yes" : "no"})` : ""} — {priceBasisDebug.whyNotSegment ? priceBasisDebug.whyNotSegment : "qualified"}</Text>

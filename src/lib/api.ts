@@ -364,6 +364,32 @@ export async function scanBarcode(token: string, upc: string): Promise<any> {
   const r = await fetch(`${API_BASE}/api/lens`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({userToken:token, upc}) });
   return r.json();
 }
+// BARCODE FAST PATH (2026-10-08): the SPEED fix - ScannerScreen's barcode
+// mode calls lookupUpcFast() FIRST (a narrow, fast /api/upc-lookup call,
+// target <1s) to get the product identity, then THIS with that already-
+// resolved identity via confirmedIdentification - server-side this skips
+// BOTH AI vision identify (same as the old scanBarcode()) AND a second,
+// slower lookupUPC() round trip (unlike the old scanBarcode(), which only
+// ever sent the raw upc and made /api/lens do that lookup itself, measured
+// at 6.2s for "identify" alone). Runs the real price-basis hierarchy (see
+// deal-ai-pro's lib/priceBasis.ts) exactly like a photo scan, with gtin
+// feeding the exact-item eBay tier's GTIN-first search and the canonical
+// product key - see that file's header for "one item, one answer."
+export async function scanBarcodeFast(token: string, upc: string, product: { itemName: string; brand: string; category: string; itemType?: string | null }): Promise<any> {
+  const r = await fetch(`${API_BASE}/api/lens`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      userToken: token,
+      confirmedIdentification: true,
+      confirmedItem: {
+        itemName: product.itemName, brand: product.brand, category: product.category,
+        itemType: product.itemType || null, gtin: upc,
+        condition: "New", conditionAssessment: "new-in-box",
+      },
+    }),
+  });
+  return r.json();
+}
 // SPIKE (2026-10-07): the "M listed now" half of sell-through for the
 // eBay-sold-webview debug screen - owner-gated server-side (see
 // deal-ai-pro's app/api/ebay-active-count/route.ts) via a real user JWT,
@@ -379,14 +405,15 @@ export async function getEbayActiveCount(token: string, opts: { upc?: string; qu
     return { success: false, error: "Network error" };
   }
 }
-// SPIKE (2026-10-07): fast UPC->title lookup for the debug screen - does
-// ONLY lookupUPC() server-side (see deal-ai-pro's app/api/upc-lookup/
-// route.ts), skipping the full /api/lens pricing-oracle/scan-save
-// pipeline a real scan needs but a debug title lookup doesn't. Measured
-// motivation: scanBarcode() through /api/lens took 6.2s for "identify"
-// alone on a real device and silently wrote a test row to scan history
-// on every debug run.
-export async function lookupUpcFast(token: string, upc: string): Promise<{ success: boolean; itemName?: string; brand?: string; listingTitle?: string; ms?: number; error?: string }> {
+// FAST UPC->product lookup (originally a 2026-10-07 owner-only debug-screen
+// spike, promoted 2026-10-08 to the real barcode scan mode's identify
+// step - see scanBarcodeFast above). Does ONLY lookupUPC() server-side (see
+// deal-ai-pro's app/api/upc-lookup/route.ts), skipping the full /api/lens
+// pricing-oracle/scan-save pipeline a real scan needs but an identity
+// lookup doesn't. category/itemType feed scanBarcodeFast's confirmedItem;
+// retailPrice is a plain retail FACT (never a sale price, never fed into
+// any pricing - see lookupUPC's own header) shown as "Retail $X" only.
+export async function lookupUpcFast(token: string, upc: string): Promise<{ success: boolean; itemName?: string; brand?: string; category?: string; itemType?: string | null; listingTitle?: string; gtin?: string; retailPrice?: number | null; upcSource?: string; ms?: number; error?: string }> {
   try {
     const r = await fetch(`${API_BASE}/api/upc-lookup`, {
       method: "POST", headers: { "Content-Type": "application/json" },
