@@ -70,19 +70,49 @@ function verdictColor(v: string) {
   return C.red;
 }
 
-// ONE VERDICT ENGINE (BEASTMODE FIX 1, 2026-09-13): this card used to show
-// the raw stored scan.verdict/scan.decision straight from whatever the
-// backend decided AT SCAN TIME, through verdictColor's own BUY/WATCH/else
-// mapping - never recomputed through the SAME classifyOutcome() Scanner
-// uses, so a scan saved under the backend's old 10%/25% thresholds (now
-// fixed server-side too, but this recomputes locally so it can never drift
-// again) could show a different verdict here than Scanner would give the
-// identical numbers today. noFlipMargin isn't its own scans-table column -
-// it rides along inside specialty_data's saved API-response JSON (`full`,
-// already parsed above), same shape lens/route.ts's own response uses.
-// Returns null (falls back to the raw badge) only when there's no real
-// decision saved yet (priceEntered:false scans, e.g.).
+// SINGLE VERDICT (2026-10-08, server-side unification): deal-ai-pro's
+// lib/priceBasis.ts is now THE one verdict engine server-side (no more
+// separate decision/heroVerdict computations that could disagree) - a scan
+// saved after that fix carries its own real verdict at full.heroVerdict.
+// headline (PASS/THIN/SOLID/WORTH A LOOK), persisted into specialty_data
+// alongside everything else buildScanResponse returns. Trust it directly
+// when present - converting straight to this card's OutcomeTierInfo shape,
+// no recompute, so History can never show a different verdict than the
+// server (and Scanner, reading the identical field) already decided.
+// META mirrors ScannerScreen.tsx's identical mapping - keep the two in sync.
+const VERDICT_META: Record<string, { tier: OutcomeTierInfo["tier"]; emoji: string; label: string; accentKey: "red" | "yellow" | "green" }> = {
+  "PASS": { tier: "skip", emoji: "🚫", label: "PASS", accentKey: "red" },
+  "THIN": { tier: "thin", emoji: "🤏", label: "THIN", accentKey: "yellow" },
+  "SOLID": { tier: "solid", emoji: "✅", label: "SOLID", accentKey: "green" },
+  "WORTH A LOOK": { tier: "hot", emoji: "🔥", label: "WORTH A LOOK", accentKey: "green" },
+};
+
+// ONE VERDICT ENGINE (BEASTMODE FIX 1, 2026-09-13; superseded by the stored
+// heroVerdict above for any scan saved after 2026-10-08 - this recompute is
+// now ONLY the fallback for OLDER rows that predate that field). This card
+// used to show the raw stored scan.verdict/scan.decision straight from
+// whatever the backend decided AT SCAN TIME, through verdictColor's own
+// BUY/WATCH/else mapping - never recomputed through the SAME
+// classifyOutcome() Scanner uses, so a scan saved under the backend's old
+// 10%/25% thresholds could show a different verdict here than Scanner would
+// give the identical numbers today. noFlipMargin isn't its own scans-table
+// column - it rides along inside specialty_data's saved API-response JSON
+// (`full`, already parsed above), same shape lens/route.ts's own response
+// uses. Returns null (falls back to the raw badge) only when there's no
+// real decision saved yet (priceEntered:false scans, e.g.) and no legacy
+// recompute is possible either.
 function scanTier(scan: any, full: any): OutcomeTierInfo | null {
+  const storedHeadline = full?.heroVerdict?.headline;
+  if (storedHeadline && VERDICT_META[storedHeadline]) {
+    const meta = VERDICT_META[storedHeadline];
+    return {
+      tier: meta.tier, emoji: meta.emoji, label: meta.label,
+      accent: meta.accentKey === "red" ? C.red : meta.accentKey === "yellow" ? C.yellow : C.green,
+      copy: full?.heroVerdict?.evidenceLine || full?.agreementBadge || "",
+      adjustedROI: Math.round(Number(scan.roi) || 0),
+      daysUsed: 0,
+    };
+  }
   const rawDecision = scan.verdict || scan.decision;
   if (!rawDecision || rawDecision === "UNKNOWN") return null;
   return classifyOutcome({

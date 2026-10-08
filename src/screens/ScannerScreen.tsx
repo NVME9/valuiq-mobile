@@ -909,8 +909,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       const tier: string = result.priceBasisTier || (result.confirmedByMoat ? "item_moat" : segOut ? "segment" : "ai_only");
       const basisPrice: number | null = Number(result.sellPrice) > 0 ? Number(result.sellPrice) : null;
       const heroSellThroughPct: number | null = result.velocity?.sellThrough ?? segOut?.sellThroughRate ?? null;
+      // Rule 0 - RETAIL-PRICE SANITY (noFlipMargin), unconditional, checked
+      // before everything else - mirrors lib/priceBasis.ts's
+      // classifyHeroVerdict exactly (added 2026-10-08).
       const headline: "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" =
-        (basisPrice != null && enteredBp >= basisPrice) ? "PASS"
+        result.noFlipMargin ? "PASS"
+        : (basisPrice != null && enteredBp >= basisPrice) ? "PASS"
         : (heroRoi < ROI_BUY_MIN) ? "THIN"
         : (tier === "segment") ? "WORTH A LOOK"
         : (heroRoi >= 50 && heroSellThroughPct != null && heroSellThroughPct >= 50) ? "WORTH A LOOK"
@@ -1241,6 +1245,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   independent of whether this item ALSO has its own
                   item-level REAL DATA above - that stays the top tier. */}
               <SegmentOutcomesBlock segment={result.segmentOutcomes} />
+
+              {/* CONDITION-MISMATCH CONTEXT (2026-10-08): the best available
+                  REAL number even when it didn't qualify as the price basis
+                  (e.g. a sealed scan with only used-condition sold data) -
+                  shown to everyone, honestly labeled, NEVER as the hero and
+                  never driving profit/ROI/verdict above. Null whenever
+                  nothing like that exists. */}
+              {!!result.priceBasisContext && (
+                <Text style={{ color: C.text3, fontSize: 12, marginHorizontal: 16, marginTop: 4 }}>{result.priceBasisContext}</Text>
+              )}
 
               {/* OWNER DEBUG READOUT (2026-10-08): the price-basis hierarchy's
                   own tier/why-not/eBay-timing readout - see deal-ai-pro's

@@ -31,14 +31,19 @@ interface WinsStats { trueScans: number; trueBuyFinds: number; total: number; tr
 // about the FIELD being absent, not the tier).
 interface PriceBasisDebug {
   tierUsed: "exact_item" | "item_moat" | "segment" | "ai_only";
+  conditionTier?: "new" | "used" | null;
   basisPrice: number | null;
   evidenceLine: string | null;
+  contextLine?: string | null;
   whyNotExactItem: string | null;
   whyNotItemMoat: string | null;
   whyNotSegment: string | null;
   exactItemMs: number | null;
   exactItemUnitsSold: number | null;
   exactItemListings: number | null;
+  itemMoatConditionMatchedCount?: number | null;
+  segmentConditionMatchedCount?: number | null;
+  segmentConditionVerified?: boolean | null;
 }
 
 export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null }) {
@@ -54,11 +59,12 @@ export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug }: {
         <View style={styles.list}>
           {priceBasisDebug && (
             <View style={{ marginBottom: 8 }}>
-              <Text style={styles.row}>Price basis: {priceBasisDebug.tierUsed}{priceBasisDebug.basisPrice != null ? ` ($${priceBasisDebug.basisPrice})` : ""}</Text>
+              <Text style={styles.row}>Price basis: {priceBasisDebug.tierUsed}{priceBasisDebug.basisPrice != null ? ` ($${priceBasisDebug.basisPrice})` : ""}  [condition: {priceBasisDebug.conditionTier || "unknown"}]</Text>
               {!!priceBasisDebug.evidenceLine && <Text style={styles.row}>Evidence: {priceBasisDebug.evidenceLine}</Text>}
+              {!!priceBasisDebug.contextLine && <Text style={styles.row}>Context (not basis): {priceBasisDebug.contextLine}</Text>}
               <Text style={styles.row}>Exact-item eBay: {priceBasisDebug.exactItemUnitsSold ?? "?"} units / {priceBasisDebug.exactItemListings ?? "?"} listings / {priceBasisDebug.exactItemMs ?? "?"}ms{priceBasisDebug.whyNotExactItem ? ` — ${priceBasisDebug.whyNotExactItem}` : " — qualified"}</Text>
-              <Text style={styles.row}>Item-moat: {priceBasisDebug.whyNotItemMoat ? priceBasisDebug.whyNotItemMoat : "qualified"}</Text>
-              <Text style={styles.row}>Segment: {priceBasisDebug.whyNotSegment ? priceBasisDebug.whyNotSegment : "qualified"}</Text>
+              <Text style={styles.row}>Item-moat: {priceBasisDebug.itemMoatConditionMatchedCount ?? "?"} condition-matched agreeing — {priceBasisDebug.whyNotItemMoat ? priceBasisDebug.whyNotItemMoat : "qualified"}</Text>
+              <Text style={styles.row}>Segment: {priceBasisDebug.segmentConditionMatchedCount ?? "?"} condition-matched outcomes{priceBasisDebug.conditionTier === "new" ? ` (verified-New: ${priceBasisDebug.segmentConditionVerified ? "yes" : "no"})` : ""} — {priceBasisDebug.whyNotSegment ? priceBasisDebug.whyNotSegment : "qualified"}</Text>
             </View>
           )}
           {winsStats && (
@@ -67,7 +73,7 @@ export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug }: {
                 True Scans: {winsStats.trueScans}{winsStats.scansCeilingHit ? "+" : ""}  (profile.stats.trueScans - scan-tab categories only, own user, is_test excluded)
               </Text>
               <Text style={styles.row}>
-                True BUY Finds: {winsStats.trueBuyFinds}{winsStats.scansCeilingHit ? "+" : ""}  (profile.stats.trueBuyFinds - lib/winsStats.ts isBuyFind(): tier hot/solid, noFlipMargin-aware)
+                True BUY Finds: {winsStats.trueBuyFinds}{winsStats.scansCeilingHit ? "+" : ""}  (profile.stats.trueBuyFinds - lib/winsStats.ts isBuyFind(): stored decision==="BUY", the single-verdict engine's own legacy mapping)
               </Text>
               <Text style={styles.row}>
                 True Made: ${Math.round(winsStats.total)}{winsStats.scansCeilingHit ? "+" : ""}  (profile.stats.soldTotal - unbounded sold-row sum, unchanged by this fix)
