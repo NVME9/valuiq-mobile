@@ -143,9 +143,13 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   // though that tab's own cards already show a SOLD badge for it.
   // Instant-paint from cache if Dashboard/Profile already fetched it
   // recently (see getProfileData in lib/api.ts).
-  const [winsSummary, setWinsSummary] = useState<{ count: number; total: number }>(() => {
+  const [winsSummary, setWinsSummary] = useState<{ count: number; total: number; trueScans: number; trueBuyFinds: number; trueRuns: number; scansCeilingHit: boolean }>(() => {
     const cached = peekProfileData(token);
-    return cached?.stats ? { count: Number(cached.stats.soldCount) || 0, total: Number(cached.stats.soldTotal) || 0 } : { count: 0, total: 0 };
+    return cached?.stats ? {
+      count: Number(cached.stats.soldCount) || 0, total: Number(cached.stats.soldTotal) || 0,
+      trueScans: Number(cached.stats.trueScans) || 0, trueBuyFinds: Number(cached.stats.trueBuyFinds) || 0,
+      trueRuns: Number(cached.stats.trueRuns) || 0, scansCeilingHit: !!cached.stats.scansCeilingHit,
+    } : { count: 0, total: 0, trueScans: 0, trueBuyFinds: 0, trueRuns: 0, scansCeilingHit: false };
   });
   // Skip the full-screen spinner when a cached scan list already primed
   // `scans` above - the list paints immediately, and loadData() below still
@@ -630,15 +634,6 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   const displayScans  = showAll ? filteredScans : filteredScans.slice(0, 10);
   const displayThrift = thriftRuns;
 
-  // Tier-based, not raw decision string (BEASTMODE FIX 1, 2026-09-13) - same
-  // classifyOutcome() the card badges above now use, so "BUY Finds" can't
-  // disagree with what the cards underneath it actually show.
-  const buyScans    = scans.filter(s => {
-    let full: any = null;
-    try { full = s.specialty_data ? JSON.parse(s.specialty_data) : null; } catch {}
-    const t = scanTier(s, full);
-    return t?.tier === "hot" || t?.tier === "solid";
-  });
   const selCount    = selectedIds().length;
 
   // Preview override (dev, see Profile's "Preview new-user flow"): render
@@ -647,13 +642,17 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   // real `scans`/`thriftRuns`/`specialtyScans`/`winsSummary` state underneath.
   // Toggling preview off needs no re-fetch: the real arrays were never
   // mutated, only which value each render reads from.
-  const effWinsSummary  = previewNewUser ? { count: 0, total: 0 } : winsSummary;
+  const effWinsSummary  = previewNewUser ? { count: 0, total: 0, trueScans: 0, trueBuyFinds: 0, trueRuns: 0, scansCeilingHit: false } : winsSummary;
   const effScans        = previewNewUser ? [] : scans;
   const effDisplayScans = previewNewUser ? [] : displayScans;
   const effDisplayThrift= previewNewUser ? [] : displayThrift;
   const effSpecialty    = previewNewUser ? [] : specialtyScans;
-  const effBuyScans     = previewNewUser ? [] : buyScans;
   const effThriftRuns   = previewNewUser ? [] : thriftRuns;
+
+  // Header stat formatter - appends "+" when /api/profile's own 5000-row
+  // ceiling was hit (effWinsSummary.scansCeilingHit), so a truncated count
+  // never masquerades as an exact one. See getWinsSummary in lib/api.ts.
+  const statFmt = (n: number) => `${n}${effWinsSummary.scansCeilingHit ? "+" : ""}`;
 
   return (
     <SafeAreaView style={s.safe}>
@@ -672,10 +671,10 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
       {/* Summary stats */}
       <View style={s.statsBar}>
         {[
-          [effScans.length, "Scans"],
-          [effBuyScans.length, "BUY Finds"],
-          [`$${Math.round(effWinsSummary.total)}`, "Made"],
-          [effThriftRuns.length, "Runs"],
+          [statFmt(effWinsSummary.trueScans), "Scans"],
+          [statFmt(effWinsSummary.trueBuyFinds), "BUY Finds"],
+          [`$${Math.round(effWinsSummary.total)}${effWinsSummary.scansCeilingHit ? "+" : ""}`, "Made"],
+          [statFmt(effWinsSummary.trueRuns), "Runs"],
         ].map(([val, label]) => (
           <View key={label as string} style={s.statItem}>
             <Text style={[s.statVal, {color:C.green}]}>{val}</Text>
@@ -1307,7 +1306,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
           </ViewShot>
         </View>
       )}
-      <ApiDebugPanel isOwner={isOwner} />
+      <ApiDebugPanel isOwner={isOwner} winsStats={effWinsSummary} />
     </SafeAreaView>
   );
 }

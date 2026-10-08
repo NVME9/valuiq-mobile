@@ -824,14 +824,30 @@ export function peekProfileData(token: string): ProfileData | undefined {
   return cacheGet<ProfileData>(`profile:${stableIdFromToken(token)}`, PROFILE_TTL);
 }
 
-// Returns null (not a fabricated {count:0,total:0}) when getProfileData has
+// Returns null (not a fabricated zeroed-out shape) when getProfileData has
 // genuinely nothing to report - a timed-out/failed fetch with a cold cache -
 // so callers can tell "we don't know" apart from "this account really has
 // zero wins" and keep whatever real number was already on screen instead of
 // stomping it with a fake zero.
-export async function getWinsSummary(token: string): Promise<{ count: number; total: number } | null> {
+//
+// trueScans/trueBuyFinds/trueRuns (2026-10-07 fix): the SAME unbounded
+// (up to /api/profile's SCANS_CEILING, not a 50/20-row page) totals that
+// soldCount/soldTotal (count/total) already were - HistoryScreen's header
+// used to compute these three by taking .length of its own page-capped
+// lists (getScanHistory(..., 50), getThriftRuns's 20-row page), which
+// under-reported for any account past those page sizes. scansCeilingHit
+// flags the rare case where even /api/profile's own ceiling was hit, so the
+// header can show "5000+" instead of a falsely-exact-looking number.
+export async function getWinsSummary(token: string): Promise<{ count: number; total: number; trueScans: number; trueBuyFinds: number; trueRuns: number; scansCeilingHit: boolean } | null> {
   const d = await getProfileData(token);
-  if (d?.stats) return { count: Number(d.stats.soldCount) || 0, total: Number(d.stats.soldTotal) || 0 };
+  if (d?.stats) return {
+    count: Number(d.stats.soldCount) || 0,
+    total: Number(d.stats.soldTotal) || 0,
+    trueScans: Number(d.stats.trueScans) || 0,
+    trueBuyFinds: Number(d.stats.trueBuyFinds) || 0,
+    trueRuns: Number(d.stats.trueRuns) || 0,
+    scansCeilingHit: !!d.stats.scansCeilingHit,
+  };
   return null;
 }
 
