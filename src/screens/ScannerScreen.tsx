@@ -14,7 +14,8 @@ import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareCard from "../components/ShareCard";
-import { API_BASE, scanImage, scanBarcode , getProfitOracle, shareWin, refineScan } from "../lib/api";
+import { API_BASE, scanImage, scanBarcode , getProfitOracle, shareWin, refineScan, emailFromToken } from "../lib/api";
+import ApiDebugPanel from "../components/ApiDebugPanel";
 import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notifications";
 import StagedProgress from "../components/StagedProgress";
 import * as Notifications from "expo-notifications";
@@ -116,7 +117,14 @@ function CollapsibleSection({ title, expanded, onToggle, children }: { title: st
 // moment it does - see the two gates right after the hook.
 let cameraPermissionKnownGranted = false;
 
+// Mirrors HistoryScreen.tsx/ProfileScreen.tsx's OWNER_EMAILS - gates the
+// owner-only price-basis debug readout below (tier used, why higher tiers
+// didn't qualify, eBay units/listings/ms, basis price - see lib/
+// priceBasis.ts, deal-ai-pro).
+const OWNER_EMAILS = ["natev9@comcast.net", "nvisionsinc@gmail.com", "nathanrussell9@outlook.com"];
+
 export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, onNavigate, onLogout, firstScanNudge, onDismissFirstScanNudge }: Props) {
+  const isOwner = OWNER_EMAILS.includes(emailFromToken(token).toLowerCase());
   const [permission, requestPermission] = useCameraPermissions();
   // Mirrors permission.granted into the module-level cache the instant it's
   // known true, so the NEXT mount (next visit to this tab) can skip the
@@ -885,22 +893,35 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // real sales... verify before buying at $X" / "AI-estimated resale
     // range... not yet confirmed") with ONE evidence line - the single
     // "estimate" caveat still lives in footNote below, not repeated here.
+    // TIER-AWARE REWRITE (2026-10-08): mirrors deal-ai-pro's lib/
+    // priceBasis.ts's classifyHeroVerdict exactly - the PASS check now
+    // compares against result.sellPrice (whichever tier the server
+    // actually used: exact-item eBay / item-moat / segment), not always
+    // segment's own median regardless of what drove the price. A real-data
+    // tier's own price never moves when the buy price is edited (only
+    // profit/ROI do), so reusing result.sellPrice here (rather than
+    // recomputing a basis) is correct, not stale. priceBasisTier is absent
+    // on a scan from before this field existed - falls back to inferring
+    // item_moat/segment/ai_only from the older confirmedByMoat/
+    // segmentOutcomes fields, which always existed.
     if (enteredBp > 0) {
       const segOut: any = result.segmentOutcomes;
-      const heroMedian: number | null = segOut?.medianSoldPrice ?? null;
-      const heroSellThroughPct: number | null = segOut?.sellThroughRate ?? null;
+      const tier: string = result.priceBasisTier || (result.confirmedByMoat ? "item_moat" : segOut ? "segment" : "ai_only");
+      const basisPrice: number | null = Number(result.sellPrice) > 0 ? Number(result.sellPrice) : null;
+      const heroSellThroughPct: number | null = result.velocity?.sellThrough ?? segOut?.sellThroughRate ?? null;
       const headline: "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" =
-        (heroMedian != null && enteredBp >= heroMedian) ? "PASS"
+        (basisPrice != null && enteredBp >= basisPrice) ? "PASS"
         : (heroRoi < ROI_BUY_MIN) ? "THIN"
+        : (tier === "segment") ? "WORTH A LOOK"
         : (heroRoi >= 50 && heroSellThroughPct != null && heroSellThroughPct >= 50) ? "WORTH A LOOK"
         : "SOLID";
-      const evidenceLine = segOut
+      const evidenceLine = result.agreementBadge || (segOut
         ? [
-            heroMedian != null ? `${segOut.label} resell ~$${Math.round(heroMedian)}` : null,
-            heroSellThroughPct != null ? `${Math.round(heroSellThroughPct)}% sell` : null,
+            segOut.medianSoldPrice != null ? `${segOut.label} resell ~$${Math.round(segOut.medianSoldPrice)}` : null,
+            segOut.sellThroughRate != null ? `${Math.round(segOut.sellThroughRate)}% sell` : null,
             segOut.resolvedCount > 0 ? `${segOut.resolvedCount} resale outcomes` : null,
           ].filter(Boolean).join(" · ") || null
-        : null;
+        : null);
       const META: Record<string, { emoji: string; accent: string; tier: "hot" | "solid" | "thin" | "skip" }> = {
         "PASS": { emoji: "🚫", accent: C.red, tier: "skip" },
         "THIN": { emoji: "🤏", accent: C.yellow, tier: "thin" },
@@ -1220,6 +1241,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   independent of whether this item ALSO has its own
                   item-level REAL DATA above - that stays the top tier. */}
               <SegmentOutcomesBlock segment={result.segmentOutcomes} />
+
+              {/* OWNER DEBUG READOUT (2026-10-08): the price-basis hierarchy's
+                  own tier/why-not/eBay-timing readout - see deal-ai-pro's
+                  lib/priceBasis.ts. result.priceBasisDebug is absent on a
+                  scan from before this field existed (ApiDebugPanel already
+                  no-ops cleanly on undefined). */}
+              <ApiDebugPanel isOwner={isOwner} priceBasisDebug={result.priceBasisDebug} />
 
               {/* AI range banner - MEASURED BUG (2026-10-06, real $26 Minnie
                   Mouse scan): gate used to be !crowdMedianAvailable, which

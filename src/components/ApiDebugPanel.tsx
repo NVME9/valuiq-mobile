@@ -22,7 +22,26 @@ import { getCallLog } from "../lib/api";
 // screen that mounts this panel without computing these.
 interface WinsStats { trueScans: number; trueBuyFinds: number; total: number; trueRuns: number; scansCeilingHit: boolean }
 
-export default function ApiDebugPanel({ isOwner, winsStats }: { isOwner: boolean; winsStats?: WinsStats }) {
+// priceBasisDebug (optional, 2026-10-08): the price-basis hierarchy's own
+// debug readout (deal-ai-pro's lib/priceBasis.ts) - which tier actually
+// drove this scan's hero/profit/ROI/verdict, why each higher tier didn't
+// qualify, and the exact-item eBay tier's own units/listings/latency. Null/
+// undefined on a scan from before this field existed, or wherever no price
+// was ever resolved (tier "ai_only" still carries a debug object - this is
+// about the FIELD being absent, not the tier).
+interface PriceBasisDebug {
+  tierUsed: "exact_item" | "item_moat" | "segment" | "ai_only";
+  basisPrice: number | null;
+  evidenceLine: string | null;
+  whyNotExactItem: string | null;
+  whyNotItemMoat: string | null;
+  whyNotSegment: string | null;
+  exactItemMs: number | null;
+  exactItemUnitsSold: number | null;
+  exactItemListings: number | null;
+}
+
+export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null }) {
   const [expanded, setExpanded] = useState(false);
   if (!isOwner) return null;
   const log = expanded ? getCallLog() : [];
@@ -33,6 +52,15 @@ export default function ApiDebugPanel({ isOwner, winsStats }: { isOwner: boolean
       </TouchableOpacity>
       {expanded && (
         <View style={styles.list}>
+          {priceBasisDebug && (
+            <View style={{ marginBottom: 8 }}>
+              <Text style={styles.row}>Price basis: {priceBasisDebug.tierUsed}{priceBasisDebug.basisPrice != null ? ` ($${priceBasisDebug.basisPrice})` : ""}</Text>
+              {!!priceBasisDebug.evidenceLine && <Text style={styles.row}>Evidence: {priceBasisDebug.evidenceLine}</Text>}
+              <Text style={styles.row}>Exact-item eBay: {priceBasisDebug.exactItemUnitsSold ?? "?"} units / {priceBasisDebug.exactItemListings ?? "?"} listings / {priceBasisDebug.exactItemMs ?? "?"}ms{priceBasisDebug.whyNotExactItem ? ` — ${priceBasisDebug.whyNotExactItem}` : " — qualified"}</Text>
+              <Text style={styles.row}>Item-moat: {priceBasisDebug.whyNotItemMoat ? priceBasisDebug.whyNotItemMoat : "qualified"}</Text>
+              <Text style={styles.row}>Segment: {priceBasisDebug.whyNotSegment ? priceBasisDebug.whyNotSegment : "qualified"}</Text>
+            </View>
+          )}
           {winsStats && (
             <View style={{ marginBottom: 8 }}>
               <Text style={styles.row}>
