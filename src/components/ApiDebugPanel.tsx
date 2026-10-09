@@ -65,7 +65,20 @@ interface BarcodeDebug {
   retailPrice: number | null;
 }
 
-export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null }) {
+// segmentDebug (optional, 2026-10-09): the "What resellers made" block's
+// own segment label/condition basis/sample sizes - see SegmentOutcomesBlock.
+// tsx's SegmentOutcomesData. Separate from priceBasisDebug.segmentConditionMatchedCount
+// (which describes why the HERO price basis tier did/didn't use segment
+// data) - this is about the reseller-outcomes DISPLAY block specifically,
+// which can be non-null even when segment never won the hero tier.
+interface SegmentDebug {
+  segmentLabel: string;
+  conditionBasis: "confirmed-new" | "confirmed-used" | "mixed";
+  resolvedCount: number;
+  soldCount: number;
+}
+
+export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug, segmentDebug, parityMismatch }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null; segmentDebug?: SegmentDebug | null; parityMismatch?: string | null }) {
   const [expanded, setExpanded] = useState(false);
   if (!isOwner) return null;
   const log = expanded ? getCallLog() : [];
@@ -94,6 +107,17 @@ export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, bar
               <Text style={styles.row}>Item-moat: {priceBasisDebug.itemMoatConditionMatchedCount ?? "?"} condition-matched agreeing — {priceBasisDebug.whyNotItemMoat ? priceBasisDebug.whyNotItemMoat : "qualified"}</Text>
               <Text style={styles.row}>Segment: {priceBasisDebug.segmentConditionMatchedCount ?? "?"} condition-matched outcomes{priceBasisDebug.conditionTier === "new" ? ` (verified-New: ${priceBasisDebug.segmentConditionVerified ? "yes" : "no"})` : ""} — {priceBasisDebug.whyNotSegment ? priceBasisDebug.whyNotSegment : "qualified"}</Text>
             </View>
+          )}
+          {segmentDebug && (
+            <Text style={styles.row}>Segment outcomes: {segmentDebug.segmentLabel} [{segmentDebug.conditionBasis}] — {segmentDebug.resolvedCount} resolved / {segmentDebug.soldCount} sold</Text>
+          )}
+          {/* PARITY GUARD (2026-10-09) - see ScannerScreen.tsx/SpecialtyScreen.
+              tsx's own comment: fires only when the local classifyHeroVerdict
+              port disagrees with the server's own fields at buyPrice=$0,
+              which should never happen - a regression tripwire, not routine
+              diagnostic noise. */}
+          {!!parityMismatch && (
+            <Text style={[styles.row, styles.err]}>{parityMismatch}</Text>
           )}
           {winsStats && (
             <View style={{ marginBottom: 8 }}>

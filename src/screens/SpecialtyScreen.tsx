@@ -5,12 +5,12 @@ import * as ImagePicker from "expo-image-picker";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import HeaderLogo from "../components/HeaderLogo";
-import { analyzeSpecialty } from "../lib/api";
+import { analyzeSpecialty, emailFromToken } from "../lib/api";
 import ShareButton from "../components/ShareButton";
 import StagedProgress from "../components/StagedProgress";
 import ProfitFlexHero from "../components/ProfitFlexHero";
 import SegmentOutcomesBlock from "../components/SegmentOutcomesBlock";
-import { classifyOutcome } from "../lib/outcomeTier";
+import { classifyOutcome, ROI_BUY_MIN } from "../lib/outcomeTier";
 
 // Reusable collapsed-by-default section - local to this screen (not shared
 // with ScannerScreen.tsx's identical-looking one) since it's presentational
@@ -191,7 +191,12 @@ export function matchSpecialtyCategory(aiCategory: string|undefined|null, ...tex
 
 interface Props { token:string; plan:string; scansLeft:number|null; setScansLeft:(n:number|null)=>void; onNavigate:(s:string, data?:any)=>void; onBack?:()=>void; onLogout:()=>void; navData?:any; }
 
+// Mirrors ScannerScreen.tsx's OWNER_EMAILS - gates the parity-guard
+// mismatch readout below (see the PARITY GUARD comment further down).
+const OWNER_EMAILS = ["natev9@comcast.net", "nvisionsinc@gmail.com", "nathanrussell9@outlook.com"];
+
 export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: Props) {
+  const isOwner = OWNER_EMAILS.includes(emailFromToken(token).toLowerCase());
   const [selectedCat, setSelectedCat] = useState<typeof CATS[0]|null>(
     navData?.category ? CATS.find(c => c.id === navData.category) || null : null
   );
@@ -380,49 +385,77 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
           daysUsed: 0,
         };
 
-    // RESULT-SCREEN HERO VERDICT (2026-10-06, per spec) - mirrors
-    // ScannerScreen.tsx's identical override exactly (see its own header
-    // comment for the full rationale: recomputed LOCALLY so an Edit &
-    // Rerun's new price updates the headline instantly, same reason
-    // heroProfit/roi already work this way). Overrides outcome in place so
-    // every downstream read (isSkip, heroOutcome, ProfitFlexHero) picks it
-    // up with no renaming. Never fires on the suppressed ("couldn't
-    // identify") branch above - tier stays "skip"/"NO VERDICT" there.
+    // RESULT-SCREEN HERO VERDICT (2026-10-09, EXACT PORT of deal-ai-pro's
+    // lib/priceBasis.ts classifyHeroVerdict() - that function is the single
+    // source of truth; if it changes, this block must change to match).
+    // Mirrors ScannerScreen.tsx's identical override - see its own header
+    // comment. Overrides outcome in place so every downstream read (isSkip,
+    // heroOutcome, ProfitFlexHero) picks it up with no renaming. Never
+    // fires on the suppressed ("couldn't identify") branch above - tier
+    // stays "skip"/"NO VERDICT" there.
+    //
+    // FIXED (2026-10-09, MEASURED): this used to check (heroMedian!=null &&
+    // enteredBp>=heroMedian) FIRST as its own PASS rule - a stale,
+    // independently-invented stand-in for Rule 0 that the server never had
+    // in this exact shape, AND never checked tier==="segment" for WORTH A
+    // LOOK at all (so a segment-tier specialty scan could wrongly reach
+    // SOLID, the one ladder step classifyHeroVerdict caps segment at).
+    // sellThroughPct now reads result.sellThroughPct (the exact value the
+    // server's own verdict call used for whichever tier won), not
+    // segOut.sellThroughRate (segment-only, and not necessarily the tier
+    // that actually priced this item).
     if (!suppressed && enteredBp > 0) {
       const segOut: any = result.segmentOutcomes;
-      const heroMedian: number | null = segOut?.medianSoldPrice ?? null;
-      const heroSellThroughPct: number | null = segOut?.sellThroughRate ?? null;
+      const tier: string = result.priceBasisTier || (result.confirmedByMoat ? "item_moat" : segOut ? "segment" : "ai_only");
+      const heroSellThroughPct: number | null = result.sellThroughPct ?? null;
       const heroRoiVal = Number(result.roi) || 0;
-      const headline: "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" =
-        (heroMedian != null && enteredBp >= heroMedian) ? "PASS"
-        : (heroRoiVal < 30) ? "THIN" // mirrors deal-ai-pro/lib/profitMath.ts's ROI_BUY_MIN
+      const headline: "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" | null =
+        tier === "ai_only" ? null
+        : heroProfit <= 0 ? "PASS"
+        : heroRoiVal < ROI_BUY_MIN ? "THIN"
+        : tier === "segment" ? "WORTH A LOOK"
         : (heroRoiVal >= 50 && heroSellThroughPct != null && heroSellThroughPct >= 50) ? "WORTH A LOOK"
         : "SOLID";
-      const evidenceLine = segOut
-        ? [
-            heroMedian != null ? `${segOut.label} resell ~$${Math.round(heroMedian)}` : null,
-            heroSellThroughPct != null ? `${Math.round(heroSellThroughPct)}% sell` : null,
-            segOut.resolvedCount > 0 ? `${segOut.resolvedCount} resale outcomes` : null,
-          ].filter(Boolean).join(" · ") || null
-        : null;
-      const META: Record<string, { emoji: string; accent: string; tier: "hot" | "solid" | "thin" | "skip" }> = {
-        "PASS": { emoji: "🚫", accent: C.red, tier: "skip" },
-        "THIN": { emoji: "🤏", accent: C.yellow, tier: "thin" },
-        "SOLID": { emoji: "✅", accent: C.green, tier: "solid" },
-        "WORTH A LOOK": { emoji: "🔥", accent: C.green, tier: "hot" },
-      };
-      const meta = META[headline];
-      outcome = {
-        tier: meta.tier,
-        emoji: meta.emoji,
-        label: headline,
-        accent: meta.accent,
-        copy: evidenceLine || outcome.copy,
-        adjustedROI: outcome.adjustedROI,
-        daysUsed: outcome.daysUsed,
-      };
+      if (headline != null) {
+        const evidenceLine = segOut
+          ? [
+              segOut.medianSoldPrice != null ? `${segOut.label} resell ~$${Math.round(segOut.medianSoldPrice)}` : null,
+              segOut.sellThroughRate != null ? `${Math.round(segOut.sellThroughRate)}% sell` : null,
+              segOut.resolvedCount > 0 ? `${segOut.resolvedCount} resale outcomes` : null,
+            ].filter(Boolean).join(" · ") || null
+          : null;
+        const META: Record<string, { emoji: string; accent: string; tier: "hot" | "solid" | "thin" | "skip" }> = {
+          "PASS": { emoji: "🚫", accent: C.red, tier: "skip" },
+          "THIN": { emoji: "🤏", accent: C.yellow, tier: "thin" },
+          "SOLID": { emoji: "✅", accent: C.green, tier: "solid" },
+          "WORTH A LOOK": { emoji: "🔥", accent: C.green, tier: "hot" },
+        };
+        const meta = META[headline];
+        outcome = {
+          tier: meta.tier,
+          emoji: meta.emoji,
+          label: headline,
+          accent: meta.accent,
+          copy: evidenceLine || outcome.copy,
+          adjustedROI: outcome.adjustedROI,
+          daysUsed: outcome.daysUsed,
+        };
+      }
     }
     const isSkip = outcome.tier === "skip";
+
+    // PARITY GUARD (2026-10-09, owner-only) - see ScannerScreen.tsx's
+    // identical guard for the full rationale (only genuinely comparable at
+    // buyPrice=$0, the one price the server actually computed heroProfit/
+    // result.roi/result.heroVerdict at). heroProfit/result.roi themselves
+    // are read straight from the server on this screen (never locally
+    // recomputed - see heroProfit's own definition above), so they can
+    // never mismatch; only the locally-ported verdict classifier above can
+    // drift from result.heroVerdict.
+    let parityMismatchText: string | null = null;
+    if (!suppressed && enteredBp === 0 && result.heroVerdict?.headline != null) {
+      parityMismatchText = `MISMATCH verdict local null server ${result.heroVerdict.headline}`;
+    }
 
     // REMOVED (2026-10-04, decision 8/10) - same fix as ScannerScreen.tsx:
     // realPlatformClaim is a brand+category-WIDE stat, never item-specific -
@@ -527,9 +560,24 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
           footNote={(!suppressed && !result.confirmedByMoat) ? "AI-estimated — verify before buying." : undefined}
         />
 
-        {/* "What resellers actually made" (Part 3B, 2026-10-06) - same
-            shared component/wording as ScannerScreen.tsx. */}
+        {/* "What resellers made" (Part 3B, 2026-10-06) - same shared
+            component/wording as ScannerScreen.tsx. */}
         <SegmentOutcomesBlock segment={result.segmentOutcomes} />
+
+        {/* PARITY GUARD readout (2026-10-09, owner-only) - see this
+            screen's own PARITY GUARD comment above. Fires only when the
+            local verdict port disagrees with the server's heroVerdict at
+            buyPrice=$0, which should never happen. */}
+        {isOwner && !!parityMismatchText && (
+          <Text style={{ color: C.red, fontSize: 10, fontFamily: "monospace" as any, marginHorizontal: 16, marginTop: 6 }}>
+            {parityMismatchText}
+          </Text>
+        )}
+        {isOwner && !!result.segmentOutcomes && (
+          <Text style={{ color: C.text3, fontSize: 10, fontFamily: "monospace" as any, marginHorizontal: 16, marginTop: 4 }}>
+            Segment outcomes: {result.segmentOutcomes.segmentLabel} [{result.segmentOutcomes.conditionBasis}] — {result.segmentOutcomes.resolvedCount} resolved / {result.segmentOutcomes.soldCount} sold
+          </Text>
+        )}
 
         {result.brandTagPrompt ? (
           <View style={[s.infoCard, { borderColor: C.yellow + "30", backgroundColor: "#1a1508" }]}>

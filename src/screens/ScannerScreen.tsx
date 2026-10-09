@@ -680,11 +680,22 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       ? Math.round(Number(result.resaleModelHigh) * conditionFactor)
       : (Number(result.priceRange?.high) || Number(result.estimatedResaleRange?.high) || null);
 
-    // FEE RATE - parsed from the best platform's own breakdown (already
-    // computed server-side, e.g. "13.3%") rather than duplicating a second
-    // fee table here that could drift from lib/profitMath.ts's FEES.
-    const feeRateStr = result.platformBreakdown?.[0]?.feeRate;
-    const feeRate = feeRateStr ? parseFloat(feeRateStr) / 100 : 0.13;
+    // FEE RATE / SHIPPING COST (2026-10-09, PARITY FIX): read straight off
+    // result.feeRate - the EXACT rate deal-ai-pro's own netProfit/roi/
+    // classifyHeroVerdict call used server-side (see app/api/lens/route.ts's
+    // "PARITY INPUTS" field) - never a hardcoded guess on this side. The
+    // fallback (only for a scan saved before this field existed) derives
+    // from OTHER already-server-computed fields on this same result
+    // (fees/sellPrice), not a new constant. estShippingCost mirrors the
+    // server's own shipping subtraction (lib/shippingEstimate.ts, only ever
+    // non-null for the exact_item tier) - this used to be silently missing
+    // from every local recompute below, so an exact-item scan's locally
+    // edited profit/ROI disagreed with the server's own (shipping-aware)
+    // numbers the instant a price was entered.
+    const feeRate = Number(result.feeRate) > 0
+      ? Number(result.feeRate)
+      : (Number(result.fees) > 0 && Number(result.sellPrice) > 0 ? Number(result.fees) / Number(result.sellPrice) : 0.13);
+    const shippingCost = Number(result.estShippingCost) || 0;
 
     const enteredBp = Number(buyPrice) || 0;
 
@@ -745,7 +756,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // existed AT SCAN TIME, almost always none now that price lives here
     // instead of before the scan.
     const localFees = Math.round(sellPriceForProfit * feeRate * 100) / 100;
-    const heroProfit = enteredBp > 0 ? Math.round((sellPriceForProfit - localFees - enteredBp) * 100) / 100 : 0;
+    const heroProfit = enteredBp > 0 ? Math.round((sellPriceForProfit - localFees - enteredBp - shippingCost) * 100) / 100 : 0;
 
     // MAX-BUY LOCAL RECOMPUTE (2026-09-10, Fix 1): mirrors deal-ai-pro/
     // lib/profitMath.ts's computeMaxBuy, but driven by sellPriceForProfit
@@ -918,74 +929,102 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           daysUsed: 0,
         });
 
-    // RESULT-SCREEN HERO VERDICT (2026-10-06, per spec): mirrors deal-ai-
-    // pro's server-side heroVerdict (app/api/lens/route.ts) exactly, but
-    // recomputed LOCALLY here for the same reason heroProfit/heroRoi
-    // already are - a price Confirm/Edit on THIS screen has to update the
-    // headline instantly with no network round trip, and the server's own
-    // result.heroVerdict (computed when this scan's buyPrice was still
-    // 0/unconfirmed, before the tag-confirm gate resolved) is stale the
-    // instant a price is entered. Needs result.segmentOutcomes.
-    // medianSoldPrice (the raw number, not just the baked-in summaryLine
-    // string) - see lib/profitOracle.ts's buildSegmentOutcomesDisplay.
-    // Overrides outcome's tier/label/emoji/accent/copy IN PLACE (not a
-    // separate variable) so every existing downstream read of `outcome`/
-    // `heroOutcome` below picks this up automatically, no renaming needed.
-    // REPLACES the old multi-paragraph hedge copy ("not yet confirmed by
-    // real sales... verify before buying at $X" / "AI-estimated resale
-    // range... not yet confirmed") with ONE evidence line - the single
-    // "estimate" caveat still lives in footNote below, not repeated here.
-    // TIER-AWARE REWRITE (2026-10-08): mirrors deal-ai-pro's lib/
-    // priceBasis.ts's classifyHeroVerdict exactly - the PASS check now
-    // compares against result.sellPrice (whichever tier the server
-    // actually used: exact-item eBay / item-moat / segment), not always
-    // segment's own median regardless of what drove the price. A real-data
-    // tier's own price never moves when the buy price is edited (only
-    // profit/ROI do), so reusing result.sellPrice here (rather than
-    // recomputing a basis) is correct, not stale. priceBasisTier is absent
-    // on a scan from before this field existed - falls back to inferring
-    // item_moat/segment/ai_only from the older confirmedByMoat/
-    // segmentOutcomes fields, which always existed.
+    // RESULT-SCREEN HERO VERDICT (2026-10-09, EXACT PORT of deal-ai-pro's
+    // lib/priceBasis.ts classifyHeroVerdict() - that function is the single
+    // source of truth; if it changes, this block must change to match).
+    // Recomputed LOCALLY (not read off result.heroVerdict, which the server
+    // computed at whatever buyPrice existed AT SCAN TIME - see this
+    // screen's own PRICE-ON-RESULTS comment, almost always $0 since price
+    // lives on this screen, not the scan request) so editing the buy price
+    // here updates the verdict instantly with no network round trip.
+    //
+    // RULE 0 REMOVED (2026-10-09, MEASURED): this used to check
+    // result.noFlipMargin (and a basisPrice>=buyPrice break-even check)
+    // FIRST, unconditionally PASSing - a stale copy of a rule deal-ai-pro's
+    // server removed in commit ebb3df1 ("selling at/above retail is not
+    // itself a reason to pass on a real, positive-margin flip"). That left
+    // this screen able to PASS an item the server's OWN current verdict
+    // logic would call SOLID/WORTH A LOOK - the exact client/server
+    // disagreement this port exists to close. Gone entirely now; the first
+    // real gate is net profit <= 0.
     if (enteredBp > 0) {
       const segOut: any = result.segmentOutcomes;
       const tier: string = result.priceBasisTier || (result.confirmedByMoat ? "item_moat" : segOut ? "segment" : "ai_only");
-      const basisPrice: number | null = Number(result.sellPrice) > 0 ? Number(result.sellPrice) : null;
-      const heroSellThroughPct: number | null = result.velocity?.sellThrough ?? segOut?.sellThroughRate ?? null;
-      // Rule 0 - RETAIL-PRICE SANITY (noFlipMargin), unconditional, checked
-      // before everything else - mirrors lib/priceBasis.ts's
-      // classifyHeroVerdict exactly (added 2026-10-08).
-      const headline: "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" =
-        result.noFlipMargin ? "PASS"
-        : (basisPrice != null && enteredBp >= basisPrice) ? "PASS"
-        : (heroRoi < ROI_BUY_MIN) ? "THIN"
-        : (tier === "segment") ? "WORTH A LOOK"
+      // sellThroughPct: the EXACT value classifyHeroVerdict used server-side
+      // for whichever tier won (PriceBasisResult.sellThroughPct, now
+      // returned on the response - see app/api/lens/route.ts's "PARITY
+      // INPUTS" comment) - NOT result.velocity.sellThrough, a different,
+      // oracle-wide metric the server's own verdict call never actually
+      // reads.
+      const heroSellThroughPct: number | null = result.sellThroughPct ?? null;
+      // ai_only -> null (no verdict at all, same as classifyHeroVerdict's
+      // own first line) - the old code had no such guard and could fall
+      // through to THIN/SOLID/etc on a pure AI estimate with zero real data
+      // behind it.
+      const headline: "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" | null =
+        tier === "ai_only" ? null
+        : heroProfit <= 0 ? "PASS"
+        : heroRoi < ROI_BUY_MIN ? "THIN"
+        : tier === "segment" ? "WORTH A LOOK"
         : (heroRoi >= 50 && heroSellThroughPct != null && heroSellThroughPct >= 50) ? "WORTH A LOOK"
         : "SOLID";
-      const evidenceLine = result.agreementBadge || (segOut
-        ? [
-            segOut.medianSoldPrice != null ? `${segOut.label} resell ~$${Math.round(segOut.medianSoldPrice)}` : null,
-            segOut.sellThroughRate != null ? `${Math.round(segOut.sellThroughRate)}% sell` : null,
-            segOut.resolvedCount > 0 ? `${segOut.resolvedCount} resale outcomes` : null,
-          ].filter(Boolean).join(" · ") || null
-        : null);
-      const META: Record<string, { emoji: string; accent: string; tier: "hot" | "solid" | "thin" | "skip" }> = {
-        "PASS": { emoji: "🚫", accent: C.red, tier: "skip" },
-        "THIN": { emoji: "🤏", accent: C.yellow, tier: "thin" },
-        "SOLID": { emoji: "✅", accent: C.green, tier: "solid" },
-        "WORTH A LOOK": { emoji: "🔥", accent: C.green, tier: "hot" },
-      };
-      const meta = META[headline];
-      outcome = {
-        tier: meta.tier,
-        emoji: meta.emoji,
-        label: headline,
-        accent: meta.accent,
-        copy: evidenceLine || outcome.copy,
-        adjustedROI: outcome.adjustedROI,
-        daysUsed: outcome.daysUsed,
-      };
+      if (headline != null) {
+        const evidenceLine = result.agreementBadge || (segOut
+          ? [
+              segOut.medianSoldPrice != null ? `${segOut.label} resell ~$${Math.round(segOut.medianSoldPrice)}` : null,
+              segOut.sellThroughRate != null ? `${Math.round(segOut.sellThroughRate)}% sell` : null,
+              segOut.resolvedCount > 0 ? `${segOut.resolvedCount} resale outcomes` : null,
+            ].filter(Boolean).join(" · ") || null
+          : null);
+        const META: Record<string, { emoji: string; accent: string; tier: "hot" | "solid" | "thin" | "skip" }> = {
+          "PASS": { emoji: "🚫", accent: C.red, tier: "skip" },
+          "THIN": { emoji: "🤏", accent: C.yellow, tier: "thin" },
+          "SOLID": { emoji: "✅", accent: C.green, tier: "solid" },
+          "WORTH A LOOK": { emoji: "🔥", accent: C.green, tier: "hot" },
+        };
+        const meta = META[headline];
+        outcome = {
+          tier: meta.tier,
+          emoji: meta.emoji,
+          label: headline,
+          accent: meta.accent,
+          copy: evidenceLine || outcome.copy,
+          adjustedROI: outcome.adjustedROI,
+          daysUsed: outcome.daysUsed,
+        };
+      }
     }
     const isSkip = outcome.tier === "skip";
+
+    // PARITY GUARD (2026-10-09, owner-only): the server's own
+    // netProfit/roi/heroVerdict are only genuinely comparable to this local
+    // port at buyPrice=$0 - that's the ONLY price the server ever actually
+    // computed them at (see the PRICE-ON-RESULTS comment above; a real,
+    // user-entered price has no server-computed equivalent to diff against
+    // without a round trip this screen deliberately doesn't make - see
+    // Part 2's own session notes on why). Checked on every render rather
+    // than once: cheap, and $0 is the steady state before any edit. If
+    // local and server ever disagree even here, the PORT above has drifted
+    // from lib/priceBasis.ts's classifyHeroVerdict - the server's numbers
+    // win, and isOwner sees exactly what disagreed. This can never catch a
+    // mismatch on an EDITED price (there is no server number for that price
+    // to compare against) - it is a regression tripwire on the $0 case, not
+    // a live check of the priced case.
+    let parityMismatchText: string | null = null;
+    if (enteredBp === 0) {
+      const serverNetProfit = Number(result.netProfit) || 0;
+      const serverRoi = Number(result.roi) || 0;
+      const serverVerdict: string | null = result.heroVerdict?.headline ?? null;
+      const mismatches: string[] = [];
+      if (heroProfit !== serverNetProfit) mismatches.push(`profit local ${heroProfit} server ${serverNetProfit}`);
+      if (heroRoi !== serverRoi) mismatches.push(`roi local ${heroRoi} server ${serverRoi}`);
+      if (serverVerdict != null) mismatches.push(`verdict local null server ${serverVerdict}`);
+      // At $0 the verdict-override block above never ran (it's gated on
+      // enteredBp>0), so `outcome` here is already untouched/server-honest
+      // - there is nothing local to swap OUT for the server's values; the
+      // mismatch text alone is the signal something upstream has drifted.
+      if (mismatches.length) parityMismatchText = `MISMATCH ${mismatches.join(" · ")}`;
+    }
     // PROFIT-HONESTY FIX (2026-10-05, MEASURED: the Minnie Mouse plush
     // scan): tier "estimate" already means "not item-level confirmed" (see
     // the VERDICT GATE comment above - it's the branch used whenever
@@ -1303,7 +1342,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   lib/priceBasis.ts. result.priceBasisDebug is absent on a
                   scan from before this field existed (ApiDebugPanel already
                   no-ops cleanly on undefined). */}
-              <ApiDebugPanel isOwner={isOwner} priceBasisDebug={result.priceBasisDebug} barcodeDebug={result._barcodeDebug} />
+              <ApiDebugPanel
+                isOwner={isOwner}
+                priceBasisDebug={result.priceBasisDebug}
+                barcodeDebug={result._barcodeDebug}
+                segmentDebug={result.segmentOutcomes ? {
+                  segmentLabel: result.segmentOutcomes.segmentLabel,
+                  conditionBasis: result.segmentOutcomes.conditionBasis,
+                  resolvedCount: result.segmentOutcomes.resolvedCount,
+                  soldCount: result.segmentOutcomes.soldCount,
+                } : null}
+                parityMismatch={parityMismatchText}
+              />
 
               {/* AI range banner - MEASURED BUG (2026-10-06, real $26 Minnie
                   Mouse scan): gate used to be !crowdMedianAvailable, which
