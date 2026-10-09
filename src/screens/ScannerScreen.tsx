@@ -782,7 +782,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const netAfterFeesAtCeiling = sellPriceForProfit * (1 - feeRate);
     const roiCeilingBuy = netAfterFeesAtCeiling / (1 + ROI_BUY_MIN / 100);
     const profitFloorBuy = netAfterFeesAtCeiling - PROFIT_JUDGMENT_FLOOR;
-    const maxBuy = sellPriceForProfit > 0
+    // AI-ONLY: NO MAX BUY (2026-10-09, MEASURED): sellPriceForProfit can
+    // still be nonzero for tier "ai_only" - it falls back to the AI's own
+    // raw anchor (adjustedResaleValue/result.resaleFromModel) whenever
+    // result.sellPrice is server-forced to 0 (see this file's ONE
+    // CANONICAL SELL PRICE comment above) - so this ceiling used to render
+    // ("Max buy: $X", ProfitFlexHero's own comment says it's ALWAYS shown,
+    // in both BUY and SKIP layouts, so isSkip/hideProfitHero never caught
+    // it) off a number with zero real data behind it. result.priceBasisTier
+    // is the server's own tier for THIS basis price - null it out here
+    // rather than threading a guard through ProfitFlexHero.
+    const isAiOnly = result.priceBasisTier === "ai_only";
+    const maxBuy = (!isAiOnly && sellPriceForProfit > 0)
       ? Math.max(1, Math.floor(Math.min(roiCeilingBuy, profitFloorBuy)))
       : null;
     const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
