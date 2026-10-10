@@ -3,6 +3,7 @@
 // which uses the service-role key server-side. No direct Supabase, no RLS issues.
 import { API_BASE } from "./api";
 import { CONDITION_TO_DB } from "./condition";
+import { requestReviewIfEligible, REVIEW_PROMPT_DELAY_MS } from "./storeReview";
 
 export type SaleOutcome = "sold" | "passed" | "not_yet";
 
@@ -128,6 +129,17 @@ export async function recordSaleOutcome(
       }
     );
     const j = await r.json().catch(() => ({}));
+    // STORE REVIEW TRIGGER (positive-profit sale): the server's own
+    // .select().single() PATCH response carries the true fee-adjusted
+    // net_profit (see SavedSale's comment above) - read THAT, not the
+    // locally-entered actualPrice, so a sale that nets negative after fees
+    // never fires the ask just because the sale price alone looked good.
+    // Delayed the same REVIEW_PROMPT_DELAY_MS every other trigger uses, so
+    // the native modal never covers whatever confirmation UI the caller
+    // shows right after this promise resolves.
+    if (outcome === "sold" && j.success && Number(j.scan?.net_profit) > 0) {
+      setTimeout(() => { requestReviewIfEligible(token, "sale").catch(() => {}); }, REVIEW_PROMPT_DELAY_MS);
+    }
     return { success: !!j.success, scan: j.scan || null };
   } catch {
     return { success: false, scan: null };

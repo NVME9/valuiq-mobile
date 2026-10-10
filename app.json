@@ -2,7 +2,7 @@
   "expo": {
     "name": "ValuIQ",
     "slug": "valuiq-mobile",
-    "version": "1.2.7",
+    "version": "1.2.8",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -55,7 +55,7 @@
     ],
     "scheme": "valuiq",
     "runtimeVersion": {
-      "policy": "sdkVersion"
+      "policy": "appVersion"
     },
     "updates": {
       "url": "https://u.expo.dev/8f5ddfbb-4b97-497e-8249-71cdf1b6811c"

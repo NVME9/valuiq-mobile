@@ -27,6 +27,7 @@ import { classifyOutcome, ROI_BUY_MIN, PROFIT_JUDGMENT_FLOOR } from "../lib/outc
 import LogSaleModal from "../components/LogSaleModal";
 import { toPendingScan } from "../lib/saleCapture";
 import { CONDITION_OPTIONS } from "../lib/condition";
+import { evaluateReview, requestReviewIfEligible, REVIEW_PROMPT_DELAY_MS, ReviewDebugState } from "../lib/storeReview";
 
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
@@ -175,6 +176,19 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // visible and actionable instead of a blank field + hint text.
   const [tagConfirmPending, setTagConfirmPending] = useState(false);
   const priceInputRef = useRef<TextInput>(null);
+  // STORE REVIEW PROMPT: reviewHeadlineRef captures THIS render's hero
+  // headline (SOLID/WORTH A LOOK only, else null) for the effect below to
+  // read after commit - the headline itself is computed deep inside the
+  // step==="result" render block (depends on buyPrice/resultCondition/
+  // result, same inputs as the PARITY-tracked verdict math above it), not
+  // something a hook can read without duplicating that whole computation.
+  // Written during render (plain JS, not state) - see the RESULT-SCREEN
+  // HERO VERDICT block below for where it's set. reviewPromptedKeyRef
+  // guards against re-firing on every keystroke while editing price once a
+  // scan has already resolved into a qualifying tier once.
+  const reviewHeadlineRef = useRef<{ scanKey: string | null; headline: "SOLID" | "WORTH A LOOK" | null }>({ scanKey: null, headline: null });
+  const reviewPromptedKeyRef = useRef<string | null>(null);
+  const [reviewDebug, setReviewDebug] = useState<ReviewDebugState | null>(null);
   // TWO-STAGE SCAN RENDER (2026-09-11): bumped once per successful
   // background /refine merge (never on a normal price/condition edit) -
   // passed to ProfitFlexHero/the range card as flashSeq so the updated
@@ -240,6 +254,31 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // buyPrice matters: without it the Oracle is computed once at scan time and
     // never updates when the user enters what they're actually paying.
   }, [result, buyPrice]);
+  // STORE REVIEW - ACTUAL TRIGGER: fires once per scan the moment its hero
+  // headline first resolves to SOLID or WORTH A LOOK (never on PASS/THIN/
+  // ai_only - reviewHeadlineRef.current.headline is null for all of those,
+  // see where it's set below). 1.5s after that render commits (ONBOARDING/
+  // ERROR exclusion is automatic: this never runs outside step==="result"
+  // with a non-error result).
+  useEffect(() => {
+    if (step !== "result") return;
+    const snap = reviewHeadlineRef.current;
+    if (!snap.headline || !snap.scanKey) return;
+    if (reviewPromptedKeyRef.current === snap.scanKey) return;
+    reviewPromptedKeyRef.current = snap.scanKey;
+    const timer = setTimeout(() => {
+      requestReviewIfEligible(token, "verdict").then(setReviewDebug);
+    }, REVIEW_PROMPT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [step, result, buyPrice, resultCondition, token]);
+  // STORE REVIEW - OWNER-ONLY LIVE READOUT: side-effect-free re-evaluation
+  // (never opens the real modal, never writes last-asked) so isOwner can
+  // see eligible/failing-condition/last-asked on the result screen at any
+  // time, not only in the instant the real trigger above actually fires.
+  useEffect(() => {
+    if (!isOwner || step !== "result" || result?._error) return;
+    evaluateReview(token, "verdict").then(setReviewDebug);
+  }, [isOwner, step, result, token]);
   const [barcodeScanned, setBarcodeScanned] = useState(false);
   const cameraRef        = useRef<any>(null);
   // CLIENT TIMING INSTRUMENTATION (2026-09-11): real, measured time spent
@@ -958,6 +997,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // logic would call SOLID/WORTH A LOOK - the exact client/server
     // disagreement this port exists to close. Gone entirely now; the first
     // real gate is net profit <= 0.
+    // STORE REVIEW: default "no qualifying headline yet" for this scan -
+    // overwritten below the moment one resolves to SOLID/WORTH A LOOK.
+    // Keyed on the scan id so the trigger effect fires once per SCAN, not
+    // once per render while the user edits price/condition.
+    reviewHeadlineRef.current = { scanKey: String(result.id ?? result.scanId ?? result.scan_id ?? ""), headline: null };
     if (enteredBp > 0) {
       const segOut: any = result.segmentOutcomes;
       const tier: string = result.priceBasisTier || (result.confirmedByMoat ? "item_moat" : segOut ? "segment" : "ai_only");
@@ -979,6 +1023,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         : tier === "segment" ? "WORTH A LOOK"
         : (heroRoi >= 50 && heroSellThroughPct != null && heroSellThroughPct >= 50) ? "WORTH A LOOK"
         : "SOLID";
+      // STORE REVIEW: real-data tier only (ai_only already headline:null
+      // above) and never PASS/THIN - exactly the two labels the ask is
+      // gated on.
+      if (headline === "SOLID" || headline === "WORTH A LOOK") {
+        reviewHeadlineRef.current.headline = headline;
+      }
       if (headline != null) {
         const evidenceLine = result.agreementBadge || (segOut
           ? [
@@ -1364,6 +1414,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   soldCount: result.segmentOutcomes.soldCount,
                 } : null}
                 parityMismatch={parityMismatchText}
+                storeReviewDebug={reviewDebug}
               />
 
               {/* AI range banner - MEASURED BUG (2026-10-06, real $26 Minnie

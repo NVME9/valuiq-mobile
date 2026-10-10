@@ -78,7 +78,20 @@ interface SegmentDebug {
   soldCount: number;
 }
 
-export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug, segmentDebug, parityMismatch }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null; segmentDebug?: SegmentDebug | null; parityMismatch?: string | null }) {
+// storeReviewDebug (optional, 2026-10-10): lib/storeReview.ts's own
+// eligibility readout for the in-app store-review ask - eligible yes/no,
+// the exact failing condition when not, and the last-asked timestamp.
+// Side-effect-free on the caller's end (never opens the real review modal,
+// never writes last-asked) - see evaluateReview()/getReviewDebugState().
+interface StoreReviewDebug {
+  eligible: boolean;
+  failingCondition: string | null;
+  lastAskedAt: string | null;
+  lifetimeScans: number | null;
+  isAvailable: boolean | null;
+}
+
+export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug, segmentDebug, parityMismatch, storeReviewDebug }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null; segmentDebug?: SegmentDebug | null; parityMismatch?: string | null; storeReviewDebug?: StoreReviewDebug | null }) {
   const [expanded, setExpanded] = useState(false);
   if (!isOwner) return null;
   const log = expanded ? getCallLog() : [];
@@ -110,6 +123,16 @@ export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, bar
           )}
           {segmentDebug && (
             <Text style={styles.row}>Segment outcomes: {segmentDebug.segmentLabel} [{segmentDebug.conditionBasis}] — {segmentDebug.resolvedCount} resolved / {segmentDebug.soldCount} sold</Text>
+          )}
+          {storeReviewDebug && (
+            <View style={{ marginBottom: 8 }}>
+              <Text style={styles.row}>
+                Store review: {storeReviewDebug.eligible ? "ELIGIBLE" : "not eligible"}{!storeReviewDebug.eligible && storeReviewDebug.failingCondition ? ` — ${storeReviewDebug.failingCondition}` : ""}
+              </Text>
+              <Text style={styles.row}>
+                Lifetime scans: {storeReviewDebug.lifetimeScans ?? "?"}  ·  isAvailable: {String(storeReviewDebug.isAvailable)}  ·  last asked: {storeReviewDebug.lastAskedAt || "never"}
+              </Text>
+            </View>
           )}
           {/* PARITY GUARD (2026-10-09) - see ScannerScreen.tsx/SpecialtyScreen.
               tsx's own comment: fires only when the local classifyHeroVerdict
