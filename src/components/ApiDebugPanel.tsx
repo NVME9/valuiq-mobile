@@ -91,7 +91,23 @@ interface StoreReviewDebug {
   isAvailable: boolean | null;
 }
 
-export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug, segmentDebug, parityMismatch, storeReviewDebug }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null; segmentDebug?: SegmentDebug | null; parityMismatch?: string | null; storeReviewDebug?: StoreReviewDebug | null }) {
+// deleteAccountDebug (optional, 2026-10-11): ProfileScreen's DeleteAccountModal
+// state, purely so the owner can see on-device that the entry still exists
+// and exactly what state its two confirmation gates (typed word, 2s hold)
+// are in - never used to drive anything, same side-effect-free pattern as
+// storeReviewDebug above. entryVisible is set by ProfileScreen itself (not
+// the modal, which only exists once mounted) so this still shows "false" if
+// the entry were ever accidentally removed from the screen entirely.
+interface DeleteAccountDebug {
+  entryVisible: boolean;
+  modalOpen: boolean;
+  typedMatches: boolean;
+  holding: boolean;
+  holdProgressMs: number;
+  submitting: boolean;
+}
+
+export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug, segmentDebug, parityMismatch, storeReviewDebug, deleteAccountDebug }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null; segmentDebug?: SegmentDebug | null; parityMismatch?: string | null; storeReviewDebug?: StoreReviewDebug | null; deleteAccountDebug?: DeleteAccountDebug | null }) {
   const [expanded, setExpanded] = useState(false);
   if (!isOwner) return null;
   const log = expanded ? getCallLog() : [];
@@ -133,6 +149,11 @@ export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, bar
                 Lifetime scans: {storeReviewDebug.lifetimeScans ?? "?"}  ·  isAvailable: {String(storeReviewDebug.isAvailable)}  ·  last asked: {storeReviewDebug.lastAskedAt || "never"}
               </Text>
             </View>
+          )}
+          {deleteAccountDebug && (
+            <Text style={styles.row}>
+              Delete-account entry: visible={String(deleteAccountDebug.entryVisible)} · modal {deleteAccountDebug.modalOpen ? "open" : "closed"} · typed match: {deleteAccountDebug.typedMatches ? "yes" : "no"} · hold: {deleteAccountDebug.holding ? `${deleteAccountDebug.holdProgressMs}ms/2000ms` : "idle"}{deleteAccountDebug.submitting ? " · SUBMITTING" : ""}
+            </Text>
           )}
           {/* PARITY GUARD (2026-10-09) - see ScannerScreen.tsx/SpecialtyScreen.
               tsx's own comment: fires only when the local classifyHeroVerdict

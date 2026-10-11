@@ -10,6 +10,7 @@ import { C } from "../lib/theme";
 import HeaderLogo from "../components/HeaderLogo";
 import UserAvatar from "../components/UserAvatar";
 import ApiDebugPanel from "../components/ApiDebugPanel";
+import DeleteAccountModal, { type DeleteAccountDebugState } from "../components/DeleteAccountModal";
 import { isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric, getBiometricLabel } from "../lib/biometrics";
 import { API_BASE, deleteAccount, getProfileData, peekProfileData, invalidateProfileCache, setCachedAvatar } from "../lib/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -22,7 +23,7 @@ import * as Updates from "expo-updates";
 // is the ground truth: if BUILD_TAG on-device doesn't match what you just
 // published, the update didn't land (see App.tsx's init() for the
 // check-and-reload-immediately fix that was missing).
-const BUILD_TAG = "2026-10-09.2";
+const BUILD_TAG = "2026-10-11.1";
 
 // The single owner/dev allowlist for anything real users must never see -
 // dev-only tools (Reset onboarding, Preview new-user flow) and the build
@@ -117,32 +118,36 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
   const [stats, setStats]           = useState<any>(cachedAtMount?.stats ?? null);
   const [earnedIds, setEarnedIds]   = useState<Set<string>>(new Set((cachedAtMount?.badges || []).map((b: any) => b.id)));
   const [deleting, setDeleting]     = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  // Owner-only debug readout state (see ApiDebugPanel's deleteAccountDebug) -
+  // reported up by DeleteAccountModal via onDebugStateChange, purely
+  // informational, never read by anything that acts on it.
+  const [deleteDebugState, setDeleteDebugState] = useState<DeleteAccountDebugState>({
+    modalOpen: false, typedMatches: false, holding: false, holdProgressMs: 0, submitting: false,
+  });
 
-  function confirmDeleteAccount() {
-    Alert.alert(
-      "Delete Account?",
-      // The backend now cancels an active Stripe subscription as part of
-      // this (see app/api/delete-account/route.ts) - but Apple/Google own
-      // App Store/Play Store billing directly, so this call can delete
-      // everything ValuIQ holds without ever being able to touch a
-      // store-billed subscription. Telling the user that here is the only
-      // way they'd know to go cancel it themselves.
-      "This permanently deletes your account and all your scans, history, and data. This cannot be undone.\n\nIf you subscribe through Stripe, that subscription is cancelled automatically. If you subscribe through the App Store or Google Play, you must cancel it separately in that store — deleting your account here can't stop store-billed subscriptions.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete Forever", style: "destructive", onPress: async () => {
-          setDeleting(true);
-          const res = await deleteAccount(token);
-          setDeleting(false);
-          if (res && res.success) {
-            Alert.alert("Account Deleted", "Your account and all data have been removed.");
-            onLogout();
-          } else {
-            Alert.alert("Could not delete", (res && res.error) || "Please try again.");
-          }
-        }},
-      ]
-    );
+  // 2026-10-11: the two-tap native Alert that used to live here is gone -
+  // see DeleteAccountModal.tsx's own header for why (the owner's own
+  // account was deleted by an accidental tap-through on 2026-10-10, 21:50
+  // UTC, during on-device testing). This screen now only opens that
+  // dedicated confirmation flow; the modal itself never touches the
+  // network - the real call and its result-handling stay here, same
+  // ownership every other server call on this screen already has.
+  function openDeleteAccountModal() {
+    setDeleteModalVisible(true);
+  }
+
+  async function handleConfirmDelete() {
+    setDeleting(true);
+    const res = await deleteAccount(token);
+    setDeleting(false);
+    return res;
+  }
+
+  function handleAccountDeleted() {
+    setDeleteModalVisible(false);
+    Alert.alert("Account Deleted", "Your account and all data have been removed.");
+    onLogout();
   }
 
   // Dev-only: replay first-launch (onboarding slides + land-on-scan nudge +
@@ -734,19 +739,14 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
           <Text style={s.upgradeFullBtnText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{plan==="free" ? "View all plans & upgrade" : "Manage plan & restore purchases"}</Text>
         </TouchableOpacity>
 
-            {/* Account deletion - available to ALL users */}
+            {/* Legal links. Account deletion used to also live in this card
+                (a prominent red button) - moved to a single plain-text entry
+                at the very bottom of the screen instead, see the Account
+                section below. Two visible delete entries in different
+                places is exactly the kind of surface that makes one of them
+                easy to hit by accident. */}
             <View style={s.deleteAccountCard}>
-              <Text style={{color:C.text1,fontSize:14,fontWeight:"700",marginBottom:6}}>Account</Text>
-              <Text style={{color:C.text3,fontSize:12,lineHeight:18,marginBottom:12}}>
-                Permanently delete your account and all your data. This cannot be undone.
-              </Text>
-              <TouchableOpacity
-                onPress={confirmDeleteAccount}
-                disabled={deleting}
-                style={{backgroundColor:"#1a0505",borderWidth:1,borderColor:C.red+"40",borderRadius:10,padding:12,alignItems:"center",opacity: deleting ? 0.5 : 1}}>
-                <Text style={{color:C.red,fontSize:13,fontWeight:"700"}}>{deleting ? "Deleting..." : "Delete Account"}</Text>
-              </TouchableOpacity>
-              <View style={{flexDirection:"row",justifyContent:"center",gap:18,marginTop:14}}>
+              <View style={{flexDirection:"row",justifyContent:"center",gap:18}}>
                 <TouchableOpacity onPress={()=>Linking.openURL("https://www.getvaluiq.com/privacy")}>
                   <Text style={{color:C.text4,fontSize:12,textDecorationLine:"underline"}}>Privacy Policy</Text>
                 </TouchableOpacity>
@@ -907,17 +907,6 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
             </TouchableOpacity>
           )}
 
-          {/* Delete account - ALL users */}
-          <TouchableOpacity
-            onPress={confirmDeleteAccount}
-            style={s.deleteBtn}
-          >
-            <Text style={s.deleteBtnTxt}>{deleting ? "Deleting..." : "Delete Account"}</Text>
-          </TouchableOpacity>
-          <Text style={s.accountNote}>
-            To delete your account and all data, tap above to email our support team. We process all requests within 24 hours.
-          </Text>
-
           {/* Sign out */}
           <TouchableOpacity onPress={onLogout} style={s.signOutBtn}>
             <Text style={s.signOutBtnTxt}>Sign Out</Text>
@@ -963,8 +952,31 @@ export default function ProfileScreen({ token, plan, onLogout, onNavigate, previ
               </Text>
             </>
           )}
+
+          {/* Delete account - ALL users, moved here (2026-10-11): the very
+              bottom of the screen, visually separated by its own divider
+              from every other control above (Sign Out included), styled as
+              a plain understated text link rather than a button - nothing
+              about this row should look tappable-by-accident. Opens
+              DeleteAccountModal; see that file's header for why a two-tap
+              Alert is no longer how this works at all. */}
+          <View style={s.deleteDivider} />
+          <TouchableOpacity onPress={openDeleteAccountModal} disabled={deleting} style={s.deleteLinkRow}>
+            <Text style={s.deleteLinkText}>{deleting ? "Deleting…" : "Delete Account"}</Text>
+          </TouchableOpacity>
         </View>
-        <ApiDebugPanel isOwner={isOwner} />
+
+        <DeleteAccountModal
+          visible={deleteModalVisible}
+          onRequestClose={() => setDeleteModalVisible(false)}
+          onConfirmDelete={handleConfirmDelete}
+          onDeleted={handleAccountDeleted}
+          onDebugStateChange={setDeleteDebugState}
+        />
+        <ApiDebugPanel
+          isOwner={isOwner}
+          deleteAccountDebug={{ entryVisible: true, ...deleteDebugState }}
+        />
 
       </ScrollView>
     </SafeAreaView>
@@ -1080,10 +1092,12 @@ const s = StyleSheet.create({
   manageBtn:         { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:12, padding:14, alignItems:"center", marginBottom:10 },
   manageBtnTxt:      { color:C.green, fontSize:13, fontWeight:"700" },
   manageBtnSubTxt:   { color:C.text3, fontSize:12, fontWeight:"600", marginTop:4 },
-  deleteBtn:         { backgroundColor:"#0d0505", borderWidth:1, borderColor:C.red+"30", borderRadius:12, padding:14, alignItems:"center", marginBottom:8 },
-  deleteBtnTxt:      { color:C.red+"cc", fontSize:13, fontWeight:"700" },
-  accountNote:       { color:C.text4, fontSize:11, textAlign:"center" as any, lineHeight:16, marginBottom:16 },
   signOutBtn:        { borderWidth:1, borderColor:C.border, borderRadius:12, padding:14, alignItems:"center" },
+  // Delete Account - very bottom of the screen, a plain text link, not a
+  // button (2026-10-11) - see the render site's own comment for why.
+  deleteDivider:     { height:1, backgroundColor:C.border, marginTop:24, marginBottom:16, opacity:0.6 },
+  deleteLinkRow:     { alignItems:"center", paddingVertical:8 },
+  deleteLinkText:    { color:C.text4, fontSize:12, fontWeight:"500" as any, textDecorationLine:"underline" as any },
   signOutBtnTxt:     { color:C.text3, fontSize:13, fontWeight:"600" },
   devResetBtn:       { padding:10, alignItems:"center", marginTop:4 },
   devResetBtnTxt:    { color:C.text4, fontSize:11, fontWeight:"500", textAlign:"center" as any },

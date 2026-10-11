@@ -235,12 +235,18 @@ export async function updateThriftItem(token: string, payload: any): Promise<any
   });
   return r.json();
 }
-export async function deleteAccount(token: string): Promise<any> {
+// status is surfaced alongside whatever JSON the server returns (2026-10-11)
+// specifically so the caller can tell a real 403 (owner/admin/seed
+// protection - app/api/delete-account/route.ts) apart from every other
+// failure shape and show a distinct, accurate message instead of a generic
+// "please try again."
+export async function deleteAccount(token: string): Promise<{ success: boolean; error?: string; status?: number; warning?: string }> {
   try {
     const r = await fetch(`${API_BASE}/api/delete-account`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userToken: token }),
     });
-    return await r.json();
+    const d = await r.json().catch(() => ({}));
+    return { ...d, status: r.status };
   } catch {
     return { success: false, error: "Network error" };
   }
