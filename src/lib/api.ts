@@ -240,10 +240,18 @@ export async function updateThriftItem(token: string, payload: any): Promise<any
 // protection - app/api/delete-account/route.ts) apart from every other
 // failure shape and show a distinct, accurate message instead of a generic
 // "please try again."
+//
+// confirm: "DELETE" (2026-10-11b) - the server will soon start rejecting
+// any deletion request that doesn't carry this exact literal, so it's sent
+// unconditionally here. Harmless to send before that lands; this function
+// has exactly one caller in the app - ProfileScreen.tsx's
+// handleConfirmDelete(), itself only ever invoked by DeleteAccountModal's
+// fireDelete() after its 2-second press-and-hold completes - so this is
+// never on a path a stray tap can reach.
 export async function deleteAccount(token: string): Promise<{ success: boolean; error?: string; status?: number; warning?: string }> {
   try {
     const r = await fetch(`${API_BASE}/api/delete-account`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userToken: token }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userToken: token, confirm: "DELETE" }),
     });
     const d = await r.json().catch(() => ({}));
     return { ...d, status: r.status };
