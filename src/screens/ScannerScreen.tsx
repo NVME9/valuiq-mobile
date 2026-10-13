@@ -14,7 +14,7 @@ import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareCard from "../components/ShareCard";
-import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast } from "../lib/api";
+import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan } from "../lib/api";
 import ApiDebugPanel from "../components/ApiDebugPanel";
 import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notifications";
 import StagedProgress from "../components/StagedProgress";
@@ -23,7 +23,7 @@ import { matchSpecialtyCategory } from "./SpecialtyScreen";
 import ProfitFlexHero from "../components/ProfitFlexHero";
 import FlashHighlight from "../components/FlashHighlight";
 import SegmentOutcomesBlock from "../components/SegmentOutcomesBlock";
-import { classifyOutcome, ROI_BUY_MIN, PROFIT_JUDGMENT_FLOOR } from "../lib/outcomeTier";
+import { classifyOutcome, ROI_BUY_MIN, PROFIT_JUDGMENT_FLOOR, classifyHeroVerdictLocal, decisionFromVerdict, type HeroVerdict } from "../lib/outcomeTier";
 import LogSaleModal from "../components/LogSaleModal";
 import { toPendingScan } from "../lib/saleCapture";
 import { CONDITION_OPTIONS } from "../lib/condition";
@@ -175,6 +175,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // retailPriceNeedsConfirmation is true - this just makes that hold
   // visible and actionable instead of a blank field + hint text.
   const [tagConfirmPending, setTagConfirmPending] = useState(false);
+  // PATCH-ON-SETTLE (2026-10-12, MEASURED: the owner's 9 real Walmart scans
+  // all stored buy_price=0/decision=UNKNOWN in production - this screen
+  // already auto-fills buyPrice from a confident tag read and recomputes a
+  // real local verdict instantly, see the result-step render's "ONE VERDICT
+  // SOURCE" block below, but NOTHING ever wrote that back to the scans row;
+  // it only ever lived in this component's state). Holds whatever that
+  // render-time block most recently computed - written there every render
+  // (a ref write during render, not a hook - see its own comment), read by
+  // the debounced effect below, which is the one place this actually gets
+  // persisted.
+  const latestVerdictRef = useRef<{ scanId: string | null; buyPrice: number; netProfit: number | null; roi: number | null; decision: string } | null>(null);
+  // Last signature actually PATCHed, so re-settling on the SAME price/
+  // verdict (e.g. a re-render with no real change) never fires a redundant
+  // network call.
+  const lastPatchedRef = useRef<string>("");
   const priceInputRef = useRef<TextInput>(null);
   // STORE REVIEW PROMPT: reviewHeadlineRef captures THIS render's hero
   // headline (SOLID/WORTH A LOOK only, else null) for the effect below to
@@ -225,6 +240,32 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       setSharingImage(false);
     }
   }
+  // PATCH-ON-SETTLE: persists whatever the result-step render most recently
+  // computed (latestVerdictRef, written during render - see its own
+  // comment) back to the stored scans row, debounced 900ms after price/
+  // condition stop changing so a redundant PATCH doesn't fire per keystroke.
+  // Fires for EVERY buyPrice>0 state, not just a manual edit - that's
+  // deliberate: a confident tag read auto-seeds buyPrice with nobody
+  // touching anything (see finishAnalyze's setBuyPrice seed), and that was
+  // exactly the real-world case (6 of the owner's 9 Walmart scans) that
+  // never got persisted before this existed.
+  useEffect(() => {
+    if (step !== "result" || !result || result._error) return;
+    const timer = setTimeout(() => {
+      const v = latestVerdictRef.current;
+      if (!v || !v.scanId || v.buyPrice <= 0) return;
+      const sig = `${v.scanId}:${v.buyPrice}:${v.decision}:${v.netProfit}:${v.roi}`;
+      if (lastPatchedRef.current === sig) return;
+      lastPatchedRef.current = sig;
+      updateScan(token, v.scanId, {
+        buy_price: v.buyPrice,
+        net_profit: v.netProfit,
+        roi: v.roi,
+        decision: v.decision,
+      }).catch(() => {});
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [step, result, buyPrice, resultCondition, token]);
   useEffect(() => {
     let alive = true;
     setOracle(null);
@@ -1002,6 +1043,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // Keyed on the scan id so the trigger effect fires once per SCAN, not
     // once per render while the user edits price/condition.
     reviewHeadlineRef.current = { scanKey: String(result.id ?? result.scanId ?? result.scan_id ?? ""), headline: null };
+    // PATCH-ON-SETTLE (2026-10-12): captured for the useEffect below (near
+    // the other top-level effects) that persists buy_price/net_profit/roi/
+    // decision back to the stored scans row once price/condition editing
+    // settles - see that effect's own comment for why this exists (the
+    // owner's real Walmart scans all stored buy_price=0/decision=UNKNOWN
+    // because nothing ever wrote the price shown here back to the row).
+    let finalHeadline: HeroVerdict = null;
     if (enteredBp > 0) {
       const segOut: any = result.segmentOutcomes;
       const tier: string = result.priceBasisTier || (result.confirmedByMoat ? "item_moat" : segOut ? "segment" : "ai_only");
@@ -1012,17 +1060,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       // oracle-wide metric the server's own verdict call never actually
       // reads.
       const heroSellThroughPct: number | null = result.sellThroughPct ?? null;
-      // ai_only -> null (no verdict at all, same as classifyHeroVerdict's
-      // own first line) - the old code had no such guard and could fall
-      // through to THIN/SOLID/etc on a pure AI estimate with zero real data
-      // behind it.
-      const headline: "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" | null =
-        tier === "ai_only" ? null
-        : heroProfit <= 0 ? "PASS"
-        : heroRoi < ROI_BUY_MIN ? "THIN"
-        : tier === "segment" ? "WORTH A LOOK"
-        : (heroRoi >= 50 && heroSellThroughPct != null && heroSellThroughPct >= 50) ? "WORTH A LOOK"
-        : "SOLID";
+      // EXTRACTED (2026-10-12) to lib/outcomeTier.ts's classifyHeroVerdictLocal
+      // - same exact logic, now shared with the PATCH-on-settle effect below
+      // so that effect can't independently drift from what's on screen.
+      const headline: HeroVerdict = classifyHeroVerdictLocal({
+        tier, buyPrice: enteredBp, netProfit: heroProfit, roi: heroRoi, sellThroughPct: heroSellThroughPct,
+      });
+      finalHeadline = headline;
       // STORE REVIEW: real-data tier only (ai_only already headline:null
       // above) and never PASS/THIN - exactly the two labels the ask is
       // gated on.
@@ -1056,6 +1100,19 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       }
     }
     const isSkip = outcome.tier === "skip";
+
+    // PATCH-ON-SETTLE: stash the freshest computed verdict for the
+    // useEffect to read after this render commits - see that effect's own
+    // comment. A plain ref write during render (not a hook) - this never
+    // affects THIS render's own output, only what the next debounced PATCH
+    // persists.
+    latestVerdictRef.current = {
+      scanId: (result.id ?? result.scanId ?? result.scan_id) != null ? String(result.id ?? result.scanId ?? result.scan_id) : null,
+      buyPrice: enteredBp,
+      netProfit: enteredBp > 0 ? heroProfit : null,
+      roi: enteredBp > 0 ? heroRoi : null,
+      decision: decisionFromVerdict(finalHeadline),
+    };
 
     // PARITY GUARD (2026-10-09, owner-only): the server's own
     // netProfit/roi/heroVerdict are only genuinely comparable to this local
@@ -1311,7 +1368,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               ) : (
                 <>
                   <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
-                    {Number(result.retailPriceRead) > 0 ? "Price (from a detected tag)" : "What you paid (optional)"}
+                    {Number(result.retailPriceRead) > 0 ? `Tag: $${result.retailPriceRead} (tap to change)` : "What you paid (optional)"}
                   </Text>
                   <View style={s.priceFieldWrap}>
                     <Text style={s.priceFieldDollar}>$</Text>
@@ -1407,6 +1464,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 isOwner={isOwner}
                 priceBasisDebug={result.priceBasisDebug}
                 barcodeDebug={result._barcodeDebug}
+                tagPriceDebug={{
+                  ocrTagText: result.retailPriceReadSourceText ?? null,
+                  detectedTagPrice: result.detectedTagPrice ?? null,
+                  detectedWasPrice: result.detectedWasPrice ?? null,
+                  retailPriceRead: result.retailPriceRead ?? null,
+                  retailPriceReadConfidence: result.retailPriceReadConfidence ?? null,
+                  buyPriceSource: result.buyPriceSource ?? null,
+                  category: result.category ?? null,
+                  brand: result.brand ?? null,
+                }}
                 segmentDebug={result.segmentOutcomes ? {
                   segmentLabel: result.segmentOutcomes.segmentLabel,
                   conditionBasis: result.segmentOutcomes.conditionBasis,

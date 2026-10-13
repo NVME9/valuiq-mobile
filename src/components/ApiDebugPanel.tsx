@@ -107,7 +107,24 @@ interface DeleteAccountDebug {
   submitting: boolean;
 }
 
-export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug, segmentDebug, parityMismatch, storeReviewDebug, deleteAccountDebug }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null; segmentDebug?: SegmentDebug | null; parityMismatch?: string | null; storeReviewDebug?: StoreReviewDebug | null; deleteAccountDebug?: DeleteAccountDebug | null }) {
+// tagPriceDebug (optional, 2026-10-12): the tag-price verdict fix's own
+// readout - the OCR'd tag text, the price it resolved to (and whether the
+// sanity gate withheld it), which of user/tag won as the verdict's buy
+// price, and the current category/brand (the identity-stability fix's own
+// result, shown here since "is this scan's category/brand stable across a
+// re-shoot" is exactly what the owner needs to eyeball after that fix).
+interface TagPriceDebug {
+  ocrTagText: string | null;
+  detectedTagPrice: number | null;
+  detectedWasPrice: number | null;
+  retailPriceRead: number | null;
+  retailPriceReadConfidence: "high" | "low" | null;
+  buyPriceSource: "user" | "tag" | null;
+  category: string | null;
+  brand: string | null;
+}
+
+export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug, segmentDebug, parityMismatch, storeReviewDebug, deleteAccountDebug, tagPriceDebug }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null; segmentDebug?: SegmentDebug | null; parityMismatch?: string | null; storeReviewDebug?: StoreReviewDebug | null; deleteAccountDebug?: DeleteAccountDebug | null; tagPriceDebug?: TagPriceDebug | null }) {
   const [expanded, setExpanded] = useState(false);
   if (!isOwner) return null;
   const log = expanded ? getCallLog() : [];
@@ -123,6 +140,25 @@ export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, bar
               <Text style={styles.row}>Barcode: GTIN {barcodeDebug.gtin}  (source: {barcodeDebug.upcSource || "?"})</Text>
               <Text style={styles.row}>Detect→lookup: {barcodeDebug.detectToLookupMs}ms  ·  Lookup→priced result: {barcodeDebug.lookupToResultMs}ms</Text>
               {barcodeDebug.retailPrice != null && <Text style={styles.row}>Retail ${barcodeDebug.retailPrice} (a retail fact, never a sale price)</Text>}
+            </View>
+          )}
+          {tagPriceDebug && (
+            <View style={{ marginBottom: 8 }}>
+              <Text style={styles.row}>
+                Category/brand: {tagPriceDebug.category || "?"} / {tagPriceDebug.brand || "?"}
+              </Text>
+              <Text style={styles.row}>
+                OCR tag text: {tagPriceDebug.ocrTagText || "(none)"}
+              </Text>
+              <Text style={styles.row}>
+                Tag read: {tagPriceDebug.retailPriceRead != null ? `$${tagPriceDebug.retailPriceRead}` : "none"}
+                {tagPriceDebug.retailPriceReadConfidence ? ` [${tagPriceDebug.retailPriceReadConfidence} confidence]` : ""}
+                {" → detectedTagPrice: "}{tagPriceDebug.detectedTagPrice != null ? `$${tagPriceDebug.detectedTagPrice}` : "null (withheld or none)"}
+                {tagPriceDebug.detectedWasPrice != null ? `  ·  was $${tagPriceDebug.detectedWasPrice}` : ""}
+              </Text>
+              <Text style={styles.row}>
+                buyPriceSource: {tagPriceDebug.buyPriceSource || "null (nothing entered or detected)"}
+              </Text>
             </View>
           )}
           {priceBasisDebug && (

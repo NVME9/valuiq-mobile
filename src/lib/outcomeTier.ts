@@ -151,3 +151,32 @@ export function classifyOutcome(input: OutcomeTierInput): OutcomeTierInfo {
     accent: C.green, adjustedROI, daysUsed: days,
   };
 }
+
+// classifyHeroVerdictLocal/decisionFromVerdict (2026-10-12) — extracted
+// from ScannerScreen.tsx's own EXACT PORT of deal-ai-pro's lib/priceBasis.ts
+// classifyHeroVerdict()/decisionFromVerdict() (that server function is the
+// single source of truth; if it changes, these must change to match) - was
+// inline there, now shared so the new tag-price-aware PATCH effect (see
+// ScannerScreen.tsx's patch-on-price-settle useEffect) can compute the SAME
+// verdict without a second, drifting copy of this logic.
+export type HeroVerdict = "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" | null;
+
+export function classifyHeroVerdictLocal(opts: {
+  tier: string; buyPrice: number; netProfit: number; roi: number; sellThroughPct: number | null;
+}): HeroVerdict {
+  const { tier, buyPrice, netProfit, roi, sellThroughPct } = opts;
+  if (tier === "ai_only") return null;
+  if (!(buyPrice > 0)) return null;
+  if (netProfit <= 0) return "PASS";
+  if (roi < ROI_BUY_MIN) return "THIN";
+  if (tier === "segment") return "WORTH A LOOK";
+  if (roi >= 50 && sellThroughPct != null && sellThroughPct >= 50) return "WORTH A LOOK";
+  return "SOLID";
+}
+
+export function decisionFromVerdict(verdict: HeroVerdict): "BUY" | "WATCH" | "PASS" | "UNKNOWN" {
+  if (verdict == null) return "UNKNOWN";
+  if (verdict === "PASS") return "PASS";
+  if (verdict === "THIN") return "WATCH";
+  return "BUY";
+}
