@@ -1368,7 +1368,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               ) : (
                 <>
                   <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
-                    {Number(result.retailPriceRead) > 0 ? `Tag: $${result.retailPriceRead} (tap to change)` : "What you paid (optional)"}
+                    {Number(result.retailPriceRead) > 0 ? `Tag: $${result.retailPriceRead} (tap to change)` : "Enter price for your verdict"}
                   </Text>
                   <View style={s.priceFieldWrap}>
                     <Text style={s.priceFieldDollar}>$</Text>

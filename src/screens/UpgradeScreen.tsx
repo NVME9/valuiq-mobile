@@ -7,7 +7,7 @@ import { API_BASE } from "../lib/api";
 import { configurePurchases, getOfferings, purchasePackage, restorePurchases, refreshEntitlements } from "../lib/purchases";
 
 interface Props {
-  token: string; plan: string;
+  token: string; plan: string; userId?: string;
   onNavigate: (s: string) => void; onBack?: () => void;
 }
 
@@ -80,14 +80,20 @@ const PLANS = [
     cta:"Become a Founder" },
 ];
 
-export default function UpgradeScreen({ token, plan, onNavigate, onBack }: Props) {
+export default function UpgradeScreen({ token, plan, userId, onNavigate, onBack }: Props) {
   const [billing, setBilling] = useState<"monthly"|"annual">("monthly");
   const [openFaq, setOpenFaq] = useState<number|null>(null);
   const [loading, setLoading] = useState<string|null>(null);
 
   const isPaid = plan !== "free";
   const isCurrent = (id: string) => plan === id;
-  React.useEffect(() => { try { configurePurchases(); refreshEntitlements(token); } catch {} }, []);
+  // IDENTITY LINK FIX (2026-10-13, MEASURED: this call never passed an
+  // appUserId - RevenueCat silently assigned its own random anonymous id,
+  // which the server has no way to map back to a Supabase user. Passing the
+  // real Supabase user id here is what makes GET /v1/subscribers/{id} on the
+  // server (app/api/set-plan-iap) able to look this purchase up at all - see
+  // that route's own header comment.
+  React.useEffect(() => { try { configurePurchases(userId || undefined); refreshEntitlements(token); } catch {} }, []);
 
   async function subscribe(priceId: string, planId: string) {
     // Native Apple In-App Purchase via RevenueCat (no external checkout).

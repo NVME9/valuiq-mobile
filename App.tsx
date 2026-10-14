@@ -668,7 +668,7 @@ export default function App() {
     }
   }
 
-  const props = { token, plan, planLoaded, scansLeft, setScansLeft, onNavigate:navigate, onBack:goBack, onLogout:handleLogout, navData, firstScanNudge, onDismissFirstScanNudge: dismissFirstScanNudge, previewNewUser, onTogglePreviewNewUser: togglePreviewNewUser };
+  const props = { token, plan, planLoaded, userId: session?.user?.id, scansLeft, setScansLeft, onNavigate:navigate, onBack:goBack, onLogout:handleLogout, navData, firstScanNudge, onDismissFirstScanNudge: dismissFirstScanNudge, previewNewUser, onTogglePreviewNewUser: togglePreviewNewUser };
 
   const SCREENS: Record<Screen,React.ReactNode> = {
     "scanner":      <ScannerScreen {...props} />,
@@ -679,7 +679,7 @@ export default function App() {
     "deathpile":    <DeathPileScreen {...props} />,
     "community":    <CommunityScreen {...props} />,
     "profile":      <ProfileScreen {...props} />,
-    "upgrade":      <UpgradeScreen token={token} plan={plan} onNavigate={navigate} onBack={goBack} />,
+    "upgrade":      <UpgradeScreen token={token} plan={plan} userId={session?.user?.id} onNavigate={navigate} onBack={goBack} />,
     "relist":       <RelisterScreen {...props} />,
     "hot-now":      <HotNowScreen {...props} />,
       "demand-radar": <DemandRadarScreen {...props} />,
