@@ -161,14 +161,23 @@ export function classifyOutcome(input: OutcomeTierInput): OutcomeTierInfo {
 // verdict without a second, drifting copy of this logic.
 export type HeroVerdict = "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" | null;
 
+// ALWAYS-ANSWER TIER 4 (2026-10-18) - mirrors deal-ai-pro's lib/priceBasis.ts
+// classifyHeroVerdict's identical, same-date update: "comparable_range" is
+// capped at WORTH A LOOK (never SOLID), same ceiling as "segment" - EXCEPT a
+// Low-identity-confidence match, which caps one rung lower (THIN). Without
+// this, a comparable_range-tier scan fell through to the generic tail below
+// and could show SOLID - exactly what the spec forbids ("comparable_range
+// verdicts are capped at WORTH A LOOK/THIN/PASS, never SOLID").
 export function classifyHeroVerdictLocal(opts: {
   tier: string; buyPrice: number; netProfit: number; roi: number; sellThroughPct: number | null;
+  comparableRangeConfidence?: "low" | "medium" | null;
 }): HeroVerdict {
-  const { tier, buyPrice, netProfit, roi, sellThroughPct } = opts;
+  const { tier, buyPrice, netProfit, roi, sellThroughPct, comparableRangeConfidence } = opts;
   if (tier === "ai_only") return null;
   if (!(buyPrice > 0)) return null;
   if (netProfit <= 0) return "PASS";
   if (roi < ROI_BUY_MIN) return "THIN";
+  if (tier === "comparable_range") return comparableRangeConfidence === "low" ? "THIN" : "WORTH A LOOK";
   if (tier === "segment") return "WORTH A LOOK";
   if (roi >= 50 && sellThroughPct != null && sellThroughPct >= 50) return "WORTH A LOOK";
   return "SOLID";

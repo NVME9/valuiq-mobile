@@ -902,7 +902,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                       <View style={s.expanded}>
                         {isThinData(full) === true && (
                           <View style={s.limitedBanner}>
-                            <Text style={s.limitedText}>Estimated — limited data, numbers may vary. Verify before buying.</Text>
+                            <Text style={s.limitedText}>Limited data, numbers may vary. Verify before buying.</Text>
                           </View>
                         )}
                         <View style={s.expandedRow}>
@@ -1246,7 +1246,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                           <>
                           {isThinData(appr) === true && (
                             <View style={s.limitedBanner}>
-                              <Text style={s.limitedText}>Estimated — limited data, numbers may vary. Verify before buying.</Text>
+                              <Text style={s.limitedText}>Limited data, numbers may vary. Verify before buying.</Text>
                             </View>
                           )}
                           {/* MEASURED BUG: this read appr._ebay, a field
@@ -1256,7 +1256,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                               specialty item since then regardless of real
                               comp data. */}
                           {appr.priceData && appr.priceData.isRealData && appr.priceData.count > 0 ? (
-                            <Text style={{color:C.green, fontSize:12, marginBottom:10}}>{appr.priceData.count} real eBay listings {"\u00B7"} ${appr.priceData.minPrice}-${appr.priceData.maxPrice} (avg ${Math.round(appr.priceData.avgPrice)})</Text>
+                            <Text style={{color:C.green, fontSize:12, marginBottom:10}}>{appr.priceData.count} recent sold prices {"\u00B7"} ${appr.priceData.minPrice}-${appr.priceData.maxPrice} (avg ${Math.round(appr.priceData.avgPrice)})</Text>
                           ) : null}
                           {appr.variantCheck ? (
                             <View style={s.apprSection}><Text style={[s.apprLabel,{color:C.green}]}>Variant check</Text><Text style={s.apprText}>{appr.variantCheck}</Text></View>

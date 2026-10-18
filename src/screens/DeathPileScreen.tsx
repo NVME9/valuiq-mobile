@@ -235,7 +235,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
                   </View>
                 ) : result.marketData?.medianSold > 0 ? (
                   <View style={s.marketRow}>
-                    <Text style={s.marketLbl}>🤖 AI estimate: ~${result.marketData.medianSold} (limited real sales data yet for this item)</Text>
+                    <Text style={s.marketLbl}>~${result.marketData.medianSold} (limited real sales data yet for this item)</Text>
                   </View>
                 ) : null}
               </View>
@@ -302,7 +302,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
                 {result.realPlatformClaim && (
                   <View style={{backgroundColor:C.surfaceHigh,borderRadius:10,padding:12,marginBottom:10,borderWidth:1,borderColor:C.green+"40"}}>
                     <Text style={{color:C.green,fontSize:14,fontWeight:"800"}}>
-                      {result.realPlatformClaim.pct}% of real {result.category || "similar"} sales sold on {result.realPlatformClaim.platform}
+                      {result.realPlatformClaim.pct}% of real {result.category || "similar"} sales sold online
                     </Text>
                     <Text style={{color:C.text3,fontSize:11,marginTop:2}}>
                       From {result.realPlatformClaim.n} real reported sales - not the AI take below

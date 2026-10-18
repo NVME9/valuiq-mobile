@@ -126,7 +126,7 @@ export default function HotNowScreen({ token, onNavigate, onBack }: Props) {
                     when it clears the majority floor server-side. */}
                 {c.realPlatformClaim && (
                   <Text style={[s.statLbl, { marginTop: 4, marginBottom: 4 }]}>
-                    {c.realPlatformClaim.pct}% sold on {c.realPlatformClaim.platform} ({c.realPlatformClaim.n} real sales)
+                    {c.realPlatformClaim.pct}% sold online ({c.realPlatformClaim.n} real sales)
                   </Text>
                 )}
                 <TouchableOpacity style={s.verifyBtn} onPress={() => ebaySearch(c.category)}>

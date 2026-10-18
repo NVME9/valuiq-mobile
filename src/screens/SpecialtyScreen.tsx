@@ -372,13 +372,13 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
       : {
           tier: "skip" as const,
           emoji: hasItemLevelSellEvidence ? "✅" : "🏷️",
-          label: hasItemLevelSellEvidence ? "REAL DATA" : "ESTIMATE",
+          label: hasItemLevelSellEvidence ? "REAL DATA" : "UNCONFIRMED",
           copy: hasItemLevelSellEvidence
             ? (Number(result.sellPrice) > 0
                 ? `Sells for about $${Math.round(Number(result.sellPrice))} (real data) — verdict needs your buy price.`
                 : "Enter what you'd pay to see your real profit and verdict.")
             : (Number(result.sellPrice) > 0
-                ? `Sells for about $${Math.round(Number(result.sellPrice))} (market estimate, not yet confirmed by real sales of this exact item) — verify before buying.`
+                ? `Sells for about $${Math.round(Number(result.sellPrice))} (not yet confirmed by real sales of this exact item) — verify before buying.`
                 : "Enter what you'd pay to see your real profit and verdict."),
           accent: hasItemLevelSellEvidence ? C.green : C.yellow,
           adjustedROI: 0,
@@ -476,12 +476,16 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
     // "Based on N real reseller outcomes" string a second time here, right
     // above it, was a duplicate in exactly that case.
     const dataPhraseShownInBanner = !suppressed && result.confirmedByMoat && !!result.priceData;
-    const dataPhrase = dataPhraseShownInBanner ? "Real sold data" : (result.agreementBadge || "Based on market estimate");
+    const dataPhrase = dataPhraseShownInBanner ? "Real sold data" : (result.agreementBadge || "Not enough matching sales yet");
     // The claim must match the number: maxBuy is now the price where this
     // clears a genuine ~$10 profit floor (lib/profitMath.ts's computeMaxBuy)
     // - same fix as ScannerScreen.tsx.
+    // maxBuy===0 (2026-10-19) - see ScannerScreen.tsx's identical comment:
+    // fees+shipping alone already exceed the conservative sell price.
     const maxBuyReasoning = maxBuy == null ? "" : (
-      enteredBp > 0
+      maxBuy === 0
+        ? `${dataPhrase}. Fees and shipping alone outweigh the typical resale price here - no buy price clears a real flip.`
+        : enteredBp > 0
         ? (enteredBp <= maxBuy
             ? `${dataPhrase}. You paid $${enteredBp} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
             : `${dataPhrase}. You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
@@ -557,7 +561,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
           dataTagColor={dataTagColor}
           secondaryStats={secondaryStats}
           skipDetail={skipDetail}
-          footNote={(!suppressed && !result.confirmedByMoat) ? "AI-estimated — verify before buying." : undefined}
+          footNote={(!suppressed && !result.confirmedByMoat) ? "Not yet confirmed — verify before buying." : undefined}
         />
 
         {/* "What resellers made" (Part 3B, 2026-10-06) - same shared
@@ -603,10 +607,10 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
                 {result.realPlatformClaim && (
                   <View style={{backgroundColor:C.surfaceHigh,borderRadius:10,padding:12,marginBottom:12,borderWidth:1,borderColor:C.green+"40"}}>
                     <Text style={{color:C.green,fontSize:15,fontWeight:"800"}}>
-                      {result.realPlatformClaim.pct}% sold on {result.realPlatformClaim.platform}
+                      {result.realPlatformClaim.pct}% of resellers sold this online
                     </Text>
                     <Text style={{color:C.text3,fontSize:11,marginTop:2}}>
-                      From {result.realPlatformClaim.n} real reported sales - not a fee estimate
+                      From {result.realPlatformClaim.n} real reported sales
                     </Text>
                   </View>
                 )}

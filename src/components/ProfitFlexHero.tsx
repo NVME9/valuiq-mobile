@@ -197,7 +197,13 @@ export default function ProfitFlexHero({
       {maxBuy != null && (
         <FlashHighlight flashSeq={flashSeq}>
           <View style={st.maxBuyBox}>
-            <Text style={st.maxBuyHeadline}>Max buy: {money(maxBuy)}</Text>
+            {/* NOT WORTH IT AT $0 (2026-10-19, MEASURED): a real $0 ceiling
+                (fees + shipping alone already exceed the conservative sell
+                price) must never render as a literal "Max buy: $0" - that
+                reads as "basically free, go ahead" when the honest answer
+                is the opposite. null stays reserved for "no price data at
+                all" (ai_only) - this is specifically maxBuy===0. */}
+            <Text style={st.maxBuyHeadline}>{maxBuy === 0 ? "Not worth it at these prices" : `Max buy: ${money(maxBuy)}`}</Text>
             {maxBuyReasoning ? <Text style={st.maxBuyReasoning}>{maxBuyReasoning}</Text> : null}
           </View>
         </FlashHighlight>

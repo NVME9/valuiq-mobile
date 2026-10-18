@@ -403,7 +403,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
               </TouchableOpacity>
             </View>
             <View style={{flexDirection:"row",gap:8}}>
-              {[["Max Pay","$"+(selectedItem.buyTarget||0),C.yellow],["Sell For","$"+(selectedItem.sellPrice||0),C.text1],[selectedItem.buyPrice?"Profit":"Est. Profit","$"+Math.round(selectedItem.profit||0),C.green]].map(([l,v,c])=>(
+              {[["Max Pay","$"+(selectedItem.buyTarget||0),C.yellow],["Sell For","$"+(selectedItem.sellPrice||0),C.text1],[selectedItem.buyPrice?"Profit":"Typical Profit","$"+Math.round(selectedItem.profit||0),C.green]].map(([l,v,c])=>(
                 <View key={l as string} style={s.detailStat}>
                   <Text style={s.detailStatLabel}>{l as string}</Text>
                   <Text style={[s.detailStatVal,{color:c as string}]}>{v as string}</Text>

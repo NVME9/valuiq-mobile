@@ -30,7 +30,9 @@ interface WinsStats { trueScans: number; trueBuyFinds: number; total: number; tr
 // was ever resolved (tier "ai_only" still carries a debug object - this is
 // about the FIELD being absent, not the tier).
 interface PriceBasisDebug {
-  tierUsed: "exact_item" | "item_moat" | "segment" | "ai_only";
+  // ALWAYS-ANSWER TIER 4 (2026-10-18): "comparable_range" added - see
+  // lib/priceBasis.ts (deal-ai-pro) for the full 5-tier cascade.
+  tierUsed: "exact_item" | "item_moat" | "segment" | "comparable_range" | "ai_only";
   conditionTier?: "new" | "used" | null;
   basisPrice: number | null;
   evidenceLine: string | null;
@@ -38,6 +40,7 @@ interface PriceBasisDebug {
   whyNotExactItem: string | null;
   whyNotItemMoat: string | null;
   whyNotSegment: string | null;
+  whyNotComparableRange?: string | null;
   exactItemMs: number | null;
   exactItemUnitsSold: number | null;
   exactItemListings: number | null;
@@ -51,6 +54,14 @@ interface PriceBasisDebug {
   canonicalKey?: string | null;
   canonicalKeyMethod?: string | null;
   canonicalKeyConfidence?: string | null;
+  // comparable_range's own identity scope (2026-10-19) - "title_tokens" >
+  // "brand_category" > "category", see lib/profitOracle.ts's
+  // queryComparableRange. Shown here so the owner can see WHICH identity
+  // key a given scan actually matched on.
+  comparableRangeConfidence?: "low" | "medium" | null;
+  comparableRangeBasisN?: number | null;
+  comparableRangeScope?: "title_tokens" | "brand_category" | "category" | null;
+  comparableRangeIdentityTokens?: string[] | null;
 }
 
 // barcodeDebug (optional, 2026-10-08): ScannerScreen's barcode fast path
@@ -122,6 +133,14 @@ interface TagPriceDebug {
   buyPriceSource: "user" | "tag" | null;
   category: string | null;
   brand: string | null;
+  // TWO-PASS TAG READ (2026-10-18) - both independent passes' own read, so
+  // the owner can see WHY a read was accepted or withheld, not just the
+  // final outcome. See deal-ai-pro's lib/lensPricing.ts readTagPriceTwoPass.
+  twoPass?: {
+    passA: { price: number | null; confidence: "high" | "low" | null; sourceText: string | null };
+    passB: { price: number | null; confidence: "high" | "low" | null; sourceText: string | null };
+    needsConfirmation: boolean;
+  } | null;
 }
 
 export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug, segmentDebug, parityMismatch, storeReviewDebug, deleteAccountDebug, tagPriceDebug }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null; segmentDebug?: SegmentDebug | null; parityMismatch?: string | null; storeReviewDebug?: StoreReviewDebug | null; deleteAccountDebug?: DeleteAccountDebug | null; tagPriceDebug?: TagPriceDebug | null }) {
@@ -159,6 +178,25 @@ export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, bar
               <Text style={styles.row}>
                 buyPriceSource: {tagPriceDebug.buyPriceSource || "null (nothing entered or detected)"}
               </Text>
+              {/* TWO-PASS TAG READ (2026-10-18): both independent passes
+                  (different models - Haiku + Sonnet, not just different
+                  wording - see readTagPriceTwoPass's own header for why
+                  same-model prompt variance alone wasn't independent
+                  enough) shown separately, so a withheld/disagreeing read
+                  is visibly explained, not just a silent "none". */}
+              {tagPriceDebug.twoPass && (
+                <>
+                  <Text style={styles.row}>
+                    Pass A: {tagPriceDebug.twoPass.passA.price != null ? `$${tagPriceDebug.twoPass.passA.price}` : "none"} [{tagPriceDebug.twoPass.passA.confidence ?? "?"}]{tagPriceDebug.twoPass.passA.sourceText ? ` — "${tagPriceDebug.twoPass.passA.sourceText}"` : ""}
+                  </Text>
+                  <Text style={styles.row}>
+                    Pass B: {tagPriceDebug.twoPass.passB.price != null ? `$${tagPriceDebug.twoPass.passB.price}` : "none"} [{tagPriceDebug.twoPass.passB.confidence ?? "?"}]{tagPriceDebug.twoPass.passB.sourceText ? ` — "${tagPriceDebug.twoPass.passB.sourceText}"` : ""}
+                  </Text>
+                  <Text style={styles.row}>
+                    {tagPriceDebug.twoPass.needsConfirmation ? "WITHHELD — passes disagreed or confidence was low, user must confirm" : "ACCEPTED — both passes agreed at high confidence"}
+                  </Text>
+                </>
+              )}
             </View>
           )}
           {priceBasisDebug && (
@@ -171,6 +209,19 @@ export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, bar
               <Text style={styles.row}>Exact-item eBay: {priceBasisDebug.exactItemUnitsSold ?? "?"} units / {priceBasisDebug.exactItemListings ?? "?"} listings / {priceBasisDebug.exactItemMs ?? "?"}ms{priceBasisDebug.whyNotExactItem ? ` — ${priceBasisDebug.whyNotExactItem}` : " — qualified"}</Text>
               <Text style={styles.row}>Item-moat: {priceBasisDebug.itemMoatConditionMatchedCount ?? "?"} condition-matched agreeing — {priceBasisDebug.whyNotItemMoat ? priceBasisDebug.whyNotItemMoat : "qualified"}</Text>
               <Text style={styles.row}>Segment: {priceBasisDebug.segmentConditionMatchedCount ?? "?"} condition-matched outcomes{priceBasisDebug.conditionTier === "new" ? ` (verified-New: ${priceBasisDebug.segmentConditionVerified ? "yes" : "no"})` : ""} — {priceBasisDebug.whyNotSegment ? priceBasisDebug.whyNotSegment : "qualified"}</Text>
+              {/* ALWAYS-ANSWER TIER 4 (2026-10-18/19): which identity key
+                  actually won - "title_tokens" (brand-independent product-
+                  line words, see this app's own queryComparableRange header
+                  for the Transformers barcode/photo bug this closes) >
+                  "brand_category" > "category" - plus the exact matched
+                  words, so the owner can see WHY two scans of the same
+                  physical item either converged or didn't. */}
+              <Text style={styles.row}>
+                Comparable range: {priceBasisDebug.comparableRangeScope ?? "?"} scope, {priceBasisDebug.comparableRangeBasisN ?? "?"} rows [{priceBasisDebug.comparableRangeConfidence ?? "?"} confidence] — {priceBasisDebug.whyNotComparableRange ? priceBasisDebug.whyNotComparableRange : "qualified"}
+              </Text>
+              {!!priceBasisDebug.comparableRangeIdentityTokens?.length && (
+                <Text style={styles.row}>Identity tokens matched: {priceBasisDebug.comparableRangeIdentityTokens.join(", ")}</Text>
+              )}
             </View>
           )}
           {segmentDebug && (

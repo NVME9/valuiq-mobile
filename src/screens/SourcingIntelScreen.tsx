@@ -111,12 +111,12 @@ export default function SourcingIntelScreen({ token, onBack }: Props) {
                 ) : m.medianSold != null ? (
                   <>
                     <View style={s.statGrid}>
-                      <View style={s.statBox}><Text style={s.statVal}>~${m.medianSold}</Text><Text style={s.statLbl}>AI estimate</Text></View>
+                      <View style={s.statBox}><Text style={s.statVal}>~${m.medianSold}</Text><Text style={s.statLbl}>Typical price</Text></View>
                     </View>
-                    <Text style={s.dataSrc}>🤖 AI estimate — limited real sales data yet for this item</Text>
+                    <Text style={s.dataSrc}>Limited real sales data yet for this item</Text>
                   </>
                 ) : (
-                  <Text style={s.line}>Not enough data yet to estimate this item's market. The analysis below still applies.</Text>
+                  <Text style={s.line}>Not enough data yet on this item's market. The analysis below still applies.</Text>
                 )}
               </View>
             )}

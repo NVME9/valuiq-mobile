@@ -16,6 +16,8 @@ import HeaderLogo from "../components/HeaderLogo";
 import ShareCard from "../components/ShareCard";
 import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan } from "../lib/api";
 import ApiDebugPanel from "../components/ApiDebugPanel";
+import ErrorBoundary from "../components/ErrorBoundary";
+import { deriveTagConfirmPending, confirmTagRead, editTagRead } from "../lib/tagConfirmState";
 import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notifications";
 import StagedProgress from "../components/StagedProgress";
 import * as Notifications from "expo-notifications";
@@ -525,7 +527,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         ? String(d.retailPriceRead)
         : ""
     );
-    setTagConfirmPending(Number(d.retailPriceRead) > 0 && !!d.retailPriceNeedsConfirmation);
+    setTagConfirmPending(deriveTagConfirmPending(d));
     setResultCondition(d.conditionAssessment || "");
     // SALE-CAPTURE MOAT: on a BUY, either schedule (if already allowed) or
     // surface the soft in-app ask. Never fire Apple's cold prompt directly.
@@ -859,9 +861,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // sell price, see above), not adjustedResaleValue directly, so the
     // ceiling this quotes is built from the exact same number the profit/
     // ROI/stat tile all use - never a different, unrounded figure.
-    const netAfterFeesAtCeiling = sellPriceForProfit * (1 - feeRate);
-    const roiCeilingBuy = netAfterFeesAtCeiling / (1 + ROI_BUY_MIN / 100);
-    const profitFloorBuy = netAfterFeesAtCeiling - PROFIT_JUDGMENT_FLOOR;
+    // SHIPPING-AWARE, FLOORED AT 0 (2026-10-19, MEASURED) - mirrors deal-
+    // ai-pro/lib/profitMath.ts's computeMaxBuy identical fix: this used to
+    // ignore shippingCost entirely (even though heroProfit, right above,
+    // already subtracts it) and clamp the floor to a fake minimum of $1 -
+    // caught live: Mainstays torches, "Pay up to $6" against a $13
+    // conservative sell price and $9 shipping actually nets -$3.73 at that
+    // buy price. shippingCost is the SAME value heroProfit already reads.
+    const netAfterFeesAndShippingAtCeiling = sellPriceForProfit * (1 - feeRate) - shippingCost;
+    const roiCeilingBuy = netAfterFeesAndShippingAtCeiling / (1 + ROI_BUY_MIN / 100);
+    const profitFloorBuy = netAfterFeesAndShippingAtCeiling - PROFIT_JUDGMENT_FLOOR;
     // AI-ONLY: NO MAX BUY (2026-10-09, MEASURED): sellPriceForProfit can
     // still be nonzero for tier "ai_only" - it falls back to the AI's own
     // raw anchor (adjustedResaleValue/result.resaleFromModel) whenever
@@ -873,8 +882,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // is the server's own tier for THIS basis price - null it out here
     // rather than threading a guard through ProfitFlexHero.
     const isAiOnly = result.priceBasisTier === "ai_only";
+    // FLOORED AT 0, NOT CLAMPED TO A FAKE $1 (2026-10-19) - 0 is a real,
+    // honest answer ("no price clears the bar"), not a sentinel. null
+    // stays reserved for "no price data at all" (ai_only) - ProfitFlexHero
+    // (below) tells these apart via maxBuy===0 vs maxBuy===null.
     const maxBuy = (!isAiOnly && sellPriceForProfit > 0)
-      ? Math.max(1, Math.floor(Math.min(roiCeilingBuy, profitFloorBuy)))
+      ? Math.max(0, Math.floor(Math.min(roiCeilingBuy, profitFloorBuy)))
       : null;
     const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
 
@@ -971,10 +984,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           // itself is real moat data; only the BUY/SKIP verdict is pending.
           tier: "estimate" as const,
           emoji: hasItemLevelSellEvidence ? "✅" : "🏷️",
-          label: hasItemLevelSellEvidence ? "REAL DATA" : "ESTIMATE",
+          label: hasItemLevelSellEvidence ? "REAL DATA" : "UNCONFIRMED",
           copy: hasItemLevelSellEvidence
             ? `Sells for about $${sellPriceForProfit} (real data from ${agreeingCountForCopy} resale outcomes) — verdict needs your buy price.`
-            : `Sells for about $${sellPriceForProfit} (market estimate, not yet confirmed by real sales of this exact item) — verify before buying at $${enteredBp}.`,
+            : `Sells for about $${sellPriceForProfit} (not yet confirmed by real sales of this exact item) — verify before buying at $${enteredBp}.`,
           accent: hasItemLevelSellEvidence ? C.green : C.yellow,
           adjustedROI: 0,
           daysUsed: 0,
@@ -993,7 +1006,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           // the sell price itself is unconfirmed.
           tier: "estimate" as const,
           emoji: hasItemLevelSellEvidence ? "✅" : "🏷️",
-          label: hasItemLevelSellEvidence ? "REAL DATA" : "ESTIMATE",
+          label: hasItemLevelSellEvidence ? "REAL DATA" : "UNCONFIRMED",
           // ONE RESALE REALITY (2026-09-17): the range clause only ever
           // appears in THIS branch (priced tiers' copy comes from
           // outcomeTier.ts's own strings, which never mention a range) -
@@ -1065,6 +1078,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       // so that effect can't independently drift from what's on screen.
       const headline: HeroVerdict = classifyHeroVerdictLocal({
         tier, buyPrice: enteredBp, netProfit: heroProfit, roi: heroRoi, sellThroughPct: heroSellThroughPct,
+        comparableRangeConfidence: result.comparableRangeConfidence ?? null,
       });
       finalHeadline = headline;
       // STORE REVIEW: real-data tier only (ai_only already headline:null
@@ -1222,8 +1236,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // the price where this clears the verdict's own BUY floor - so it's
     // honest to say what paying it actually gets you, and it stays honest
     // across a condition/price edit instead of quietly going stale.
+    // maxBuy===0 (2026-10-19): fees + shipping alone already exceed the
+    // conservative sell price - no entered price, however small, clears the
+    // bar, so the enteredBp>0 branches below would otherwise claim a $1-$2
+    // buy is "under the ceiling" when it genuinely isn't (the ceiling IS
+    // zero). One honest line for this case, same reasoning regardless of
+    // what (if anything) was entered.
     const maxBuyReasoning = maxBuy == null ? "" : (
-      enteredBp > 0
+      maxBuy === 0
+        ? `${maxBuyPrefix}Fees and shipping alone outweigh the typical resale price here - no buy price clears a real flip.`
+        : enteredBp > 0
         ? (enteredBp <= maxBuy
             ? `${maxBuyPrefix}You paid $${enteredBp} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
             : `${maxBuyPrefix}You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
@@ -1252,7 +1274,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // multi-paragraph "not yet confirmed by real sales... verify before
     // buying" / "AI-estimated resale range... not yet confirmed" copy is
     // gone from outcome.copy and the range banner below).
-    const footNote = result.confirmedByMoat ? undefined : "AI-estimated — verify before buying.";
+    const footNote = result.confirmedByMoat ? undefined : "Not yet confirmed — verify before buying.";
     // sell price reads sellPriceForProfit (condition-adjusted), NOT
     // result.sellPrice directly - it sits right next to ROI in this same
     // row, and ROI is already computed off the adjusted number (see
@@ -1337,6 +1359,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   already withholds this number from its own dealReasoning
                   while the flag is true, so nothing downstream acts on it
                   until one of these two buttons is tapped. */}
+              {/* ERROR BOUNDARY (2026-10-19): this block is this session's
+                  newest/most-edited piece of the result screen (two-pass
+                  tag-read UI, live price recompute) - a crash here must not
+                  take down the whole result screen, which still has a real
+                  photo/verdict/profit already rendered above it. Falls back
+                  to a plain message; the rest of the screen stays usable. */}
+              <ErrorBoundary fallbackMessage="Couldn't show the price field — the rest of this scan is still shown below.">
               {tagConfirmPending ? (
                 <View style={s.tagConfirmCard}>
                   <Text style={s.tagConfirmTitle}>We read ${result.retailPriceRead} off the tag — correct?</Text>
@@ -1347,8 +1376,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     <TouchableOpacity
                       style={s.tagConfirmBtn}
                       onPress={() => {
-                        setBuyPrice(String(result.retailPriceRead));
-                        setTagConfirmPending(false);
+                        const next = confirmTagRead(Number(result.retailPriceRead));
+                        setBuyPrice(next.buyPrice);
+                        setTagConfirmPending(next.tagConfirmPending);
                       }}
                     >
                       <Text style={s.tagConfirmBtnText}>Confirm ${result.retailPriceRead}</Text>
@@ -1356,8 +1386,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     <TouchableOpacity
                       style={s.tagEditBtn}
                       onPress={() => {
-                        setBuyPrice("");
-                        setTagConfirmPending(false);
+                        const next = editTagRead();
+                        setBuyPrice(next.buyPrice);
+                        setTagConfirmPending(next.tagConfirmPending);
                         setTimeout(() => priceInputRef.current?.focus(), 50);
                       }}
                     >
@@ -1389,6 +1420,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   </Text>
                 </>
               )}
+              </ErrorBoundary>
 
               {/* THE hero: verdict + profit + max-buy (with reasoning) + key
                   stats, reconciled into one card instead of a separate
@@ -1419,7 +1451,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   // "● REAL DATA") was the Under Armour polo's exact
                   // contradiction - "estimated" now only applies when the
                   // price genuinely isn't confirmed.
-                  profitLabel={enteredBp > 0 ? profitLabel : (result.confirmedByMoat ? "sell price" : "estimated sell price")}
+                  profitLabel={enteredBp > 0 ? profitLabel : (result.confirmedByMoat ? "sell price" : "typical sell price")}
                   maxBuy={maxBuy}
                   maxBuyReasoning={maxBuyReasoning}
                   dataTag={dataTag}
@@ -1473,6 +1505,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   buyPriceSource: result.buyPriceSource ?? null,
                   category: result.category ?? null,
                   brand: result.brand ?? null,
+                  twoPass: result.tagReadDebug ?? null,
                 }}
                 segmentDebug={result.segmentOutcomes ? {
                   segmentLabel: result.segmentOutcomes.segmentLabel,
@@ -1509,7 +1542,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     {/* ONE CAVEAT MAX: the "not yet confirmed" qualifier
                         lives once, in ProfitFlexHero's footNote above - not
                         repeated here. */}
-                    <Text style={[s.rangeBannerSub, { flex: 1 }]}>{`At $${dealCompareValue}, AI-estimated range is $${adjustedResaleLow}-$${adjustedResaleHigh}.`}</Text>
+                    <Text style={[s.rangeBannerSub, { flex: 1 }]}>{`At $${dealCompareValue}, typical range is $${adjustedResaleLow}-$${adjustedResaleHigh}.`}</Text>
                   </FlashHighlight>
                 </View>
               ) : null}
@@ -1708,10 +1741,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                       {result.realPlatformClaim && (
                         <View style={{backgroundColor:C.surfaceHigh,borderRadius:10,padding:12,marginBottom:12,borderWidth:1,borderColor:C.green+"40"}}>
                           <Text style={{color:C.green,fontSize:15,fontWeight:"800"}}>
-                            {result.realPlatformClaim.pct}% sold on {result.realPlatformClaim.platform}
+                            {result.realPlatformClaim.pct}% of resellers sold this online
                           </Text>
                           <Text style={{color:C.text3,fontSize:11,marginTop:2}}>
-                            From {result.realPlatformClaim.n} real reported sales - not a fee estimate
+                            From {result.realPlatformClaim.n} real reported sales
                           </Text>
                         </View>
                       )}
