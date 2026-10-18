@@ -51,6 +51,10 @@ interface PriceBasisDebug {
   segmentSoldSampleTooThin?: boolean;
   estShippingCost?: number | null;
   shippingSizeClass?: string | null;
+  // review fix #1 (2026-10-19): "keyword" = a real size-word match fired;
+  // "category_default" = no keyword, but this category has a real-data
+  // median class; "global_default" = neither (flat medium, now rare).
+  shippingSizeClassSource?: "keyword" | "category_default" | "global_default" | null;
   canonicalKey?: string | null;
   canonicalKeyMethod?: string | null;
   canonicalKeyConfidence?: string | null;
@@ -205,7 +209,7 @@ export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, bar
               {!!priceBasisDebug.canonicalKey && <Text style={styles.row}>Canonical key: {priceBasisDebug.canonicalKey}  (via {priceBasisDebug.canonicalKeyMethod}, confidence: {priceBasisDebug.canonicalKeyConfidence})</Text>}
               {!!priceBasisDebug.evidenceLine && <Text style={styles.row}>Evidence: {priceBasisDebug.evidenceLine}</Text>}
               {!!priceBasisDebug.contextLine && <Text style={styles.row}>Context (not basis): {priceBasisDebug.contextLine}</Text>}
-              {priceBasisDebug.estShippingCost != null && <Text style={styles.row}>Est. shipping: -${priceBasisDebug.estShippingCost} ({priceBasisDebug.shippingSizeClass}) - already subtracted from profit/ROI above</Text>}
+              {priceBasisDebug.estShippingCost != null && <Text style={styles.row}>Est. shipping: -${priceBasisDebug.estShippingCost} ({priceBasisDebug.shippingSizeClass}, {priceBasisDebug.shippingSizeClassSource === "keyword" ? "inferred from item name" : priceBasisDebug.shippingSizeClassSource === "category_default" ? "category default" : "global default"}) - already subtracted from profit/ROI above</Text>}
               <Text style={styles.row}>Exact-item eBay: {priceBasisDebug.exactItemUnitsSold ?? "?"} units / {priceBasisDebug.exactItemListings ?? "?"} listings / {priceBasisDebug.exactItemMs ?? "?"}ms{priceBasisDebug.whyNotExactItem ? ` — ${priceBasisDebug.whyNotExactItem}` : " — qualified"}</Text>
               <Text style={styles.row}>Item-moat: {priceBasisDebug.itemMoatConditionMatchedCount ?? "?"} condition-matched agreeing — {priceBasisDebug.whyNotItemMoat ? priceBasisDebug.whyNotItemMoat : "qualified"}</Text>
               <Text style={styles.row}>Segment: {priceBasisDebug.segmentConditionMatchedCount ?? "?"} condition-matched outcomes{priceBasisDebug.conditionTier === "new" ? ` (verified-New: ${priceBasisDebug.segmentConditionVerified ? "yes" : "no"})` : ""} — {priceBasisDebug.whyNotSegment ? priceBasisDebug.whyNotSegment : "qualified"}</Text>
