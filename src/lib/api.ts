@@ -1125,3 +1125,20 @@ export async function shareWin(
     return false;
   }
 }
+
+// MEASUREMENT (2026-10-21, Max Buy paywall funnel) - fire-and-forget, same
+// "never affects the real feature" contract every other best-effort logger
+// in this app follows (see recordSaleOutcome's own fetch). token may be
+// empty for a genuinely anonymous caller - /api/events treats that as
+// user_id:null rather than rejecting the call.
+export async function logEvent(token: string, event: "lock_tap" | "paywall_view" | "first_scan", props: Record<string, any> = {}): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/api/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, event, props }),
+    });
+  } catch {
+    // best-effort only
+  }
+}

@@ -32,6 +32,14 @@ interface ProfitFlexHeroProps {
   profitLabel?: string;         // "actual profit" | "projected profit"
   maxBuy?: number | null;
   maxBuyReasoning?: string;      // ALWAYS shown alongside max-buy, self-explaining
+  // PLAN GATING (2026-10-21): true when the server's `locked` array
+  // included "maxBuy" for this scan (free plan - app/api/lens/route.ts's
+  // gateResponseForPlan). Replaces BOTH the hero profit figure and the
+  // max-buy box with one tappable locked row - the caller (ScannerScreen)
+  // already skipped computing a real heroProfit/maxBuy in this case, so
+  // this flag only controls what renders, not a second data gate.
+  maxBuyLocked?: boolean;
+  onUpgradePress?: () => void;
   dataTag?: string;               // "● REAL DATA" / "Based on N listings" / "ESTIMATE"
   dataTagColor?: string;
   secondaryStats?: SecondaryStat[]; // ROI, sell-time
@@ -74,7 +82,7 @@ function money(n: number): string {
 
 export default function ProfitFlexHero({
   outcome, itemName, categoryLine, photoBase64, onEdit, isSkip,
-  heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, dataTag, dataTagColor, secondaryStats = [], footNote,
+  heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, maxBuyLocked = false, onUpgradePress, dataTag, dataTagColor, secondaryStats = [], footNote,
   skipDetail, flashSeq = 0,
 }: ProfitFlexHeroProps) {
   // MEASURED BUG: a long AI-generated item name ("American Flag with Fish
@@ -172,10 +180,17 @@ export default function ProfitFlexHero({
         </>
       ) : (
         <>
-          <FlashHighlight flashSeq={flashSeq}>
-            <Text style={[st.hero, { color: outcome.accent }]} numberOfLines={1} adjustsFontSizeToFit>{heroText}</Text>
-          </FlashHighlight>
-          <Text style={st.heroLabel}>{profitLabel}</Text>
+          {/* PLAN GATING: the hero $ figure IS "profit at this buy price" -
+              one of the three locked concepts (maxBuy/tagVerdict/
+              profitAtTag) - so it's skipped here, not just the max-buy box
+              below, whenever the server locked this scan. The verdict
+              badge/copy above and the range/stats below are untouched. */}
+          {!maxBuyLocked && (
+            <FlashHighlight flashSeq={flashSeq}>
+              <Text style={[st.hero, { color: outcome.accent }]} numberOfLines={1} adjustsFontSizeToFit>{heroText}</Text>
+            </FlashHighlight>
+          )}
+          {!maxBuyLocked && <Text style={st.heroLabel}>{profitLabel}</Text>}
           <Text style={[st.copy, { color: outcome.accent }]}>{outcome.copy}</Text>
 
           {secondaryStats.length > 0 && (
@@ -193,8 +208,16 @@ export default function ProfitFlexHero({
 
       {/* Max-buy: ALWAYS shown, in both BUY and SKIP layouts, and always
           paired with the reasoning that explains it - never a bare number
-          asking for trust. */}
-      {maxBuy != null && (
+          asking for trust. PLAN GATING: maxBuyLocked renders one tappable
+          locked row instead - caller passes maxBuy={null} in this case, so
+          this is a separate branch, not a fallback for "no data". */}
+      {maxBuyLocked ? (
+        <TouchableOpacity onPress={onUpgradePress} activeOpacity={0.8}>
+          <View style={st.maxBuyBox}>
+            <Text style={st.maxBuyHeadline}>Pay up to $•• 🔒  See your Max buy</Text>
+          </View>
+        </TouchableOpacity>
+      ) : maxBuy != null && (
         <FlashHighlight flashSeq={flashSeq}>
           <View style={st.maxBuyBox}>
             {/* NOT WORTH IT AT $0 (2026-10-19, MEASURED): a real $0 ceiling

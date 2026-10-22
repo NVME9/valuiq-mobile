@@ -1,14 +1,21 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, Alert, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
-import { API_BASE } from "../lib/api";
+import { API_BASE, logEvent } from "../lib/api";
 import { configurePurchases, getOfferings, purchasePackage, restorePurchases, refreshEntitlements } from "../lib/purchases";
 
 interface Props {
   token: string; plan: string; userId?: string;
   onNavigate: (s: string) => void; onBack?: () => void;
+  // MEASUREMENT (2026-10-21) - what sent the viewer here ("lock_tap",
+  // "scans_exhausted", ...). Optional: this screen is reachable from many
+  // call sites across the app, most of which don't pass navData through
+  // to a screen prop today - wiring every one of those through the root
+  // navigator is a separate, larger change than this feature touches.
+  // Falls back to "unknown" rather than silently not logging at all.
+  trigger?: string;
 }
 
 const PLANS = [
@@ -80,10 +87,15 @@ const PLANS = [
     cta:"Become a Founder" },
 ];
 
-export default function UpgradeScreen({ token, plan, userId, onNavigate, onBack }: Props) {
+export default function UpgradeScreen({ token, plan, userId, onNavigate, onBack, trigger }: Props) {
   const [billing, setBilling] = useState<"monthly"|"annual">("monthly");
   const [openFaq, setOpenFaq] = useState<number|null>(null);
   const [loading, setLoading] = useState<string|null>(null);
+
+  // MEASUREMENT (2026-10-21) - once per mount, not per render.
+  useEffect(() => {
+    logEvent(token, "paywall_view", { trigger: trigger || "unknown" });
+  }, []);
 
   const isPaid = plan !== "free";
   const isCurrent = (id: string) => plan === id;
@@ -157,6 +169,10 @@ export default function UpgradeScreen({ token, plan, userId, onNavigate, onBack 
       </View>
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+        {/* PLAN GATING (2026-10-21): the one concrete, specific reason a
+            free user who just tapped a locked "Max buy" row ends up here -
+            see ScannerScreen.tsx/ProfitFlexHero.tsx's maxBuyLocked row. */}
+        <Text style={s.maxBuyNote}>Paid plans show your Max buy on every item.</Text>
         <Text style={s.headline}>Upgrade ValuIQ</Text>
         <Text style={s.sub}>No contracts. Cancel anytime. Not happy? Email team@getvaluiq.com within 7 days.</Text>
 
@@ -324,6 +340,7 @@ const s = StyleSheet.create({
   backTxt:         { color:C.text1, fontSize:15, fontWeight:"700" as any },
   navTitle:        { color:C.text1, fontSize:16, fontWeight:"800" as any },
   scroll:          { padding:16, paddingBottom:80 },
+  maxBuyNote:      { color:C.green, fontSize:12, fontWeight:"700" as any, marginBottom:10 },
   headline:        { color:C.text1, fontSize:24, fontWeight:"900" as any, letterSpacing:-0.5, marginBottom:6 },
   sub:             { color:C.text3, fontSize:13, lineHeight:18, marginBottom:20 },
 

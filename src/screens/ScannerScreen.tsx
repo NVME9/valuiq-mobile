@@ -14,7 +14,7 @@ import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareCard from "../components/ShareCard";
-import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan } from "../lib/api";
+import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, logEvent } from "../lib/api";
 import ApiDebugPanel from "../components/ApiDebugPanel";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { deriveTagConfirmPending, confirmTagRead, editTagRead } from "../lib/tagConfirmState";
@@ -828,6 +828,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // verdict box still renders its own sell-through/sample-size content
     // (see the crowd-box render further down), it just no longer overrides
     // the price everything else on this card is computed from.
+    // PLAN GATING (2026-10-21): the server already sent buyTarget/
+    // buyTargetState/netProfit/roi/detectedTagPrice/buyPriceSource as null
+    // for a free plan (app/api/lens/route.ts's gateResponseForPlan) - this
+    // flag is what stops the LOCAL recompute below from quietly rebuilding
+    // the exact same numbers client-side from ungated inputs (sellPrice/
+    // feeRate/shippingCost are never gated, so this recompute would
+    // otherwise defeat the server-side gate entirely for any free user who
+    // typed a price).
+    const locked: string[] = result.locked || [];
+    const maxBuyLocked = locked.includes("maxBuy");
+
     const sellPriceForProfit = Math.round(adjustedResaleValue || Number(result.sellPrice) || 0);
     // LOCAL RECOMPUTE (2026-09-10, items 8/9): mirrors lib/profitMath.ts's
     // computeProfit exactly - fees = round(sp*feeRate*100)/100, netProfit =
@@ -838,7 +849,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // existed AT SCAN TIME, almost always none now that price lives here
     // instead of before the scan.
     const localFees = Math.round(sellPriceForProfit * feeRate * 100) / 100;
-    const heroProfit = enteredBp > 0 ? Math.round((sellPriceForProfit - localFees - enteredBp - shippingCost) * 100) / 100 : 0;
+    const heroProfit = (!maxBuyLocked && enteredBp > 0) ? Math.round((sellPriceForProfit - localFees - enteredBp - shippingCost) * 100) / 100 : 0;
 
     // MAX-BUY LOCAL RECOMPUTE (2026-09-10, Fix 1): mirrors deal-ai-pro/
     // lib/profitMath.ts's computeMaxBuy, but driven by sellPriceForProfit
@@ -886,7 +897,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // honest answer ("no price clears the bar"), not a sentinel. null
     // stays reserved for "no price data at all" (ai_only) - ProfitFlexHero
     // (below) tells these apart via maxBuy===0 vs maxBuy===null.
-    const maxBuy = (!isAiOnly && sellPriceForProfit > 0)
+    const maxBuy = (!maxBuyLocked && !isAiOnly && sellPriceForProfit > 0)
       ? Math.max(0, Math.floor(Math.min(roiCeilingBuy, profitFloorBuy)))
       : null;
     const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
@@ -898,7 +909,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // = 260%, instead of the real $13 / $1 entered = 1300%) and fed the
     // wrong number into the tier classifier - that's what made a 1300%-ROI
     // flip misread as "not worth the trip."
-    const actualCostBasis = enteredBp > 0 ? enteredBp : (maxBuy || 0);
+    const actualCostBasis = maxBuyLocked ? 0 : (enteredBp > 0 ? enteredBp : (maxBuy || 0));
     const heroRoi = actualCostBasis > 0
       ? Math.round((heroProfit / actualCostBasis) * 100)
       : 0;
@@ -1242,7 +1253,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // buy is "under the ceiling" when it genuinely isn't (the ceiling IS
     // zero). One honest line for this case, same reasoning regardless of
     // what (if anything) was entered.
-    const maxBuyReasoning = maxBuy == null ? "" : (
+    const maxBuyReasoning = (maxBuyLocked || maxBuy == null) ? "" : (
       maxBuy === 0
         ? `${maxBuyPrefix}Fees and shipping alone outweigh the typical resale price here - no buy price clears a real flip.`
         : enteredBp > 0
@@ -1283,7 +1294,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // elsewhere - a condition edit must move both together.
     const secondaryStats = [
       { label: "sell price", value: sellPriceForProfit > 0 ? "$" + sellPriceForProfit : "—" },
-      { label: "ROI", value: heroRoi ? heroRoi + "%" : "—" },
+      { label: "ROI", value: maxBuyLocked ? "🔒" : (heroRoi ? heroRoi + "%" : "—") },
       { label: "to sell", value: oracleDaysTxt },
     ];
     const skipDetail = isSkip ? (result.reasoning || null) : null;
@@ -1454,6 +1465,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   profitLabel={enteredBp > 0 ? profitLabel : (result.confirmedByMoat ? "sell price" : "typical sell price")}
                   maxBuy={maxBuy}
                   maxBuyReasoning={maxBuyReasoning}
+                  maxBuyLocked={maxBuyLocked}
+                  onUpgradePress={() => {
+                    logEvent(token, "lock_tap", { item: "maxBuy" });
+                    onNavigate("upgrade", { trigger: "lock_tap" });
+                  }}
                   dataTag={dataTag}
                   dataTagColor={dataTagColor}
                   secondaryStats={secondaryStats}
@@ -1918,7 +1934,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   <Text style={{fontSize:20,marginBottom:6}}></Text>
                   <Text style={{color:C.green,fontSize:14,fontWeight:"900",marginBottom:4}}>Unlock Full Intelligence</Text>
                   <Text style={{color:C.text3,fontSize:12,textAlign:"center",lineHeight:18,marginBottom:10}}>
-                    Platform comparison, listing title, risk score, hot tips, and share card are locked on Free. Upgrade to see everything - one good flip pays for 6 months.
+                    Max buy is on paid plans. Upgrade to see everything - one good flip pays for 6 months.
                   </Text>
                   <View style={{backgroundColor:C.green,borderRadius:8,paddingHorizontal:20,paddingVertical:8}}>
                     <Text style={{color:C.greenDark,fontWeight:"900",fontSize:13}}>Upgrade from $14.99/mo {'>'}</Text>
