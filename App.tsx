@@ -44,6 +44,7 @@ import OnboardingScreen from "./src/screens/OnboardingScreen";
 import AIConsentScreen from "./src/screens/AIConsentScreen";
 import AICoachScreen from "./src/screens/AICoachScreen";
 import HistoryScreen from "./src/screens/HistoryScreen";
+import ScanConfirmScreen from "./src/screens/ScanConfirmScreen";
 import FAQScreen from "./src/screens/FAQScreen";
 import AdminScreen from "./src/screens/AdminScreen";
 // SPIKE (branch spike/ebay-sold-fetch, 2026-10-07) - owner-only debug
@@ -65,7 +66,7 @@ export type Screen =
   "scanner"|"dashboard"|"thrift-run"|
   "specialty"|"manifest"|"deathpile"|"community"|
   "profile"|"relist"|"hot-now"|"arbitrage"|"upgrade"|
-  "bundle"|"alerts"|"leaderboard"|"inventory"|"profit-tracker"|"deal-hunter"|"ai-coach"|"history"|"faq"|"admin"|"titan"|"import-sales"|"sold-data-debug";
+  "bundle"|"alerts"|"leaderboard"|"inventory"|"profit-tracker"|"deal-hunter"|"ai-coach"|"history"|"faq"|"admin"|"titan"|"import-sales"|"sold-data-debug"|"scan-confirm";
 
 const { height } = Dimensions.get("window");
 
@@ -731,7 +732,7 @@ export default function App() {
     }
   }
 
-  const props = { token, plan, planLoaded, userId: session?.user?.id, scansLeft, setScansLeft, onNavigate:navigate, onBack:goBack, onLogout:handleLogout, navData, firstScanNudge, onDismissFirstScanNudge: dismissFirstScanNudge, previewNewUser, onTogglePreviewNewUser: togglePreviewNewUser };
+  const props = { token, refreshToken: session?.refresh_token || "", plan, planLoaded, userId: session?.user?.id, scansLeft, setScansLeft, onNavigate:navigate, onBack:goBack, onLogout:handleLogout, navData, firstScanNudge, onDismissFirstScanNudge: dismissFirstScanNudge, previewNewUser, onTogglePreviewNewUser: togglePreviewNewUser };
 
   const SCREENS: Record<Screen,React.ReactNode> = {
     "scanner":      <ScannerScreen {...props} />,
@@ -764,10 +765,11 @@ export default function App() {
     "ai-coach":     <AICoachScreen {...props} />,
     "profit-tracker": <ProfitTrackerScreen {...props} />,
     "history":      <HistoryScreen {...props} />,
+    "scan-confirm": <ScanConfirmScreen {...props} />,
     "faq":          <FAQScreen {...props} />,
     "admin":        <AdminScreen {...props} />,
     "sold-data-debug": screen === "sold-data-debug" ? renderSoldDataDebugScreen({ token, onBack: goBack }) : null,
-    "titan":     hasProAccess(plan) ? <BusinessApp token={token} plan={plan} userEmail={session?.user?.email || ""} scansLeft={scansLeft} setScansLeft={setScansLeft} onLogout={handleLogout} /> : <UpgradeScreen {...props} />,
+    "titan":     hasProAccess(plan) ? <BusinessApp token={token} refreshToken={session?.refresh_token || ""} plan={plan} userEmail={session?.user?.email || ""} scansLeft={scansLeft} setScansLeft={setScansLeft} onLogout={handleLogout} /> : <UpgradeScreen {...props} />,
   };
 
   const TAB_SCREENS: Screen[] = ["scanner","dashboard","history","community","profile"];

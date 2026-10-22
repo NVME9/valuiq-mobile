@@ -25,9 +25,11 @@ import FAQScreen from "../FAQScreen";
 import AICoachScreen from "../AICoachScreen";
 import InventoryScreen from "../InventoryScreen";
 import CommunityScreen from "../CommunityScreen";
+import ScanConfirmScreen from "../ScanConfirmScreen";
 
 interface Props {
   token: string;
+  refreshToken: string;
   plan: string;
   userEmail: string;
   scansLeft: number | null;
@@ -35,12 +37,12 @@ interface Props {
   onLogout: () => void;
 }
 
-type BizScreen = "biz-dashboard" | "manifest-beast" | "reseller-cfo" | "tax" | 
+type BizScreen = "biz-dashboard" | "manifest-beast" | "reseller-cfo" | "tax" |
   "scanner"|"dashboard"|"price-battle"|"thrift-run"|"deathpile"|
   "arbitrage"|"specialty"|"profile"|
-  "history"|"faq"|"ai-coach"|"inventory"|"community"|"cashflow"|"viral-content"|"bundle"|"sourcing-trip";
+  "history"|"faq"|"ai-coach"|"inventory"|"community"|"cashflow"|"viral-content"|"bundle"|"sourcing-trip"|"scan-confirm";
 
-export default function BusinessApp({ token, plan, userEmail, scansLeft, setScansLeft, onLogout }: Props) {
+export default function BusinessApp({ token, refreshToken, plan, userEmail, scansLeft, setScansLeft, onLogout }: Props) {
   const [screen, setScreen]   = useState<BizScreen>("biz-dashboard");
   const [history, setHistory] = useState<BizScreen[]>([]);
   const [mode, setMode]       = useState<"business"|"tools">("business");
@@ -57,7 +59,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
   }
 
   const consumerProps = {
-  token, plan, scansLeft, setScansLeft,
+  token, refreshToken, plan, scansLeft, setScansLeft,
     onNavigate: navigate, onBack: goBack, onLogout };
 
   const isBizScreen = screen === "biz-dashboard" || screen === "manifest-beast" || screen === "reseller-cfo" || screen === "tax";
@@ -101,6 +103,7 @@ export default function BusinessApp({ token, plan, userEmail, scansLeft, setScan
       {screen === "specialty"    && <SpecialtyScreen  {...consumerProps}/>}
       {screen === "profile"      && <ProfileScreen    {...consumerProps}/>}
       {screen === "history"      && <HistoryScreen    {...consumerProps}/>}
+      {screen === "scan-confirm" && <ScanConfirmScreen {...consumerProps}/>}
       {screen === "faq"          && <FAQScreen        {...consumerProps}/>}
       {screen === "ai-coach"     && <AICoachScreen    {...consumerProps}/>}
       {screen === "cashflow"      && <CashFlowScreen     {...consumerProps}/>}

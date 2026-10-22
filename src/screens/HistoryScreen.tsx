@@ -18,7 +18,6 @@ import { toPendingScan } from "../lib/saleCapture";
 import { fetchFlexStat, cacheFlexStat, readCachedFlexStat, concreteLine, FlexStat } from "../lib/flexReveal";
 import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty, getWinsSummary, peekProfileData, getScanHistory, peekScanHistory, invalidateScanHistoryCache, getThriftRuns, peekThriftRuns, invalidateThriftRunsCache, emailFromToken } from "../lib/api";
 import { classifyOutcome, OutcomeTierInfo } from "../lib/outcomeTier";
-import { CONDITION_OPTIONS, CONDITION_TO_DB } from "../lib/condition";
 import ApiDebugPanel from "../components/ApiDebugPanel";
 
 // Mirrors ProfileScreen.tsx's OWNER_EMAILS - gates the owner-only API
@@ -195,6 +194,9 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   const [expanded, setExpanded]     = useState<string|null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected]     = useState<Record<string, boolean>>({});
+  // Scans-tab Edit (HistoryScreen Props.onNavigate("scan-confirm", {scan}))
+  // no longer uses editingId at all - see ScanConfirmScreen.tsx. Thrift and
+  // Specialty's own separate inline editors still do.
   const [editingId, setEditingId]   = useState<string|null>(null);
   // OWNER-ONLY DEBUG (2026-10-22) - no console logs, on-screen only (see
   // the nested-touchable fix comment at the scans card render for why this
@@ -206,10 +208,6 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   const [editCategory, setEditCat]  = useState("");
   const [editDesc, setEditDesc]     = useState("");
   const [editPrice, setEditPrice]   = useState("");
-  // Chip VALUE from lib/condition.ts (e.g. "used-good"), blank = untouched -
-  // see openEditor/doRerun below for the deliberate "don't send what the
-  // user didn't actually pick" handling, same rule SaleCaptureCard follows.
-  const [editCondition, setEditCondition] = useState("");
   const [editThriftItem, setEditThriftItem] = useState<{runId:string; itemId:string}|null>(null);
   const [editPhotos, setEditPhotos] = useState<string[]>([]);
   const [rerunning, setRerunning]   = useState(false);
@@ -287,19 +285,11 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
     setEditCat(scan.category || "");
     setEditDesc("");
     setEditPrice(scan.buy_price ? String(scan.buy_price) : "");
-    // DELIBERATE BLANK DEFAULT (same rule as SaleCaptureCard's condition/
-    // platform chips) - never pre-select a chip from the scan's existing
-    // `condition`, which is usually just identify's own scan-time guess,
-    // not a real confirmed condition. Leaving it untouched means doRerun
-    // below correctly sends nothing and never overwrites that guess with
-    // itself disguised as a user-entered value.
-    setEditCondition("");
     setEditPhotos([]);
   }
 
   function closeEditor() {
     setEditingId(null);
-    setEditCondition("");
     setEditPhotos([]);
   }
 
@@ -326,102 +316,6 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
       { text: "Choose from Library", onPress: () => pickFrom("library") },
       { text: "Cancel", style: "cancel" },
     ]);
-  }
-
-  async function doRerun(scan: any) {
-    if (!editName.trim()) {
-      if (isOwner) setEditDebug({ id: scan.id, msg: "bailed: no item name entered" });
-      Alert.alert("Name required", "Enter an item name to re-run.");
-      return;
-    }
-    setRerunning(true);
-    if (isOwner) setEditDebug({ id: scan.id, msg: "rerunScan() called" });
-    try {
-      // HISTORY RERUN FIX (2026-09-14): the item's already-known resale
-      // value, carried forward so a price-only edit can't silently re-derive
-      // a different one (see rerunScan's storedResale doc comment / lens/
-      // route.ts's pinnedResale). specialty_data is this same scan's own
-      // last-saved full API response - its priceRange/noFlipMargin are the
-      // same fields a fresh scan would have produced, just already known.
-      let priorFull: any = null;
-      try { priorFull = scan.specialty_data ? JSON.parse(scan.specialty_data) : null; } catch {}
-      const storedSellPrice = Number(scan.sell_price) || 0;
-      const data = await rerunScan(token, {
-        itemName: editName.trim(),
-        brand: editBrand.trim() || "Unknown",
-        category: editCategory.trim() || "Other",
-        condition: scan.condition || "Good",
-        buyPrice: parseFloat(editPrice) || scan.buy_price || 0,
-        extraDescription: editDesc.trim() || undefined,
-        newPhotosBase64: editPhotos.length > 0 ? editPhotos : undefined,
-        storedResale: storedSellPrice > 0 ? {
-          value: storedSellPrice,
-          low: priorFull?.priceRange?.low ?? null,
-          high: priorFull?.priceRange?.high ?? null,
-          noFlipMargin: !!priorFull?.noFlipMargin,
-        } : undefined,
-      });
-      if (isOwner) setEditDebug({ id: scan.id, msg: `rerunScan() returned (success=${!!data?.success}, locked=${JSON.stringify(data?.locked || null)})` });
-      if (data && (data.success || data.sellPrice != null)) {
-        // MEASURED BUG: this updated the stat columns (sell_price/net_profit/
-        // roi) but never re-saved specialty_data - the JSON blob the card's
-        // "Analysis" prose and platform breakdown are read from. That left
-        // the prose describing the OLD scan's numbers while the stat row
-        // showed the re-run's new ones, an internal contradiction on the
-        // same card. `data` here IS the full fresh scanResult (same shape
-        // lens/route.ts saves at scan time) - re-saving it keeps the prose
-        // in sync with the stats it's describing.
-        //
-        // PLAN GATING (2026-10-22): data.locked (app/api/lens/route.ts's
-        // gateResponseForPlan) means THIS rerun came back for a free-plan
-        // account - buyTarget/netProfit/roi are null ON PURPOSE, not "no
-        // change from the fresh call." The old `?? scan.buy_target`
-        // fallback would otherwise silently keep whatever real number this
-        // row had from BEFORE the lock feature existed (or from the last
-        // time this account was paid) forever, defeating the lock on every
-        // rerun. When locked, these three columns go to null outright -
-        // same as a brand-new free scan, never a stale leftover real one.
-        const isLocked = Array.isArray(data.locked) && data.locked.length > 0;
-        const updates: any = {
-          item_name: editName.trim(),
-          brand: editBrand.trim() || "Unknown",
-          category: editCategory.trim() || scan.category,
-          buy_price: parseFloat(editPrice) || scan.buy_price || 0,
-          sell_price: data.sellPrice ?? scan.sell_price,
-          buy_target: isLocked ? null : (data.buyTarget ?? scan.buy_target),
-          net_profit: isLocked ? null : (data.netProfit ?? scan.net_profit),
-          decision: data.decision ?? scan.decision,
-          best_platform: data.bestPlatform ?? scan.best_platform,
-          roi: isLocked ? null : (data.roi ?? scan.roi),
-          specialty_data: JSON.stringify(data),
-        };
-        // Only sent when the user actually tapped a chip (see openEditor's
-        // blank-default comment) - app/api/scan-history/route.ts stamps
-        // condition_source: 'user-entered' automatically whenever
-        // `condition` is present, so that never needs to be sent from here.
-        if (editCondition && CONDITION_TO_DB[editCondition]) {
-          updates.condition = CONDITION_TO_DB[editCondition];
-        }
-        // Persist to DB (PATCH preserves image_url / thumbnail)
-        try { await updateScan(token, scan.id, updates); } catch {}
-        invalidateScanHistoryCache(token);
-        setScans(prev => prev.map(s => s.id === scan.id ? {
-          ...s, ...updates,
-          profit: isLocked ? null : (data.netProfit ?? s.profit),
-          verdict: data.decision ?? s.verdict,
-        } : s));
-        closeEditor();
-        setExpanded(scan.id);
-        if (isOwner) setEditDebug({ id: scan.id, msg: "saved + closed editor" });
-      } else {
-        if (isOwner) setEditDebug({ id: scan.id, msg: "bailed: rerunScan() returned no success/sellPrice" });
-        Alert.alert("Re-run failed", "Could not re-analyze. Try again.");
-      }
-    } catch (e: any) {
-      if (isOwner) setEditDebug({ id: scan.id, msg: `bailed: threw - ${e?.message || String(e)}` });
-      Alert.alert("Re-run failed", "Something went wrong. Try again.");
-    }
-    setRerunning(false);
   }
 
   // Specialty re-run: unlike scans, the original per-category form fields
@@ -847,11 +741,12 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                   const isSel = !!selected[scan.id];
                   let full: any = null;
                   try { full = scan.specialty_data ? JSON.parse(scan.specialty_data) : null; } catch { full = null; }
-                  // PLAN GATING (2026-10-22): a free-plan rerun (doRerun
-                  // below) stores this same `locked` array into
+                  // PLAN GATING (2026-10-22): a free-plan rerun (Edit now
+                  // navigates to ScanConfirmScreen's confirmAndRerun - see
+                  // that file) stores this same `locked` array into
                   // specialty_data - this row's buy_target/net_profit/roi
-                  // columns are null ON PURPOSE in that case (see doRerun's
-                  // own comment), not "no data yet." Row-level, not a
+                  // columns are null ON PURPOSE in that case, not "no data
+                  // yet." Row-level, not a
                   // top-of-screen `plan` check, since an account that was
                   // free when this item was last (re)run and is paid NOW
                   // still shows real numbers once it reruns again - the
@@ -947,9 +842,8 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                           onViewReveal={() => openReveal(scan)}
                           onEdit={() => {
                             if (isOwner) setEditDebug({ id: scan.id, msg: "tapped" });
-                            openEditor(scan);
-                            setExpanded(scan.id);
-                            if (isOwner) setEditDebug({ id: scan.id, msg: "handler reached (editingId set)" });
+                            onNavigate("scan-confirm", { scan });
+                            if (isOwner) setEditDebug({ id: scan.id, msg: "navigated to scan-confirm" });
                           }}
                           onShare={() => shareHistoryRow(scan)}
                           sharing={sharingRow && shareTarget?.id === scan.id}
@@ -996,7 +890,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                           </Text>
                         ) : null}
 
-                        {full && editingId !== scan.id && (
+                        {full && (
                           <>
                             {full.platformBreakdown && full.platformBreakdown.length > 0 && (
                               <View style={s.apprSection}>
@@ -1031,53 +925,6 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                           </>
                         )}
 
-                        {editingId === scan.id ? (
-                          <View style={s.editPanel}>
-                            <Text style={s.editLabel}>Item name</Text>
-                            <TextInput style={s.editInput} value={editName} onChangeText={setEditName} placeholder="Item name" placeholderTextColor={C.text4}/>
-                            <Text style={s.editLabel}>Brand</Text>
-                            <TextInput style={s.editInput} value={editBrand} onChangeText={setEditBrand} placeholder="Brand (optional)" placeholderTextColor={C.text4}/>
-                            <Text style={s.editLabel}>Category</Text>
-                            <TextInput style={s.editInput} value={editCategory} onChangeText={setEditCat} placeholder="Category" placeholderTextColor={C.text4}/>
-                            <Text style={s.editLabel}>Extra details (optional)</Text>
-                            <TextInput style={s.editInput} value={editDesc} onChangeText={setEditDesc} placeholder="Model, condition notes, etc." placeholderTextColor={C.text4}/>
-                            <Text style={s.editLabel}>What you paid (optional)</Text>
-                            <TextInput style={s.editInput} value={editPrice} onChangeText={setEditPrice} placeholder="0.00" placeholderTextColor={C.text4} keyboardType="decimal-pad"/>
-                            <Text style={s.editLabel}>Condition (optional)</Text>
-                            <View style={{flexDirection:"row", flexWrap:"wrap", gap:8, marginBottom:8}}>
-                              {CONDITION_OPTIONS.map((opt) => {
-                                const sel = editCondition === opt.value;
-                                return (
-                                  <TouchableOpacity
-                                    key={opt.value}
-                                    style={{paddingVertical:8, paddingHorizontal:14, borderRadius:20, backgroundColor: sel ? C.green : C.surfaceHigh, borderColor: sel ? C.green : C.border, borderWidth:1}}
-                                    onPress={() => setEditCondition(sel ? "" : opt.value)}
-                                  >
-                                    <Text style={{color: sel ? C.greenDark : C.text2, fontSize:13, fontWeight: sel ? "800" : "600"}}>{opt.label}</Text>
-                                  </TouchableOpacity>
-                                );
-                              })}
-                            </View>
-                            {editPhotos.length > 0 && (
-                              <ScrollView horizontal style={{marginTop:8}} showsHorizontalScrollIndicator={false}>
-                                {editPhotos.map((ph, pi) => (
-                                  <Image key={pi} source={{uri: ph}} style={s.editPhotoThumb}/>
-                                ))}
-                              </ScrollView>
-                            )}
-                            <TouchableOpacity style={s.addPhotoBtn} onPress={addEditPhoto}>
-                              <Text style={s.addPhotoTxt}>+ Add Photo {editPhotos.length > 0 ? "("+editPhotos.length+")" : ""}</Text>
-                            </TouchableOpacity>
-                            <View style={[s.expandedActions, {marginTop:10}]}>
-                              <TouchableOpacity style={[s.actionBtn,{flex:1, opacity: rerunning ? 0.5 : 1}]} disabled={rerunning} onPress={() => doRerun(scan)}>
-                                <Text style={s.actionBtnTxt}>{rerunning ? "Re-running..." : "Re-run Analysis"}</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity style={[s.actionBtn,{backgroundColor:C.surfaceHigh, borderColor:C.border}]} disabled={rerunning} onPress={closeEditor}>
-                                <Text style={[s.actionBtnTxt,{color:C.text3}]}>Cancel</Text>
-                              </TouchableOpacity>
-                            </View>
-                          </View>
-                        ) : null}
                       </View>
                     )}
                   </View>
