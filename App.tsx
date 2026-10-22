@@ -13,7 +13,7 @@ import LogSaleModal from "./src/components/LogSaleModal";
 import { toPendingScan } from "./src/lib/saleCapture";
 import * as Updates from "expo-updates";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { isBiometricEnabled, saveBiometricRefreshToken } from "./src/lib/biometrics";
+import { isBiometricEnabled, isBiometricAvailable, authenticateWithBiometrics, saveBiometricRefreshToken } from "./src/lib/biometrics";
 import LoginScreen from "./src/screens/LoginScreen";
 import ScannerScreen from "./src/screens/ScannerScreen";
 import DashboardScreen from "./src/screens/DashboardScreen";
@@ -276,6 +276,15 @@ export default function App() {
   const [navData, setNavData]       = useState<any>(null);
   const [appReady, setAppReady]     = useState(false);
   const [splashDone, setSplashDone] = useState(false);
+  // APP-LOCK BIOMETRIC GATE (2026-10-22, NEW FEATURE - see runBiometricGate's
+  // own header comment below for why this is new, not a regression fix).
+  // biometricLocked blocks the render chain (see the return() below) until
+  // a real Face ID/Touch ID success; biometricChecking only toggles the
+  // lock screen's own copy/button while a prompt is actually in flight.
+  const [biometricLocked, setBiometricLocked]     = useState(false);
+  const [biometricChecking, setBiometricChecking] = useState(false);
+  // Owner-only, on-screen (no console logs) - see runBiometricGate.
+  const [bioDebugLine, setBioDebugLine] = useState<string | null>(null);
   // See attemptSessionRestore() below: true whenever a background refresh
   // (cold-launch restore OR foreground-resume) is failing for a reason that
   // says nothing about whether the session is actually valid (timeout/
@@ -352,6 +361,11 @@ export default function App() {
           const saved = await loadSession();
           if (saved && saved.refresh_token) {
             savedSessionRef.current = saved;
+            // RESUME - see runBiometricGate's header comment. Fires on
+            // EVERY background->active transition regardless of token
+            // freshness - the early-return right below is about the token
+            // refresh only, not about whether to re-lock.
+            runBiometricGate();
             if (!isTokenNearExpiry(saved.access_token)) return;
             const refreshed = await refreshToken(saved.refresh_token);
             await saveSession(refreshed);
@@ -420,6 +434,52 @@ export default function App() {
   // Bounded to ONE silent retry, never more - see HOUSEKEEPING.md's
   // "Refresh now" retry-loop incident for why an uncapped auto-retry here
   // would be the same mistake again, just moved to a different button.
+  // APP-LOCK BIOMETRIC GATE (2026-10-22, NEW - not a regression fix. MEASURED:
+  // authenticateWithBiometrics() (src/lib/biometrics.ts) has never, in this
+  // app's entire git history, been called from App.tsx - it was only ever
+  // reachable from the SIGNED-OUT LoginScreen's own quick-login button
+  // (src/screens/LoginScreen.tsx:68). A restored session (attemptSessionRestore
+  // below) skips LoginScreen entirely, so nothing has ever prompted Face ID
+  // on a normal cold start or background->foreground resume with a saved
+  // session - "the app goes straight into the signed-in account" is this
+  // feature's absence, not a broken wire. This closes that gap: runs on
+  // cold start (attemptSessionRestore, once a session exists) and on every
+  // background->active transition (the AppState listener below) whenever
+  // the user has Face ID enabled (ProfileScreen.tsx's toggle, src/lib/
+  // biometrics.ts's isBiometricEnabled()).
+  //
+  // Device hardware/enrollment changing AFTER the toggle was enabled (Face
+  // ID turned off in iOS Settings, say) can't be enforced from here -
+  // gracefully skips the lock rather than trapping the user with no way
+  // in. A genuine prompt on available hardware that fails or is cancelled,
+  // however, never clears the lock - biometricLocked only ever goes false
+  // on a real authenticateWithBiometrics() success (or the "Sign Out"
+  // escape hatch on the lock screen itself, which routes to LoginScreen,
+  // never into the account).
+  async function runBiometricGate() {
+    const ownerNow = OWNER_EMAILS.includes((savedSessionRef.current?.user?.email || session?.user?.email || "").toLowerCase());
+    let enabled = false, available = false, result = "n/a";
+    try {
+      enabled = await isBiometricEnabled();
+      if (!enabled) { setBiometricLocked(false); return; }
+      const avail = await isBiometricAvailable();
+      available = avail.available;
+      if (!available) { setBiometricLocked(false); return; }
+      setBiometricLocked(true);
+      setBiometricChecking(true);
+      const auth = await authenticateWithBiometrics();
+      result = auth.success ? "success" : "failed";
+      if (auth.success) setBiometricLocked(false);
+      // else: stays locked - the lock screen's own "Try Again" is the only
+      // thing that re-invokes this function from here.
+    } finally {
+      setBiometricChecking(false);
+      if (ownerNow) {
+        setBioDebugLine(`biometric: enabled=${enabled} supported=${available} enrolled=${available} prompted=${enabled && available} result=${result}`);
+      }
+    }
+  }
+
   async function attemptSessionRestore(saved: Session) {
     savedSessionRef.current = saved;
     // Render NOW, optimistically, with whatever's on disk - a stale access
@@ -430,6 +490,9 @@ export default function App() {
     setAppReady(true);
     setReconnecting(false);
     startRestoreTimer();
+    // COLD START - not awaited: manages its own state (biometricLocked)
+    // and must never block the token-refresh work below it.
+    runBiometricGate();
     const MAX_ATTEMPTS = 2;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
@@ -755,7 +818,38 @@ export default function App() {
         />
       )}
       <Animated.View style={[{flex:1}, {opacity:fadeIn}]}>
-        {previewNewUser && previewStep === "value" && session && aiConsented ? (
+        {biometricLocked && session ? (
+          // APP-LOCK BIOMETRIC GATE - see runBiometricGate's header comment.
+          // Takes priority over every other branch below (preview/
+          // onboarding/consent/main app) whenever it's true - nothing past
+          // this point renders until a real Face ID/Touch ID success.
+          <View style={{flex:1, backgroundColor:C.bg, alignItems:"center", justifyContent:"center", padding:24}}>
+            <Text style={{fontSize:40, marginBottom:16}}>{"🔐"}</Text>
+            <Text style={{color:C.text1, fontSize:18, fontWeight:"800", marginBottom:8, textAlign:"center"}}>Unlock ValuIQ</Text>
+            <Text style={{color:C.text3, fontSize:13, marginBottom:24, textAlign:"center"}}>
+              {biometricChecking ? "Waiting for Face ID…" : "Face ID is required to continue."}
+            </Text>
+            {!biometricChecking && (
+              <TouchableOpacity
+                style={{backgroundColor:C.green, borderRadius:14, paddingVertical:14, paddingHorizontal:32, marginBottom:12}}
+                onPress={runBiometricGate}
+              >
+                <Text style={{color:C.greenDark, fontWeight:"900", fontSize:15}}>Try Again</Text>
+              </TouchableOpacity>
+            )}
+            {/* Escape hatch - never a route INTO the account, only out to
+                LoginScreen. Without this, a device whose Face ID genuinely
+                stops working after being enabled would have no recovery. */}
+            {!biometricChecking && (
+              <TouchableOpacity onPress={async () => { await clearSession(); setSession(null); setBiometricLocked(false); }}>
+                <Text style={{color:C.text4, fontSize:13, fontWeight:"700"}}>Sign Out</Text>
+              </TouchableOpacity>
+            )}
+            {isOwner && bioDebugLine && (
+              <Text style={{color:C.yellow, fontSize:10, marginTop:20, textAlign:"center"}}>{bioDebugLine}</Text>
+            )}
+          </View>
+        ) : previewNewUser && previewStep === "value" && session && aiConsented ? (
           // PREVIEW: the real value screen, shown on top of an already-
           // logged-in/consented session - onComplete here advances the
           // LOCAL preview state machine only (never touches @valuiq_onboarded
