@@ -196,6 +196,11 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected]     = useState<Record<string, boolean>>({});
   const [editingId, setEditingId]   = useState<string|null>(null);
+  // OWNER-ONLY DEBUG (2026-10-22) - no console logs, on-screen only (see
+  // the nested-touchable fix comment at the scans card render for why this
+  // exists). Single slot, not keyed-per-scan state, since only one card's
+  // editor can be open/being-tapped at a time.
+  const [editDebug, setEditDebug]   = useState<{ id: string; msg: string } | null>(null);
   const [editName, setEditName]     = useState("");
   const [editBrand, setEditBrand]   = useState("");
   const [editCategory, setEditCat]  = useState("");
@@ -324,8 +329,13 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   }
 
   async function doRerun(scan: any) {
-    if (!editName.trim()) { Alert.alert("Name required", "Enter an item name to re-run."); return; }
+    if (!editName.trim()) {
+      if (isOwner) setEditDebug({ id: scan.id, msg: "bailed: no item name entered" });
+      Alert.alert("Name required", "Enter an item name to re-run.");
+      return;
+    }
     setRerunning(true);
+    if (isOwner) setEditDebug({ id: scan.id, msg: "rerunScan() called" });
     try {
       // HISTORY RERUN FIX (2026-09-14): the item's already-known resale
       // value, carried forward so a price-only edit can't silently re-derive
@@ -351,6 +361,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
           noFlipMargin: !!priorFull?.noFlipMargin,
         } : undefined,
       });
+      if (isOwner) setEditDebug({ id: scan.id, msg: `rerunScan() returned (success=${!!data?.success}, locked=${JSON.stringify(data?.locked || null)})` });
       if (data && (data.success || data.sellPrice != null)) {
         // MEASURED BUG: this updated the stat columns (sell_price/net_profit/
         // roi) but never re-saved specialty_data - the JSON blob the card's
@@ -360,17 +371,28 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
         // same card. `data` here IS the full fresh scanResult (same shape
         // lens/route.ts saves at scan time) - re-saving it keeps the prose
         // in sync with the stats it's describing.
+        //
+        // PLAN GATING (2026-10-22): data.locked (app/api/lens/route.ts's
+        // gateResponseForPlan) means THIS rerun came back for a free-plan
+        // account - buyTarget/netProfit/roi are null ON PURPOSE, not "no
+        // change from the fresh call." The old `?? scan.buy_target`
+        // fallback would otherwise silently keep whatever real number this
+        // row had from BEFORE the lock feature existed (or from the last
+        // time this account was paid) forever, defeating the lock on every
+        // rerun. When locked, these three columns go to null outright -
+        // same as a brand-new free scan, never a stale leftover real one.
+        const isLocked = Array.isArray(data.locked) && data.locked.length > 0;
         const updates: any = {
           item_name: editName.trim(),
           brand: editBrand.trim() || "Unknown",
           category: editCategory.trim() || scan.category,
           buy_price: parseFloat(editPrice) || scan.buy_price || 0,
           sell_price: data.sellPrice ?? scan.sell_price,
-          buy_target: data.buyTarget ?? scan.buy_target,
-          net_profit: data.netProfit ?? scan.net_profit,
+          buy_target: isLocked ? null : (data.buyTarget ?? scan.buy_target),
+          net_profit: isLocked ? null : (data.netProfit ?? scan.net_profit),
           decision: data.decision ?? scan.decision,
           best_platform: data.bestPlatform ?? scan.best_platform,
-          roi: data.roi ?? scan.roi,
+          roi: isLocked ? null : (data.roi ?? scan.roi),
           specialty_data: JSON.stringify(data),
         };
         // Only sent when the user actually tapped a chip (see openEditor's
@@ -385,15 +407,18 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
         invalidateScanHistoryCache(token);
         setScans(prev => prev.map(s => s.id === scan.id ? {
           ...s, ...updates,
-          profit: data.netProfit ?? s.profit,
+          profit: isLocked ? null : (data.netProfit ?? s.profit),
           verdict: data.decision ?? s.verdict,
         } : s));
         closeEditor();
         setExpanded(scan.id);
+        if (isOwner) setEditDebug({ id: scan.id, msg: "saved + closed editor" });
       } else {
+        if (isOwner) setEditDebug({ id: scan.id, msg: "bailed: rerunScan() returned no success/sellPrice" });
         Alert.alert("Re-run failed", "Could not re-analyze. Try again.");
       }
-    } catch {
+    } catch (e: any) {
+      if (isOwner) setEditDebug({ id: scan.id, msg: `bailed: threw - ${e?.message || String(e)}` });
       Alert.alert("Re-run failed", "Something went wrong. Try again.");
     }
     setRerunning(false);
@@ -822,17 +847,47 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                   const isSel = !!selected[scan.id];
                   let full: any = null;
                   try { full = scan.specialty_data ? JSON.parse(scan.specialty_data) : null; } catch { full = null; }
+                  // PLAN GATING (2026-10-22): a free-plan rerun (doRerun
+                  // below) stores this same `locked` array into
+                  // specialty_data - this row's buy_target/net_profit/roi
+                  // columns are null ON PURPOSE in that case (see doRerun's
+                  // own comment), not "no data yet." Row-level, not a
+                  // top-of-screen `plan` check, since an account that was
+                  // free when this item was last (re)run and is paid NOW
+                  // still shows real numbers once it reruns again - the
+                  // lock reflects what THIS row last saw, not the viewer's
+                  // current plan.
+                  const rowLocked = Array.isArray(full?.locked) && full.locked.includes("maxBuy");
                   const scanProfit = scan.profit || scan.net_profit || 0;
                   const scanIsLoss = scanProfit < 0;
                   const tier = scanTier(scan, full);
                   return (
-                  <TouchableOpacity
+                  // NESTED-TOUCHABLE FIX (2026-10-22, MEASURED: owner-reported
+                  // "Edit does nothing" on a lifetime account - reproduced via
+                  // the editDebug readout below, which showed "tapped" but
+                  // never "handler reached," on a build where this whole card
+                  // - FlipActionsRow's Edit button, the editor panel's
+                  // TextInputs, the Re-run/Cancel buttons - was nested INSIDE
+                  // this one outer TouchableOpacity's own tap-to-expand
+                  // responder. React Native's touch responder negotiation
+                  // between nested Touchables is not guaranteed to hand the
+                  // gesture to the innermost one; the outer card's onPress
+                  // could win the negotiation and swallow the inner Edit
+                  // tap, or re-collapse `expanded` on the same gesture that
+                  // was supposed to open the editor. Fix: the outer wrapper
+                  // is now a plain View (no onPress, nothing to compete for
+                  // the responder) - only the header below is tappable to
+                  // expand/collapse, so FlipActionsRow and the editor panel
+                  // are no longer nested inside ANY enclosing Touchable.
+                  <View
                     key={scan.id}
                     style={[s.card, isSel && s.cardSelected]}
-                    onPress={() => selectMode ? toggleSelect(scan.id) : setExpanded(expanded === scan.id ? null : scan.id)}
-                    activeOpacity={0.85}
                   >
-                    <View style={s.cardHeader}>
+                    <TouchableOpacity
+                      style={s.cardHeader}
+                      onPress={() => selectMode ? toggleSelect(scan.id) : setExpanded(expanded === scan.id ? null : scan.id)}
+                      activeOpacity={0.85}
+                    >
                       {selectMode && (
                         <View style={[s.checkbox, isSel && s.checkboxOn]}>
                           {isSel && <Text style={s.checkboxTick}>{"\u2713"}</Text>}
@@ -880,7 +935,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                           scanProfit > 0 && <Text style={s.profit}>+${Math.round(scanProfit)} est.</Text>
                         )}
                       </View>
-                    </View>
+                    </TouchableOpacity>
 
                     {!selectMode && (
                       <View style={s.cardActionsWrap}>
@@ -890,11 +945,24 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                           sold={scan.sold_status === "sold"}
                           onSold={() => setLogSaleScan(scan)}
                           onViewReveal={() => openReveal(scan)}
-                          onEdit={() => { openEditor(scan); setExpanded(scan.id); }}
+                          onEdit={() => {
+                            if (isOwner) setEditDebug({ id: scan.id, msg: "tapped" });
+                            openEditor(scan);
+                            setExpanded(scan.id);
+                            if (isOwner) setEditDebug({ id: scan.id, msg: "handler reached (editingId set)" });
+                          }}
                           onShare={() => shareHistoryRow(scan)}
                           sharing={sharingRow && shareTarget?.id === scan.id}
                           onDelete={() => deleteItem(scan.id, "scan", scan.item_name||"Item")}
                         />
+                        {/* OWNER-ONLY DEBUG (2026-10-22) - see the nested-
+                            touchable fix comment above for why this exists.
+                            Shows regardless of whether the card ever expands,
+                            since "does nothing" could mean the tap never
+                            even registers. No console logs - on-screen only. */}
+                        {isOwner && editDebug?.id === scan.id && (
+                          <Text style={{color:C.yellow, fontSize:10, marginTop:4}}>edit: {editDebug.msg}</Text>
+                        )}
                       </View>
                     )}
 
@@ -907,10 +975,10 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                         )}
                         <View style={s.expandedRow}>
                           {[
-                            ["Max Pay", "$" + (Math.round((scan.buy_target || (scan.sell_price ? scan.sell_price * 0.4 : 0)) * 100) / 100), C.yellow],
+                            ["Max Pay", rowLocked ? "🔒" : "$" + (Math.round((scan.buy_target || (scan.sell_price ? scan.sell_price * 0.4 : 0)) * 100) / 100), C.yellow],
                             ["Sell For", scan.sell_price ? "$" + (scan.sell_price) : "-", C.text1],
-                            ["Profit", (scan.profit||scan.net_profit) ? "$" + (Math.round(scan.profit||scan.net_profit||0)) : "-", C.green],
-                            ["ROI", scan.roi ? (Math.round(scan.roi)) + "%" : "-", C.green],
+                            ["Profit", rowLocked ? "🔒" : ((scan.profit||scan.net_profit) ? "$" + (Math.round(scan.profit||scan.net_profit||0)) : "-"), C.green],
+                            ["ROI", rowLocked ? "🔒" : (scan.roi ? (Math.round(scan.roi)) + "%" : "-"), C.green],
                           ].map(([label, val, color]) => (
                             <View key={label as string} style={s.expandedStat}>
                               <Text style={[s.expandedVal, {color: color as string}]}>{val}</Text>
@@ -1012,7 +1080,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                         ) : null}
                       </View>
                     )}
-                  </TouchableOpacity>
+                  </View>
                   );
                 })
               )}
