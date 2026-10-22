@@ -284,18 +284,15 @@ export default function App() {
   // lock screen's own copy/button while a prompt is actually in flight.
   const [biometricLocked, setBiometricLocked]     = useState(false);
   const [biometricChecking, setBiometricChecking] = useState(false);
-  // Owner-only, on-screen (no console logs) - see runBiometricGate.
-  const [bioDebugLine, setBioDebugLine] = useState<string | null>(null);
   // LOOP FIX (2026-10-22, MEASURED: owner stuck on "Waiting for Face ID…"
-  // forever, debug line showing result=success). Root cause: the native
-  // Face ID system dialog itself drives AppState through inactive->active
-  // (iOS treats the overlay as the app losing/regaining focus) - the OLD
-  // AppState listener called runBiometricGate() on EVERY "active" event
-  // unconditionally, so the dialog closing after a GENUINE success
-  // immediately fired a SECOND, fully independent invocation that set
-  // biometricLocked back to true and prompted again, forever, regardless of
-  // what the first call's own `result` said. Fixed with four independent
-  // guards (see runBiometricGate + the AppState listener below):
+  // forever). Root cause: the native Face ID system dialog itself drives
+  // AppState through inactive->active (iOS treats the overlay as the app
+  // losing/regaining focus) - the OLD AppState listener called
+  // runBiometricGate() on EVERY "active" event unconditionally, so the
+  // dialog closing after a GENUINE success immediately fired a SECOND,
+  // fully independent invocation that set biometricLocked back to true and
+  // prompted again, forever. Fixed with three independent guards (see
+  // runBiometricGate + the AppState listener below):
   //   1. inFlightRef - only one prompt in flight at a time, a second
   //      invocation while one is already running is a pure no-op.
   //   2. lastPromptEndRef + POST_PROMPT_COOLDOWN_MS - an "active" event
@@ -306,26 +303,20 @@ export default function App() {
   //      background->active return of 30s+ (tracked separately from
   //      "inactive", which the Face ID dialog produces but true
   //      backgrounding does not skip) - never on "inactive" at all.
-  //   4. promptTimestampsRef + MAX_PROMPTS_PER_WINDOW - belt-and-suspenders:
-  //      even if something else re-triggers it, more than 2 AUTOMATIC
-  //      prompts within 20s trips loopBroken, which stops all automatic
-  //      prompting and hands control to the lock screen's own "Try Face ID"/
-  //      "Sign Out" buttons - only a manual tap (runBiometricGate({manual:
-  //      true})) clears it and tries again.
-  // lastUnlockedAtRef is the actual source of truth for "is a real session
-  // still trusted" - a genuine success stamps it, and it's what the owner
-  // debug line's lastUnlockedAt=<s ago> reports.
+  // promptTimestampsRef + MAX_PROMPTS_PER_WINDOW is a belt-and-suspenders
+  // loop breaker on top of the three guards above: even if something else
+  // re-triggers the gate, more than 2 AUTOMATIC prompts within 20s trips
+  // loopBroken, which stops all automatic prompting and hands control to
+  // the lock screen's own "Try Face ID"/"Sign Out" buttons - only a manual
+  // tap (runBiometricGate({manual: true})) clears it and tries again.
   const BACKGROUND_LOCK_THRESHOLD_MS = 30000;
   const POST_PROMPT_COOLDOWN_MS = 3000;
   const MAX_PROMPTS_PER_WINDOW = 2;
   const PROMPT_WINDOW_MS = 20000;
   const inFlightRef = useRef(false);
   const lastPromptEndRef = useRef(0);
-  const lastUnlockedAtRef = useRef<number | null>(null);
   const wentBackgroundAtRef = useRef<number | null>(null);
   const promptTimestampsRef = useRef<number[]>([]);
-  const gateRunsRef = useRef(0);
-  const appStateRef = useRef(AppState.currentState);
   const [loopBroken, setLoopBroken] = useState(false);
   // See attemptSessionRestore() below: true whenever a background refresh
   // (cold-launch restore OR foreground-resume) is failing for a reason that
@@ -398,7 +389,6 @@ export default function App() {
   // call needed to check).
   useEffect(() => {
     const sub = AppState.addEventListener("change", async (state) => {
-      appStateRef.current = state;
       // Real backgrounding only - NEVER "inactive", which is exactly what
       // the native Face ID system dialog itself produces as it overlays the
       // app (see the LOOP FIX comment above biometricLocked's declaration).
@@ -517,36 +507,25 @@ export default function App() {
   // never into the account).
   async function runBiometricGate(opts?: { manual?: boolean }) {
     const manual = !!opts?.manual;
-    const ownerNow = OWNER_EMAILS.includes((savedSessionRef.current?.user?.email || session?.user?.email || "").toLowerCase());
-    const debugSuffix = () =>
-      ` gateRuns=${gateRunsRef.current} lastUnlockedAt=${lastUnlockedAtRef.current ? Math.round((Date.now() - lastUnlockedAtRef.current) / 1000) + "s ago" : "never"} appState=${appStateRef.current} inFlight=${inFlightRef.current}`;
 
     // GUARD 1 - only one prompt in flight at a time. A second invocation
     // (e.g. the AppState listener firing again while the first is still
     // awaiting authenticateWithBiometrics()) is a pure no-op, never a second
     // overlapping prompt.
-    if (inFlightRef.current) {
-      if (ownerNow) setBioDebugLine(`biometric: skipped (already in flight)` + debugSuffix());
-      return;
-    }
+    if (inFlightRef.current) return;
     // GUARD 2 - a cooldown after a prompt just finished. This is what
     // actually breaks the loop: the Face ID system dialog closing drives
     // AppState to "active" within milliseconds of this function's own
     // finally block running, and that re-fire must never start a fresh
     // prompt. A MANUAL tap (the lock screen's own button) bypasses this -
     // the user asking again is never "too soon."
-    if (!manual && Date.now() - lastPromptEndRef.current < POST_PROMPT_COOLDOWN_MS) {
-      if (ownerNow) setBioDebugLine(`biometric: skipped (cooldown)` + debugSuffix());
-      return;
-    }
+    if (!manual && Date.now() - lastPromptEndRef.current < POST_PROMPT_COOLDOWN_MS) return;
 
-    let enabled = false, available = false, result = "n/a";
     try {
-      enabled = await isBiometricEnabled();
+      const enabled = await isBiometricEnabled();
       if (!enabled) { setBiometricLocked(false); return; }
       const avail = await isBiometricAvailable();
-      available = avail.available;
-      if (!available) { setBiometricLocked(false); return; }
+      if (!avail.available) { setBiometricLocked(false); return; }
 
       if (manual) {
         // A deliberate user tap always gets a clean attempt - never trips
@@ -564,31 +543,22 @@ export default function App() {
         if (promptTimestampsRef.current.length >= MAX_PROMPTS_PER_WINDOW) {
           setBiometricLocked(true);
           setLoopBroken(true);
-          if (ownerNow) setBioDebugLine(`biometric: loop breaker tripped, auto-prompt stopped` + debugSuffix());
           return;
         }
       }
       promptTimestampsRef.current.push(Date.now());
-      gateRunsRef.current += 1;
 
       inFlightRef.current = true;
       setBiometricLocked(true);
       setBiometricChecking(true);
       const auth = await authenticateWithBiometrics();
-      result = auth.success ? "success" : "failed";
-      if (auth.success) {
-        lastUnlockedAtRef.current = Date.now();
-        setBiometricLocked(false);
-      }
+      if (auth.success) setBiometricLocked(false);
       // else: stays locked - the lock screen's own "Try Face ID" is the
       // only thing that re-invokes this function from here (manual:true).
     } finally {
       inFlightRef.current = false;
       lastPromptEndRef.current = Date.now();
       setBiometricChecking(false);
-      if (ownerNow) {
-        setBioDebugLine(`biometric: enabled=${enabled} supported=${available} enrolled=${available} prompted=${enabled && available} result=${result}` + debugSuffix());
-      }
     }
   }
 
@@ -963,9 +933,6 @@ export default function App() {
             <TouchableOpacity onPress={async () => { await clearSession(); setSession(null); setBiometricLocked(false); setLoopBroken(false); }}>
               <Text style={{color:C.text4, fontSize:13, fontWeight:"700"}}>Sign Out</Text>
             </TouchableOpacity>
-            {isOwner && bioDebugLine && (
-              <Text style={{color:C.yellow, fontSize:10, marginTop:20, textAlign:"center"}}>{bioDebugLine}</Text>
-            )}
           </View>
         ) : previewNewUser && previewStep === "value" && session && aiConsented ? (
           // PREVIEW: the real value screen, shown on top of an already-

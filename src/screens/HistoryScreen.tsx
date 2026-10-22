@@ -198,11 +198,6 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   // no longer uses editingId at all - see ScanConfirmScreen.tsx. Thrift and
   // Specialty's own separate inline editors still do.
   const [editingId, setEditingId]   = useState<string|null>(null);
-  // OWNER-ONLY DEBUG (2026-10-22) - no console logs, on-screen only (see
-  // the nested-touchable fix comment at the scans card render for why this
-  // exists). Single slot, not keyed-per-scan state, since only one card's
-  // editor can be open/being-tapped at a time.
-  const [editDebug, setEditDebug]   = useState<{ id: string; msg: string } | null>(null);
   const [editName, setEditName]     = useState("");
   const [editBrand, setEditBrand]   = useState("");
   const [editCategory, setEditCat]  = useState("");
@@ -759,8 +754,9 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                   return (
                   // NESTED-TOUCHABLE FIX (2026-10-22, MEASURED: owner-reported
                   // "Edit does nothing" on a lifetime account - reproduced via
-                  // the editDebug readout below, which showed "tapped" but
-                  // never "handler reached," on a build where this whole card
+                  // an owner-only debug readout (since removed) that showed
+                  // "tapped" but never "handler reached," on a build where
+                  // this whole card
                   // - FlipActionsRow's Edit button, the editor panel's
                   // TextInputs, the Re-run/Cancel buttons - was nested INSIDE
                   // this one outer TouchableOpacity's own tap-to-expand
@@ -840,23 +836,11 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                           sold={scan.sold_status === "sold"}
                           onSold={() => setLogSaleScan(scan)}
                           onViewReveal={() => openReveal(scan)}
-                          onEdit={() => {
-                            if (isOwner) setEditDebug({ id: scan.id, msg: "tapped" });
-                            onNavigate("scan-confirm", { scan });
-                            if (isOwner) setEditDebug({ id: scan.id, msg: "navigated to scan-confirm" });
-                          }}
+                          onEdit={() => onNavigate("scan-confirm", { scan })}
                           onShare={() => shareHistoryRow(scan)}
                           sharing={sharingRow && shareTarget?.id === scan.id}
                           onDelete={() => deleteItem(scan.id, "scan", scan.item_name||"Item")}
                         />
-                        {/* OWNER-ONLY DEBUG (2026-10-22) - see the nested-
-                            touchable fix comment above for why this exists.
-                            Shows regardless of whether the card ever expands,
-                            since "does nothing" could mean the tap never
-                            even registers. No console logs - on-screen only. */}
-                        {isOwner && editDebug?.id === scan.id && (
-                          <Text style={{color:C.yellow, fontSize:10, marginTop:4}}>edit: {editDebug.msg}</Text>
-                        )}
                       </View>
                     )}
 

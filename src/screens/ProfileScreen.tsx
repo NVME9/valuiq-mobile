@@ -11,7 +11,7 @@ import HeaderLogo from "../components/HeaderLogo";
 import UserAvatar from "../components/UserAvatar";
 import ApiDebugPanel from "../components/ApiDebugPanel";
 import DeleteAccountModal, { type DeleteAccountDebugState } from "../components/DeleteAccountModal";
-import { isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric, getBiometricLabel, authenticateWithBiometrics, getBiometricDiagnostics } from "../lib/biometrics";
+import { isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric, getBiometricLabel, authenticateWithBiometrics } from "../lib/biometrics";
 import { API_BASE, deleteAccount, getProfileData, peekProfileData, invalidateProfileCache, setCachedAvatar } from "../lib/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Updates from "expo-updates";
@@ -183,22 +183,6 @@ export default function ProfileScreen({ token, refreshToken, plan, onLogout, onN
   const [emojiModal, setEmojiModal] = useState(false);
   const [biometricType, setBioType] = useState<"face"|"fingerprint"|"none">("none");
   const [biometricEnabled, setBioEnabled] = useState(false);
-  // OWNER-ONLY DEBUG (2026-10-22, MEASURED: the Face ID toggle never
-  // switched on - two real bugs, not one, both invisible without this. (1)
-  // enableBiometric(email) was called with profile?.email, a field the
-  // backend's user_profiles row never has (app/api/profile/route.ts's
-  // getOrCreateProfile/fallbackProfile never set it) - always "", so the
-  // `if (emailToSave)` guard below silently no-opped on every tap, zero
-  // network, zero prompt, zero state change. (2) enableBiometric's real
-  // signature takes (email, refreshToken) - the old call passed only one
-  // arg, so even a non-empty email would have written a `refreshToken:
-  // undefined` pair into AsyncStorage.multiSet, which several versions of
-  // that native call treat as a hard failure. On TOP of both: nothing here
-  // ever called authenticateWithBiometrics() - turning the toggle on never
-  // required a real Face ID check, only App.tsx's SEPARATE cold-start gate
-  // ever did (see App.tsx's runBiometricGate comment). No console logs -
-  // on-screen only.
-  const [bioDebug, setBioDebug] = useState({ hw: false, enrolled: false, types: "none", tapResult: "n/a", stored: false, error: "" });
   const [userEmail, setUserEmail] = useState("");
   const [referralLink, setReferralLink] = useState("");
   const [referrals, setReferrals] = useState({ total: 0, totalEarned: 0, pendingEarned: 0 });
@@ -824,46 +808,32 @@ export default function ProfileScreen({ token, refreshToken, plan, onLogout, onN
 
           {/* History & FAQ */}
         {biometricType !== "none" && (
-          <>
           <TouchableOpacity
             style={ps.navRow}
             onPress={async () => {
-              const diag = await getBiometricDiagnostics();
               if (biometricEnabled) {
                 await disableBiometric();
                 setBioEnabled(false);
-                if (isOwner) {
-                  const stored = await isBiometricEnabled();
-                  setBioDebug({ hw: diag.hasHardware, enrolled: diag.enrolled, types: diag.types, tapResult: "disabled", stored, error: diag.error });
-                }
                 return;
               }
               // Toggle ON must run a real Face ID/Touch ID check first and
-              // only store "enabled" on a genuine success - see bioDebug's
-              // own comment for why the old version never did either.
-              let tapResult = "n/a";
-              let errorMsg = diag.error;
+              // only store "enabled" on a genuine success - a silent no-op
+              // here used to be the bug (profile?.email is never set by the
+              // backend's user_profiles row, so the old email-only call
+              // never actually fired - see enableBiometric's own call below
+              // for the real email source).
               try {
                 const auth = await authenticateWithBiometrics();
-                tapResult = auth.success ? "success" : "failed";
                 if (auth.success) {
                   // userEmail (decoded from the JWT above) is used instead of
-                  // profile?.email - that field never exists on the backend
-                  // row (see bioDebug's comment) and was always "".
+                  // profile?.email, which the backend row never sets.
                   await enableBiometric(userEmail || profile?.email || "", refreshToken);
                   setBioEnabled(true);
                 } else {
-                  errorMsg = auth.error || errorMsg;
                   Alert.alert("Face ID not confirmed", "Couldn't verify Face ID. The toggle stays off.");
                 }
-              } catch (e: any) {
-                tapResult = "error";
-                errorMsg = e?.message || String(e);
+              } catch {
                 Alert.alert("Face ID error", "Something went wrong enabling Face ID.");
-              }
-              if (isOwner) {
-                const stored = await isBiometricEnabled();
-                setBioDebug({ hw: diag.hasHardware, enrolled: diag.enrolled, types: diag.types, tapResult, stored, error: errorMsg });
               }
             }}
           >
@@ -873,12 +843,6 @@ export default function ProfileScreen({ token, refreshToken, plan, onLogout, onN
               <View style={[ps.toggleThumb, biometricEnabled && ps.toggleThumbOn]}/>
             </View>
           </TouchableOpacity>
-          {isOwner && (
-            <Text style={{color:C.yellow, fontSize:10, marginTop:-8, marginBottom:8, paddingHorizontal:4}}>
-              faceid: hw={String(bioDebug.hw)} enrolled={String(bioDebug.enrolled)} types={bioDebug.types} tapResult={bioDebug.tapResult} stored={String(bioDebug.stored)} error={bioDebug.error || "none"}
-            </Text>
-          )}
-          </>
         )}
         {/* Display-side wiring (showing the real name/photo to other users
             once opted in) isn't built yet - every community/leaderboard row

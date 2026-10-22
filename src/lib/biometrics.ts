@@ -67,27 +67,3 @@ export async function authenticateWithBiometrics(): Promise<{ success: boolean; 
     return { success: result.success, error: result.success ? undefined : (result.error || result.warning || "not confirmed") };
   } catch (e: any) { return { success: false, error: e?.message || String(e) }; }
 }
-
-// OWNER-ONLY DIAGNOSTIC (2026-10-22) - the Profile toggle's on-screen readout
-// needs the raw hardware/enrollment/type signals, not the collapsed
-// {available,type} isBiometricAvailable already returns to every other
-// caller - added here as its own function instead of widening that one's
-// return shape, so App.tsx's runBiometricGate/LoginScreen's existing
-// destructuring of {available,type} can't silently break.
-export async function getBiometricDiagnostics(): Promise<{ hasHardware: boolean; enrolled: boolean; types: string; error: string }> {
-  if (!LA) return { hasHardware: false, enrolled: false, types: "none", error: "module unavailable" };
-  try {
-    const hasHardware = await LA.hasHardwareAsync();
-    const enrolled = hasHardware ? await LA.isEnrolledAsync() : false;
-    const rawTypes: number[] = hasHardware ? await LA.supportedAuthenticationTypesAsync() : [];
-    const TYPE_NAMES: Record<number, string> = {
-      [LA.AuthenticationType?.FINGERPRINT]: "fingerprint",
-      [LA.AuthenticationType?.FACIAL_RECOGNITION]: "face",
-      [LA.AuthenticationType?.IRIS]: "iris",
-    };
-    const types = rawTypes.map(t => TYPE_NAMES[t] || String(t)).join(",") || "none";
-    return { hasHardware, enrolled, types, error: "" };
-  } catch (e: any) {
-    return { hasHardware: false, enrolled: false, types: "none", error: e?.message || String(e) };
-  }
-}
