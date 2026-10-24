@@ -88,27 +88,42 @@ export default function ScanConfirmScreen({ token, onNavigate, onBack, navData }
 
   async function confirmAndRerun() {
     if (!name.trim()) { Alert.alert("Name required", "Enter an item name to re-run."); return; }
+
+    // "NOTHING CHANGED" SHORTCUT (HISTORY RERUN FIX #2, 2026-10-24): the
+    // storedResale pin this used to send on a photo-less edit is GONE -
+    // AUDIT-PROVEN BUG (scan ddf17d11-5c53-42aa-bcb3-f6098943f099, a NECA
+    // figure): pinning sellPrice to the old final value still let the
+    // server silently drop its shipping estimate and swap the scan's real
+    // price tier for a hardcoded one, producing a DIFFERENT max-buy/verdict
+    // off the IDENTICAL stored number. A rerun now either (a) genuinely
+    // re-prices through the exact same pipeline a fresh scan uses, when the
+    // user actually edited something, or (b) never calls the server at
+    // all and leaves the saved row completely untouched, when they didn't -
+    // "return the saved result unchanged" means literally unchanged, not a
+    // recompute that happens to land on the same numbers.
+    const effectiveCondition = (condition && CONDITION_TO_DB[condition]) || scan.condition || "Good";
+    const effectiveBuyPrice = parseFloat(price) || scan.buy_price || 0;
+    const nothingChanged = newPhotos.length === 0
+      && name.trim() === (scan.item_name || "").trim()
+      && (brand.trim() || "Unknown") === (scan.brand || "Unknown")
+      && (category.trim() || "Other") === (scan.category || "Other")
+      && effectiveCondition === (scan.condition || "Good")
+      && effectiveBuyPrice === (Number(scan.buy_price) || 0);
+    if (nothingChanged) {
+      Alert.alert("No changes", "Nothing about this item changed - the saved result is unchanged.");
+      onNavigate("history");
+      return;
+    }
+
     setRerunning(true);
     try {
-      // Same storedResale pin the old inline editor used (see HISTORY RERUN
-      // FIX, lib/api.ts's rerunScan doc comment): only skipped when a new
-      // photo makes this a real re-identification, not a pure detail edit.
-      let priorFull: any = null;
-      try { priorFull = scan.specialty_data ? JSON.parse(scan.specialty_data) : null; } catch {}
-      const storedSellPrice = Number(scan.sell_price) || 0;
       const data = await rerunScan(token, {
         itemName: name.trim(),
         brand: brand.trim() || "Unknown",
         category: category.trim() || "Other",
-        condition: scan.condition || "Good",
-        buyPrice: parseFloat(price) || scan.buy_price || 0,
+        condition: effectiveCondition,
+        buyPrice: effectiveBuyPrice,
         newPhotosBase64: newPhotos.length > 0 ? newPhotos : undefined,
-        storedResale: newPhotos.length === 0 && storedSellPrice > 0 ? {
-          value: storedSellPrice,
-          low: priorFull?.priceRange?.low ?? null,
-          high: priorFull?.priceRange?.high ?? null,
-          noFlipMargin: !!priorFull?.noFlipMargin,
-        } : undefined,
       });
       if (data && (data.success || data.sellPrice != null)) {
         // PLAN GATING: a free-plan rerun comes back with data.locked
@@ -116,18 +131,28 @@ export default function ScanConfirmScreen({ token, onNavigate, onBack, navData }
         // three columns go to null on purpose, same as the old editor's
         // doRerun did, never a stale real number from before the lock.
         const isLocked = Array.isArray(data.locked) && data.locked.length > 0;
+        // EVIDENCE PRESERVATION (2026-10-24): a rerun overwrites this row's
+        // specialty_data wholesale below - before that happens, nest the
+        // PRE-rerun result under previousResult so the original evidence
+        // (comps, evidence line, price range) survives the overwrite. One
+        // level deep only - strip any previousResult the prior result
+        // itself already carried, rather than growing a chain.
+        let priorFull: any = null;
+        try { priorFull = scan.specialty_data ? JSON.parse(scan.specialty_data) : null; } catch {}
+        if (priorFull && typeof priorFull === "object") delete priorFull.previousResult;
+        const newSpecialtyData = priorFull ? { ...data, previousResult: priorFull } : data;
         const updates: any = {
           item_name: name.trim(),
           brand: brand.trim() || "Unknown",
           category: category.trim() || scan.category,
-          buy_price: parseFloat(price) || scan.buy_price || 0,
+          buy_price: effectiveBuyPrice,
           sell_price: data.sellPrice ?? scan.sell_price,
           buy_target: isLocked ? null : (data.buyTarget ?? scan.buy_target),
           net_profit: isLocked ? null : (data.netProfit ?? scan.net_profit),
           decision: data.decision ?? scan.decision,
           best_platform: data.bestPlatform ?? scan.best_platform,
           roi: isLocked ? null : (data.roi ?? scan.roi),
-          specialty_data: JSON.stringify(data),
+          specialty_data: JSON.stringify(newSpecialtyData),
         };
         if (condition && CONDITION_TO_DB[condition]) updates.condition = CONDITION_TO_DB[condition];
         try { await updateScan(token, scan.id, updates); } catch {}

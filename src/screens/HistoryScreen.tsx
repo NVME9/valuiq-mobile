@@ -347,6 +347,14 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
         // here - on specialty rows that column stores the CATEGORY (see
         // comment above), not a resale platform, and doesn't change on a
         // re-run of the same item.
+        // EVIDENCE PRESERVATION (2026-10-24): nest the PRE-rerun appraisal
+        // under previousResult before this overwrites specialty_data, same
+        // fix as ScanConfirmScreen.tsx's Scans-tab rerun - one level deep
+        // only, so a chain of reruns doesn't grow unbounded.
+        let priorFull: any = null;
+        try { priorFull = item.specialty_data ? JSON.parse(item.specialty_data) : null; } catch {}
+        if (priorFull && typeof priorFull === "object") delete priorFull.previousResult;
+        const newSpecialtyData = priorFull ? { ...r, previousResult: priorFull } : r;
         const updates = {
           item_name: r.identification || editName.trim(),
           decision: r.decision || item.decision,
@@ -354,7 +362,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
           buy_target: Number(r.buyTarget) || item.buy_target,
           net_profit: Number(r.netProfit) || item.net_profit,
           roi: Number(r.roi) || item.roi,
-          specialty_data: JSON.stringify(r),
+          specialty_data: JSON.stringify(newSpecialtyData),
         };
         try { await updateScan(token, item.id, updates); } catch {}
         invalidateScanHistoryCache(token);
