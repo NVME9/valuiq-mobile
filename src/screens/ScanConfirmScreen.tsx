@@ -101,7 +101,16 @@ export default function ScanConfirmScreen({ token, onNavigate, onBack, navData }
     // all and leaves the saved row completely untouched, when they didn't -
     // "return the saved result unchanged" means literally unchanged, not a
     // recompute that happens to land on the same numbers.
-    const effectiveCondition = (condition && CONDITION_TO_DB[condition]) || scan.condition || "Good";
+    // CONDITION FIX (item 6, 2026-10-25): `condition` state already holds
+    // the CHIP value (preselected from the saved scan's DB condition via
+    // DB_TO_CONDITION above, or whatever the user picked) - that chip value
+    // is what must reach the server (both as the DB string AND as
+    // conditionAssessment, see api.ts's rerunScan), not a re-derived DB
+    // string alone. Falls back through the same preselect mapping, then
+    // "used-good", for the edge case where the saved scan's condition
+    // never mapped to any chip at all (condition state starts "").
+    const effectiveConditionChip = condition || (scan.condition && DB_TO_CONDITION[scan.condition]) || "used-good";
+    const effectiveCondition = CONDITION_TO_DB[effectiveConditionChip] || scan.condition || "Good";
     const effectiveBuyPrice = parseFloat(price) || scan.buy_price || 0;
     const nothingChanged = newPhotos.length === 0
       && name.trim() === (scan.item_name || "").trim()
@@ -121,7 +130,9 @@ export default function ScanConfirmScreen({ token, onNavigate, onBack, navData }
         itemName: name.trim(),
         brand: brand.trim() || "Unknown",
         category: category.trim() || "Other",
-        condition: effectiveCondition,
+        // The CHIP value now (see api.ts's rerunScan comment) - it derives
+        // both the DB string and conditionAssessment from this one value.
+        condition: effectiveConditionChip,
         buyPrice: effectiveBuyPrice,
         newPhotosBase64: newPhotos.length > 0 ? newPhotos : undefined,
       });
@@ -154,7 +165,7 @@ export default function ScanConfirmScreen({ token, onNavigate, onBack, navData }
           roi: isLocked ? null : (data.roi ?? scan.roi),
           specialty_data: JSON.stringify(newSpecialtyData),
         };
-        if (condition && CONDITION_TO_DB[condition]) updates.condition = CONDITION_TO_DB[condition];
+        if (CONDITION_TO_DB[effectiveConditionChip]) updates.condition = CONDITION_TO_DB[effectiveConditionChip];
         try { await updateScan(token, scan.id, updates); } catch {}
         invalidateScanHistoryCache(token);
         onNavigate("history");

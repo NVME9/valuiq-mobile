@@ -18,6 +18,7 @@ import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromTo
 import ApiDebugPanel from "../components/ApiDebugPanel";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { deriveTagConfirmPending, confirmTagRead, editTagRead } from "../lib/tagConfirmState";
+import { shouldPatchSettledVerdict, settleSignature, type BuyPriceSource } from "../lib/scanSettleState";
 import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notifications";
 import StagedProgress from "../components/StagedProgress";
 import * as Notifications from "expo-notifications";
@@ -28,7 +29,7 @@ import SegmentOutcomesBlock from "../components/SegmentOutcomesBlock";
 import { classifyOutcome, ROI_BUY_MIN, PROFIT_JUDGMENT_FLOOR, classifyHeroVerdictLocal, decisionFromVerdict, type HeroVerdict } from "../lib/outcomeTier";
 import LogSaleModal from "../components/LogSaleModal";
 import { toPendingScan } from "../lib/saleCapture";
-import { CONDITION_OPTIONS } from "../lib/condition";
+import { CONDITION_OPTIONS, CONDITION_TO_DB } from "../lib/condition";
 import { evaluateReview, requestReviewIfEligible, REVIEW_PROMPT_DELAY_MS, ReviewDebugState } from "../lib/storeReview";
 
 const { width } = Dimensions.get("window");
@@ -177,6 +178,28 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // retailPriceNeedsConfirmation is true - this just makes that hold
   // visible and actionable instead of a blank field + hint text.
   const [tagConfirmPending, setTagConfirmPending] = useState(false);
+  // BUY-PRICE SOURCE (2026-10-25, STALE-STATE FIX: seven real Walmart scans,
+  // three saved REJECTED tag reads as buy_price): tracks WHY buyPrice holds
+  // whatever it currently holds - "tag" only when the user explicitly
+  // tapped "Confirm $X" or a confident tag read auto-seeded it untouched
+  // (the ORIGINAL, still-intended PATCH-ON-SETTLE behavior below), "user"
+  // the instant they type/edit the field themselves, null after "Edit"
+  // (reject) until something real replaces it. See lib/scanSettleState.ts -
+  // the PATCH-on-settle effect below refuses to persist buyPrice at all
+  // once this is null, so a rejected-then-abandoned or merely-suggested
+  // read can never reach the stored row.
+  const [buyPriceSource, setBuyPriceSource] = useState<BuyPriceSource>(null);
+  // SCAN ATTEMPT GUARD (2026-10-25): bumped at the start of every analyze()/
+  // handleBarcode() call AND on reset() - finishAnalyze bails immediately
+  // if its own attempt number no longer matches this, i.e. the user has
+  // already started (or abandoned into) a DIFFERENT scan before this one's
+  // network response landed. "Every PATCH must target the scan id returned
+  // by THAT scan's own response; ignore a late response for a previous
+  // scan" - this is what makes that literally true: a late response can
+  // never even reach setResult/setBuyPrice for a scan the user has moved
+  // on from, so latestVerdictRef/lastPatchedRef below can never be fed a
+  // stale (scanId, buyPrice) pair that didn't come from the CURRENT scan.
+  const scanAttemptRef = useRef(0);
   // PATCH-ON-SETTLE (2026-10-12, MEASURED: the owner's 9 real Walmart scans
   // all stored buy_price=0/decision=UNKNOWN in production - this screen
   // already auto-fills buyPrice from a confident tag read and recomputes a
@@ -187,7 +210,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // (a ref write during render, not a hook - see its own comment), read by
   // the debounced effect below, which is the one place this actually gets
   // persisted.
-  const latestVerdictRef = useRef<{ scanId: string | null; buyPrice: number; netProfit: number | null; roi: number | null; decision: string } | null>(null);
+  const latestVerdictRef = useRef<{ scanId: string | null; buyPrice: number; buyPriceSource: BuyPriceSource; netProfit: number | null; roi: number | null; decision: string } | null>(null);
   // Last signature actually PATCHed, so re-settling on the SAME price/
   // verdict (e.g. a re-render with no real change) never fires a redundant
   // network call.
@@ -255,19 +278,22 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     if (step !== "result" || !result || result._error) return;
     const timer = setTimeout(() => {
       const v = latestVerdictRef.current;
-      if (!v || !v.scanId || v.buyPrice <= 0) return;
-      const sig = `${v.scanId}:${v.buyPrice}:${v.decision}:${v.netProfit}:${v.roi}`;
-      if (lastPatchedRef.current === sig) return;
-      lastPatchedRef.current = sig;
-      updateScan(token, v.scanId, {
+      // shouldPatchSettledVerdict (lib/scanSettleState.ts) is the ONE gate:
+      // requires a real scanId, a positive buyPrice, AND a real source
+      // (user-typed or user-confirmed) - a rejected or merely-suggested
+      // read can never reach this PATCH, see buyPriceSource's own comment.
+      if (!v || !shouldPatchSettledVerdict(v, lastPatchedRef.current)) return;
+      lastPatchedRef.current = settleSignature(v);
+      updateScan(token, v.scanId!, {
         buy_price: v.buyPrice,
+        buy_price_source: v.buyPriceSource,
         net_profit: v.netProfit,
         roi: v.roi,
         decision: v.decision,
       }).catch(() => {});
     }, 900);
     return () => clearTimeout(timer);
-  }, [step, result, buyPrice, resultCondition, token]);
+  }, [step, result, buyPrice, resultCondition, buyPriceSource, token]);
   useEffect(() => {
     let alive = true;
     setOracle(null);
@@ -350,6 +376,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setBarcodeScanned(false);
     setMode("photo");
     compressMsTotalRef.current = 0;
+    // STALE-STATE FIX: every piece of state that could otherwise survive
+    // into the NEXT scan is cleared here, not just the ones that happen to
+    // feed this screen's own render. tagConfirmPending/buyPriceSource are
+    // real-state (not derived from `result`), so without this they'd carry
+    // whatever the PREVIOUS scan left them at for one frame of the next
+    // scan's "loading" step. latestVerdictRef/lastPatchedRef are refs, not
+    // state - a reset alone wouldn't even trigger a re-render for them, so
+    // they're cleared directly. scanAttemptRef bump invalidates any
+    // still-in-flight request for the scan being abandoned - see that
+    // ref's own comment.
+    setTagConfirmPending(false);
+    setBuyPriceSource(null);
+    latestVerdictRef.current = null;
+    lastPatchedRef.current = "";
+    scanAttemptRef.current++;
   }
 
   async function takePhoto() {
@@ -409,8 +450,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setBarcodeScanned(true);
     if (firstScanNudge) onDismissFirstScanNudge && onDismissFirstScanNudge();
     setStep("loading");
+    // STALE-STATE FIX: a new scan attempt - see scanAttemptRef's own
+    // comment. Everything that could leak from the PREVIOUS scan is
+    // cleared here too, not just on "New Scan" - a barcode scan started
+    // right after a photo scan's result (without ever tapping "New Scan")
+    // is the exact fast-aisle-scanning pattern that produced the real bug.
+    const myAttempt = ++scanAttemptRef.current;
     setBuyPrice("");
     setResultCondition("");
+    setTagConfirmPending(false);
+    setBuyPriceSource(null);
+    latestVerdictRef.current = null;
+    lastPatchedRef.current = "";
     const tDetect = Date.now();
     try {
       const lookup = await lookupUpcFast(token, data);
@@ -419,6 +470,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       // back to photo mode rather than attempting a scan with nothing real
       // to identify it from.
       if (!lookup.success || !lookup.itemName) {
+        if (myAttempt !== scanAttemptRef.current) return;
         setBarcodeScanned(false);
         setMode("photo");
         setStep("camera");
@@ -438,8 +490,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           retailPrice: lookup.retailPrice ?? null,
         };
       }
-      await finishAnalyze(d, [], true);
+      await finishAnalyze(d, [], true, myAttempt);
     } catch (e: any) {
+      if (myAttempt !== scanAttemptRef.current) return;
       setBarcodeScanned(false);
       setResult({ _error: e.message });
       setStep("result");
@@ -454,6 +507,19 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // or sit stale on screen while the new one is in flight.
     setBuyPrice("");
     setResultCondition("");
+    // STALE-STATE FIX: see scanAttemptRef's own comment - finishAnalyze
+    // below bails if a NEWER analyze()/handleBarcode()/reset() has already
+    // superseded this one by the time the network response lands, so a
+    // late response for this scan can never write into state for whatever
+    // scan the user has since moved on to. tagConfirmPending/buyPriceSource/
+    // the PATCH refs are cleared here too, same reasoning as reset() - this
+    // function is reached on every "Edit & Rerun" re-analyze, which (unlike
+    // reset()) was NOT previously clearing any of these.
+    const myAttempt = ++scanAttemptRef.current;
+    setTagConfirmPending(false);
+    setBuyPriceSource(null);
+    latestVerdictRef.current = null;
+    lastPatchedRef.current = "";
     let photosForRefine: string[] = [];
     try {
       const p = customPhotos || photos;
@@ -465,8 +531,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       // what reads the price tag (retailPriceRead). See the results step
       // below for where a price is now entered/edited.
       const d = await scanImage(token, p, (brandInput ? "Brand: " + brandInput + ". " : "") + description, undefined, compressMsTotalRef.current);
-      await finishAnalyze(d, photosForRefine, false);
+      await finishAnalyze(d, photosForRefine, false, myAttempt);
     } catch (e: any) {
+      if (myAttempt !== scanAttemptRef.current) return;
       setResult({ _error: e.message });
       setStep("result");
     }
@@ -476,7 +543,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // here once `d` (the /api/lens response) is in hand - one place decides
   // what happens with a finished scan result regardless of which path
   // produced it, so the two can never silently diverge in post-processing.
-  async function finishAnalyze(d: any, photosForRefine: string[], isBarcode: boolean) {
+  // `attempt` is this call's scanAttemptRef snapshot (from analyze()/
+  // handleBarcode()) - a STALE-STATE GUARD: if the user has already started
+  // (or abandoned into) a different scan since this request went out,
+  // scanAttemptRef has moved on and this response is a "late response for a
+  // previous scan" that must be ignored outright, never merged into
+  // whatever IS currently on screen.
+  async function finishAnalyze(d: any, photosForRefine: string[], isBarcode: boolean, attempt: number) {
+    if (attempt !== scanAttemptRef.current) return;
     if (d.error === "scan_limit_reached") {
       onNavigate("upgrade");
       return;
@@ -501,6 +575,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       // same number that seeding is about to write into state.
       refineScan(token, d.id, photosForRefine, (brandInput ? "Brand: " + brandInput + ". " : "") + description, Number(d.retailPriceRead) || 0, plan)
         .then((refined) => {
+          // STALE-STATE GUARD: a late refine response for a scan the user
+          // has already moved on from (new scan started before this
+          // fire-and-forget call settled) must never merge into whatever
+          // IS on screen now - prev.id===d.id alone already prevented it
+          // landing on a DIFFERENT scan's result object, but attempt is
+          // checked too so it also can't resurrect THIS exact scan's state
+          // after a "New Scan" reset that's since moved past it.
+          if (attempt !== scanAttemptRef.current) return;
           if (refined?.success && refined?.updated) {
             setResult((prev: any) => (prev && prev.id === d.id ? { ...prev, ...refined } : prev));
             setRefineSeq((s) => s + 1);
@@ -522,11 +604,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // before; a low-confidence one leaves the field blank and the hint
     // below (near the price input) shows what was read, asking the user
     // to confirm or correct it before any verdict leans on it.
-    setBuyPrice(
-      Number(d.retailPriceRead) > 0 && !d.retailPriceNeedsConfirmation
-        ? String(d.retailPriceRead)
-        : ""
-    );
+    const confidentTagRead = Number(d.retailPriceRead) > 0 && !d.retailPriceNeedsConfirmation;
+    setBuyPrice(confidentTagRead ? String(d.retailPriceRead) : "");
+    // BUY-PRICE SOURCE: a confident auto-seed counts as "tag" (this is the
+    // one intentionally-automatic case PATCH-ON-SETTLE exists for - see its
+    // own comment) - null otherwise (no price, or a low-confidence read
+    // withheld pending the user's own Confirm/Edit tap below).
+    setBuyPriceSource(confidentTagRead ? "tag" : null);
     setTagConfirmPending(deriveTagConfirmPending(d));
     setResultCondition(d.conditionAssessment || "");
     // SALE-CAPTURE MOAT: on a BUY, either schedule (if already allowed) or
@@ -755,12 +839,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const adjustedResaleValue = hasRawModelResale
       ? Math.round(Number(result.resaleFromModel) * conditionFactor)
       : (Number(result.sellPrice) || Number(result.estimatedResaleValue) || 0);
-    const adjustedResaleLow = hasRawModelResale && Number(result.resaleModelLow) > 0
-      ? Math.round(Number(result.resaleModelLow) * conditionFactor)
-      : (Number(result.priceRange?.low) || Number(result.estimatedResaleRange?.low) || null);
-    const adjustedResaleHigh = hasRawModelResale && Number(result.resaleModelHigh) > 0
-      ? Math.round(Number(result.resaleModelHigh) * conditionFactor)
-      : (Number(result.priceRange?.high) || Number(result.estimatedResaleRange?.high) || null);
+    // RANGE (item 2, 2026-10-25): the old adjustedResaleLow/High (this same
+    // condition-multiplied AI anchor's own low/high) used to drive the
+    // range banner and the no-price copy's "(range $X-$Y)" clause - both
+    // gone now. "Show the range only from the server's priceLow/priceHigh
+    // and never an AI range" - see serverPriceLow/serverPriceHigh/
+    // hasServerRange further down, the only range source this screen reads
+    // from any more.
 
     // FEE RATE / SHIPPING COST (2026-10-09, PARITY FIX): read straight off
     // result.feeRate - the EXACT rate deal-ai-pro's own netProfit/roi/
@@ -780,29 +865,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const shippingCost = Number(result.estShippingCost) || 0;
 
     const enteredBp = Number(buyPrice) || 0;
-
-    // RANGE-CARD VALUE (2026-09-10): dealCompareValue prefers the
-    // entered/edited price, falling back to the detected tag price only
-    // when nothing's been entered - same precedence the server used.
-    // ONE VERDICT SOURCE (Fix 3): this used to also compute its own
-    // independent isGoodDeal (dealCompareValue < adjustedResaleLow) and
-    // color/label the range card off THAT - a second, separately-computed
-    // verdict that could (and did, on the Fisher-Price scan) say "good
-    // deal" in green while outcome/classifyOutcome below said SKIP for the
-    // same item, because range-position and dollar-profit-floor are
-    // different questions with different answers. isGoodDeal/dealReasoning
-    // are gone; the range card below reads outcome.tier/label/accent
-    // directly (computed further down) so it is now structurally
-    // impossible for the two cards to disagree - they render off the same
-    // OutcomeTierInfo object. This value is now used ONLY to display the
-    // range numbers, never to independently decide good/bad framing.
-    // TAG CONFIRM GATE: an unconfirmed tag read must not drive this display
-    // either, same reasoning as the server's own dealCompareValue gate -
-    // without this, the range card could still show the unconfirmed number
-    // while the confirm card above was asking about that exact number.
-    const dealCompareValue = enteredBp > 0
-      ? enteredBp
-      : (!tagConfirmPending && Number(result.retailPriceRead) > 0 ? Number(result.retailPriceRead) : null);
 
     // ONE CANONICAL SELL PRICE (2026-09-17, REVERTED 2026-10-04 - decision
     // 3/10, Walmart-aisle testing): the single sell-price figure every
@@ -840,6 +902,23 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const maxBuyLocked = locked.includes("maxBuy");
 
     const sellPriceForProfit = Math.round(adjustedResaleValue || Number(result.sellPrice) || 0);
+    // PLANNING PRICE (2026-10-25 SERVER CONTRACT): the server's own,
+    // deliberately conservative figure to plan a BUY decision against -
+    // separate from sellPriceForProfit above (the headline "typical recent
+    // sale" DISPLAY price). planningBasis says which basis produced it:
+    // "low end of recent sales" or "typical sale" (the two coincide
+    // whenever the typical sale price IS the conservative choice, in which
+    // case the display never bothers distinguishing them - see
+    // showTypicalSaleLabel below). Falls back to sellPriceForProfit for a
+    // response that predates this field - never silently 0 when a real
+    // headline price exists. EVERY profit-math formula below (heroProfit,
+    // the max-buy ceiling) reads planningPrice, NEVER sellPriceForProfit -
+    // the bug this closes is the local recompute using the headline/AI
+    // price for money math instead of the server's own planning basis.
+    const planningBasis: string | null = result.planningBasis || null;
+    const planningPrice = Number(result.planningPrice) > 0
+      ? Math.round(Number(result.planningPrice))
+      : sellPriceForProfit;
     // LOCAL RECOMPUTE (2026-09-10, items 8/9): mirrors lib/profitMath.ts's
     // computeProfit exactly - fees = round(sp*feeRate*100)/100, netProfit =
     // round((sp-fees-cost)*100)/100 - so editing price or condition here
@@ -848,8 +927,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // result.netProfit directly - that was computed against whatever price
     // existed AT SCAN TIME, almost always none now that price lives here
     // instead of before the scan.
-    const localFees = Math.round(sellPriceForProfit * feeRate * 100) / 100;
-    const heroProfit = (!maxBuyLocked && enteredBp > 0) ? Math.round((sellPriceForProfit - localFees - enteredBp - shippingCost) * 100) / 100 : 0;
+    const localFees = Math.round(planningPrice * feeRate * 100) / 100;
+    const heroProfit = (!maxBuyLocked && enteredBp > 0) ? Math.round((planningPrice - localFees - enteredBp - shippingCost) * 100) / 100 : 0;
 
     // MAX-BUY LOCAL RECOMPUTE (2026-09-10, Fix 1): mirrors deal-ai-pro/
     // lib/profitMath.ts's computeMaxBuy, but driven by sellPriceForProfit
@@ -879,7 +958,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // caught live: Mainstays torches, "Pay up to $6" against a $13
     // conservative sell price and $9 shipping actually nets -$3.73 at that
     // buy price. shippingCost is the SAME value heroProfit already reads.
-    const netAfterFeesAndShippingAtCeiling = sellPriceForProfit * (1 - feeRate) - shippingCost;
+    const netAfterFeesAndShippingAtCeiling = planningPrice * (1 - feeRate) - shippingCost;
     const roiCeilingBuy = netAfterFeesAndShippingAtCeiling / (1 + ROI_BUY_MIN / 100);
     const profitFloorBuy = netAfterFeesAndShippingAtCeiling - PROFIT_JUDGMENT_FLOOR;
     // AI-ONLY: NO MAX BUY (2026-10-09, MEASURED): sellPriceForProfit can
@@ -897,10 +976,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // honest answer ("no price clears the bar"), not a sentinel. null
     // stays reserved for "no price data at all" (ai_only) - ProfitFlexHero
     // (below) tells these apart via maxBuy===0 vs maxBuy===null.
-    const maxBuy = (!maxBuyLocked && !isAiOnly && sellPriceForProfit > 0)
+    const maxBuy = (!maxBuyLocked && !isAiOnly && planningPrice > 0)
       ? Math.max(0, Math.floor(Math.min(roiCeilingBuy, profitFloorBuy)))
       : null;
     const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
+    // "Typical recent sale $X" (item 2): the no-price-entered hero number
+    // is always sellPriceForProfit (the headline/display price) - relabel
+    // it explicitly as the TYPICAL sale only when that number actually
+    // differs from planningPrice (the conservative figure captioned under
+    // Max buy below), so the two numbers on screen are never confusable as
+    // the same claim. When they're equal, the existing generic "sell
+    // price"/"typical sell price" label already says the same thing.
+    const showTypicalSaleLabel = sellPriceForProfit > 0 && planningPrice > 0 && sellPriceForProfit !== planningPrice;
 
     // ROI MUST be computed against the SAME cost basis as heroProfit - the
     // entered price when one exists, else the max-buy ceiling. This used to
@@ -1003,42 +1090,20 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           adjustedROI: 0,
           daysUsed: 0,
         } : {
-          // NO PRICE ENTERED (2026-09-10, item 8): the OLD "ADD PRICE" skip-
-          // styled dead-end is gone - price now lives on THIS screen (see
-          // above), so having none yet is the common, honest starting
-          // state, not a degraded one. tier:"estimate" (not "skip") means
-          // this renders through the SAME buy-style hero layout as a real
-          // verdict (isSkip stays false below), showing the estimate +
-          // range as the hero number instead of a profit figure - see
-          // heroDisplayValue below and its ProfitFlexHero prop.
-          //
-          // Same ESTIMATE-LABEL BUG fix as the branch above - see its
-          // comment. No buy price entered yet means no VERDICT, not that
-          // the sell price itself is unconfirmed.
+          // NO PRICE ENTERED (item 4, 2026-10-25 REWRITE): emoji/label/copy
+          // below are never actually rendered for this state any more -
+          // ProfitFlexHero's noVerdictPrompt (set below, once enteredBp<=0
+          // is known) takes over the ENTIRE badge+copy area with the plain
+          // "Type the tag price..." prompt the spec calls for, replacing
+          // the old "ADD PRICE"/estimate framing (which used to restate a
+          // range here too - gone, see the RANGE comment above
+          // adjustedResaleValue). `accent` is the one field that still
+          // matters: ProfitFlexHero's hero-number color and card border
+          // tint read it even in noVerdictPrompt mode.
           tier: "estimate" as const,
           emoji: hasItemLevelSellEvidence ? "✅" : "🏷️",
           label: hasItemLevelSellEvidence ? "REAL DATA" : "UNCONFIRMED",
-          // ONE RESALE REALITY (2026-09-17): the range clause only ever
-          // appears in THIS branch (priced tiers' copy comes from
-          // outcomeTier.ts's own strings, which never mention a range) -
-          // when crowdMedianAvailable (NOT the broader crowdHasRealData -
-          // see the comment above crowdMedianAvailable's definition) the
-          // crowd line below carries the real resale number, so this
-          // reuses the existing no-range fallback instead of stating the
-          // AI range a second time. Not left blank - ProfitFlexHero
-          // renders this unconditionally for every non-skip tier, so it
-          // always needs SOME sentence here.
-          // ONE CANONICAL SELL PRICE: reads sellPriceForProfit, not the raw
-          // adjustedResaleValue - already resolves to the crowd median when
-          // crowdMedianAvailable (see sellPriceForProfit's definition), so
-          // the no-price "sells for about $X" figure matches the exact
-          // number the "sell price" stat and maxBuy ceiling use once a
-          // price IS entered, instead of a separately-rounded one.
-          copy: hasItemLevelSellEvidence
-            ? `Sells for about $${sellPriceForProfit} (real data from ${agreeingCountForCopy} resale outcomes). Enter what you paid above for your real profit and verdict.`
-            : (adjustedResaleLow != null && adjustedResaleHigh != null && !crowdMedianAvailable)
-            ? `Sells for about $${sellPriceForProfit} (range $${adjustedResaleLow}-$${adjustedResaleHigh}). Enter what you paid above for your real profit and verdict.`
-            : `Sells for about $${sellPriceForProfit}. Enter what you paid above for your real profit and verdict.`,
+          copy: "",
           accent: hasItemLevelSellEvidence ? C.green : C.yellow,
           adjustedROI: 0,
           daysUsed: 0,
@@ -1134,6 +1199,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     latestVerdictRef.current = {
       scanId: (result.id ?? result.scanId ?? result.scan_id) != null ? String(result.id ?? result.scanId ?? result.scan_id) : null,
       buyPrice: enteredBp,
+      buyPriceSource,
       netProfit: enteredBp > 0 ? heroProfit : null,
       roi: enteredBp > 0 ? heroRoi : null,
       decision: decisionFromVerdict(finalHeadline),
@@ -1262,6 +1328,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             : `${maxBuyPrefix}You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
         : `${maxBuyPrefix}Pay $${maxBuy} or less to make this a real flip (≥${ROI_BUY_MIN}% ROI, ≥$${PROFIT_JUDGMENT_FLOOR} profit after fees).`
     );
+    // "Based on <planningBasis> ($planningPrice)" (item 2) - shown under
+    // Max buy whenever the server sent a real basis for it. Absent (older
+    // response, or maxBuy itself is null/locked) means nothing to caption.
+    const maxBuyBasis = (!maxBuyLocked && maxBuy != null && planningBasis && planningPrice > 0)
+      ? `Based on ${planningBasis} ($${planningPrice})`
+      : null;
 
     // ONE BADGE PER RESULT (2026-10-06, MEASURED: both badges stacked -
     // "✅ REAL DATA" + "● REAL DATA", "🏷️ ESTIMATE" + "● ESTIMATE"): the
@@ -1297,7 +1369,39 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       { label: "ROI", value: maxBuyLocked ? "🔒" : (heroRoi ? heroRoi + "%" : "—") },
       { label: "to sell", value: oracleDaysTxt },
     ];
-    const skipDetail = isSkip ? (result.reasoning || null) : null;
+    // TEXT (item 5): never the server's own reasoning text here any more -
+    // outcome.copy (the skipReason line right above this in ProfitFlexHero)
+    // already states the verdict's own reason; result.reasoning used to be
+    // rendered right underneath it as "skipDetail," which measured out as a
+    // near-duplicate second statement of the same thing ("duplicated
+    // headline/body lines") and, on a failed-narrative scan, as the literal
+    // old hardcoded failure sentence. narrativeUnavailable (2026-10-25
+    // server contract) replaces that sentence outright - this is now the
+    // ONLY thing skipDetail ever shows, and only as one small grey caveat,
+    // never the narrative text itself.
+    const skipDetail = isSkip && result.narrativeUnavailable ? "Full analysis unavailable for this item." : null;
+    // CHECK ITEM (item 3, 2026-10-25 server contract): the server withheld
+    // a real verdict entirely because identity is title-only/low-confidence
+    // - netProfit/roi are null server-side in this state regardless of any
+    // buy price, so there is nothing for THIS screen's local recompute to
+    // stand behind either. Checked independently of enteredBp/outcome - see
+    // the dedicated card below, which replaces the whole price+verdict
+    // section rather than trying to fit inside it.
+    const isCheckItem = result.heroVerdict?.headline === "CHECK ITEM";
+    // RANGE (item 2): "show the range only from the server's priceLow/
+    // priceHigh and never an AI range" - adjustedResaleLow/High (the local,
+    // condition-multiplied AI anchor) no longer feeds anything user-facing;
+    // only a real server-provided range (currently exact_item tier, "and
+    // later segment" per the contract) ever renders.
+    const serverPriceLow = Number(result.priceLow) || null;
+    const serverPriceHigh = Number(result.priceHigh) || null;
+    const hasServerRange = serverPriceLow != null && serverPriceHigh != null && serverPriceLow > 0 && serverPriceHigh > 0;
+    // NO PRICE ENTERED (item 4): "tag unread or rejected" - enteredBp<=0
+    // covers both (deriveTagConfirmPending/editTagRead both leave buyPrice
+    // blank - see tagConfirmState.ts). Never shown for CHECK ITEM, which
+    // has its own dedicated, even simpler card below.
+    const noPriceEntered = !isCheckItem && enteredBp <= 0;
+    const noVerdictPrompt = noPriceEntered ? "Type the tag price to get Buy or Pass." : null;
 
     return (
       <SafeAreaView style={s.safe}>
@@ -1343,8 +1447,43 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             </View>
           )}
 
+          {/* - CHECK ITEM (item 3, 2026-10-25 server contract) - identity is
+              title-only/low-confidence; the server withheld netProfit/roi
+              entirely (heroVerdict.headline === "CHECK ITEM", decision
+              WATCH). No BUY/PASS, no profit figures - range only (server
+              priceLow/priceHigh), the one honest sentence, and a button
+              straight into the identity-confirm re-run screen. */}
+          {!hasNoData && isCheckItem && (
+            <View style={s.noDataCard}>
+              <Text style={{color:C.text1,fontSize:15,fontWeight:"700",textAlign:"center",marginBottom:8}}>Check This Item</Text>
+              <Text style={{color:C.text3,fontSize:13,textAlign:"center",lineHeight:20,marginBottom: hasServerRange ? 10 : 16}}>
+                Not sure it's this exact item. Confirm the name, then re-run.
+              </Text>
+              {hasServerRange ? (
+                <Text style={{color:C.text2,fontSize:13,fontWeight:"700",textAlign:"center",marginBottom:16}}>
+                  {`Typical range: $${serverPriceLow}-$${serverPriceHigh}`}
+                </Text>
+              ) : null}
+              <TouchableOpacity
+                style={[s.navBtn,{alignSelf:"center",paddingHorizontal:24,paddingTop:16,paddingBottom:10}]}
+                onPress={() => onNavigate("scan-confirm", { scan: {
+                  id: result.id ?? result.scanId ?? result.scan_id,
+                  item_name: result.itemName || result.item_name || "",
+                  brand: result.brand,
+                  category: result.category,
+                  condition: resultCondition ? (CONDITION_TO_DB[resultCondition] || undefined) : undefined,
+                  buy_price: enteredBp || undefined,
+                  image_url: photos[0] ? `data:image/jpeg;base64,${photos[0]}` : undefined,
+                  specialty_data: JSON.stringify(result),
+                } })}
+              >
+                <Text style={s.navBtnText}>Is this what you're looking for?</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* - PROFIT (only when we have data) - */}
-          {!hasNoData && (
+          {!hasNoData && !isCheckItem && (
             <>
               {/* REORDER (2026-09-16): price now renders FIRST - the
                   editable price input is the actual top-of-screen content,
@@ -1390,6 +1529,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                         const next = confirmTagRead(Number(result.retailPriceRead));
                         setBuyPrice(next.buyPrice);
                         setTagConfirmPending(next.tagConfirmPending);
+                        setBuyPriceSource("tag");
                       }}
                     >
                       <Text style={s.tagConfirmBtnText}>Confirm ${result.retailPriceRead}</Text>
@@ -1400,6 +1540,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                         const next = editTagRead();
                         setBuyPrice(next.buyPrice);
                         setTagConfirmPending(next.tagConfirmPending);
+                        // REJECTED: never a source until the user types a
+                        // real replacement - see buyPriceSource's comment.
+                        setBuyPriceSource(null);
                         setTimeout(() => priceInputRef.current?.focus(), 50);
                       }}
                     >
@@ -1418,7 +1561,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                       ref={priceInputRef}
                       style={s.priceFieldInput}
                       value={buyPrice}
-                      onChangeText={setBuyPrice}
+                      onChangeText={(t) => { setBuyPrice(t); setBuyPriceSource("user"); }}
                       placeholder="0.00"
                       placeholderTextColor={C.text4}
                       keyboardType="decimal-pad"
@@ -1462,9 +1605,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   // "● REAL DATA") was the Under Armour polo's exact
                   // contradiction - "estimated" now only applies when the
                   // price genuinely isn't confirmed.
-                  profitLabel={enteredBp > 0 ? profitLabel : (result.confirmedByMoat ? "sell price" : "typical sell price")}
+                  // "Typical recent sale" (item 2): only when that number
+                  // actually differs from the planningPrice captioned under
+                  // Max buy below - see showTypicalSaleLabel's own comment.
+                  profitLabel={enteredBp > 0 ? profitLabel : (showTypicalSaleLabel ? "Typical recent sale" : (result.confirmedByMoat ? "sell price" : "typical sell price"))}
                   maxBuy={maxBuy}
                   maxBuyReasoning={maxBuyReasoning}
+                  maxBuyBasis={maxBuyBasis}
                   maxBuyLocked={maxBuyLocked}
                   onUpgradePress={() => {
                     logEvent(token, "lock_tap", { item: "maxBuy" });
@@ -1472,9 +1619,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   }}
                   dataTag={dataTag}
                   dataTagColor={dataTagColor}
-                  secondaryStats={secondaryStats}
+                  secondaryStats={noPriceEntered ? [] : secondaryStats}
                   footNote={footNote}
                   skipDetail={skipDetail}
+                  noVerdictPrompt={noVerdictPrompt}
                   flashSeq={refineSeq}
                 />
               </View>
@@ -1551,14 +1699,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   outcome.tier/label/emoji/accent directly - the SAME
                   OutcomeTierInfo the verdict card renders (FIX 3,
                   2026-09-10) - so this can't contradict the verdict card. */}
-              {!hasItemLevelSellEvidence && dealCompareValue != null && adjustedResaleLow != null ? (
+              {/* RANGE (item 2/4, 2026-10-25): server priceLow/priceHigh
+                  only - never the local AI-derived range. Shown whenever
+                  there isn't already a full item-level verdict standing on
+                  its own real numbers (!hasItemLevelSellEvidence), OR no
+                  price has been entered yet at all (noPriceEntered) - item
+                  4 calls for the range alongside Max buy in that state
+                  regardless of moat confirmation. */}
+              {hasServerRange && (noPriceEntered || !hasItemLevelSellEvidence) ? (
                 <View style={[s.rangeBanner, { backgroundColor: outcome.accent + "1a", borderColor: outcome.accent + "55" }]}>
                   <Text></Text>
                   <FlashHighlight flashSeq={refineSeq}>
                     {/* ONE CAVEAT MAX: the "not yet confirmed" qualifier
                         lives once, in ProfitFlexHero's footNote above - not
                         repeated here. */}
-                    <Text style={[s.rangeBannerSub, { flex: 1 }]}>{`At $${dealCompareValue}, typical range is $${adjustedResaleLow}-$${adjustedResaleHigh}.`}</Text>
+                    <Text style={[s.rangeBannerSub, { flex: 1 }]}>{`Typical range is $${serverPriceLow}-$${serverPriceHigh}.`}</Text>
                   </FlashHighlight>
                 </View>
               ) : null}

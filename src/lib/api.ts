@@ -3,6 +3,7 @@ import * as AppleAuthentication from "expo-apple-authentication";
 import * as WebBrowser from "expo-web-browser";
 import { supabase } from "./supabase";
 import * as ImageManipulator from "expo-image-manipulator";
+import { CONDITION_TO_DB } from "./condition";
 
 export const SUPABASE_URL = "https://tylrcmczbvcvxkbuwnhf.supabase.co";
 export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR5bHJjbWN6YnZjdnhrYnV3bmhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4OTMxMDgsImV4cCI6MjA5MDQ2OTEwOH0.RkllmmOBfdfhzC9s_3PyKrhFre9QpvzFVC-aY2xhsN4";
@@ -266,6 +267,19 @@ export async function updateScan(token: string, id: string, updates: any): Promi
   return r.json();
 }
 export async function rerunScan(token: string, opts: {
+  // CONDITION FIX (2026-10-25, AUDIT-PROVEN BUG - scan priced against used
+  // sales with five matching NEW sales in range): opts.condition is now a
+  // CONDITION_OPTIONS chip VALUE ("new-in-box"/"new-no-tags"/"used-good"/
+  // "used-heavy" - see lib/condition.ts), not a `scans.condition` DB
+  // string. Previously this function only ever sent the DB string
+  // (confirmedItem.condition - lens/route.ts's own comments call this the
+  // old COSMETIC field, never wired to pricing) and never sent
+  // conditionAssessment at all - the ONE field actually wired to the
+  // new-vs-used sales filter (see scanBarcodeFast below, which already
+  // sends both). A rerun of a "New" item with no conditionAssessment at
+  // all left the server to default the sales filter to used, exactly the
+  // measured bug. Both fields are now derived from the SAME chip value
+  // below, so they can never disagree again.
   itemName: string; brand?: string; category?: string; condition?: string; buyPrice?: number;
   extraDescription?: string; newPhotosBase64?: string[];
 }): Promise<any> {
@@ -292,7 +306,11 @@ export async function rerunScan(token: string, opts: {
       itemName: opts.itemName,
       brand: opts.brand || "Unknown",
       category: opts.category || "Other",
-      condition: opts.condition || "Good",
+      // Both derived from the same chip value - see this function's own
+      // comment above for why sending only `condition` (the cosmetic DB
+      // string) was the bug.
+      condition: (opts.condition && CONDITION_TO_DB[opts.condition]) || "Good",
+      conditionAssessment: opts.condition || "used-good",
       size: null,
     },
   };

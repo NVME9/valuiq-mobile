@@ -44,9 +44,20 @@ interface ProfitFlexHeroProps {
   dataTagColor?: string;
   secondaryStats?: SecondaryStat[]; // ROI, sell-time
   footNote?: string;
+  // Small caption rendered under maxBuyReasoning, inside the max-buy box -
+  // "Based on <planningBasis> ($planningPrice)" (2026-10-25 server
+  // contract). Shown whenever present, independent of noVerdictPrompt/isSkip.
+  maxBuyBasis?: string | null;
+
+  // NO VERDICT YET (2026-10-25, item 4): no buy price exists (tag unread or
+  // rejected) - there is nothing to verdict ON, so this replaces the
+  // ENTIRE badge+hero+copy+stats block with just the plain prompt string
+  // (max-buy still renders below, unaffected - see maxBuy/maxBuyBasis).
+  // Mutually exclusive with isSkip in practice (caller only ever sets one).
+  noVerdictPrompt?: string | null;
 
   // SKIP-path fields
-  skipDetail?: string | null;    // lens's own reasoning, shown as secondary context under the one-line reason
+  skipDetail?: string | null;    // narrativeUnavailable's one grey caveat line, shown under the one-line reason - never the server's own reasoning text (see ScannerScreen.tsx's skipDetail comment, "Remove the duplicated headline/body lines")
 
   // TWO-STAGE SCAN RENDER (2026-09-11): bumped by ScannerScreen ONLY when a
   // background /refine call actually landed corrected numbers - triggers a
@@ -82,8 +93,8 @@ function money(n: number): string {
 
 export default function ProfitFlexHero({
   outcome, itemName, categoryLine, photoBase64, onEdit, isSkip,
-  heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, maxBuyLocked = false, onUpgradePress, dataTag, dataTagColor, secondaryStats = [], footNote,
-  skipDetail, flashSeq = 0,
+  heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, maxBuyBasis, maxBuyLocked = false, onUpgradePress, dataTag, dataTagColor, secondaryStats = [], footNote,
+  skipDetail, noVerdictPrompt, flashSeq = 0,
 }: ProfitFlexHeroProps) {
   // MEASURED BUG: a long AI-generated item name ("American Flag with Fish
   // Trucker Hat (likely...") had no way to be seen in full - numberOfLines
@@ -148,24 +159,26 @@ export default function ProfitFlexHero({
         <Image source={{ uri: `data:image/jpeg;base64,${photoBase64}` }} style={st.photo} resizeMode="cover" />
       ) : null}
 
-      <FlashHighlight flashSeq={flashSeq}>
-        <View style={st.top}>
-          {isHot ? (
-            <Animated.Text style={[st.badge, { color: outcome.accent }, pulseStyle]} numberOfLines={1}>
-              {outcome.emoji} {outcome.label}
-            </Animated.Text>
-          ) : (
-            <Text style={[st.badge, { color: outcome.accent }]} numberOfLines={1}>{outcome.emoji} {outcome.label}</Text>
-          )}
-          {/* MEASURED BUG (2026-09-10): "● REAL DATA · SMALL SAMPLE" clipped
-              mid-word ("SAMP…") - `top` was a single non-wrapping row with
-              justifyContent:"space-between", so a long badge label left the
-              tag too little width before its own numberOfLines={1} ellipsized
-              it. flexWrap lets the tag drop to its own full-width line
-              instead of fighting the badge for room on one line. */}
-          {dataTag ? <Text style={[st.tag, { color: dataTagColor }]}>{dataTag}</Text> : null}
-        </View>
-      </FlashHighlight>
+      {!noVerdictPrompt && (
+        <FlashHighlight flashSeq={flashSeq}>
+          <View style={st.top}>
+            {isHot ? (
+              <Animated.Text style={[st.badge, { color: outcome.accent }, pulseStyle]} numberOfLines={1}>
+                {outcome.emoji} {outcome.label}
+              </Animated.Text>
+            ) : (
+              <Text style={[st.badge, { color: outcome.accent }]} numberOfLines={1}>{outcome.emoji} {outcome.label}</Text>
+            )}
+            {/* MEASURED BUG (2026-09-10): "● REAL DATA · SMALL SAMPLE" clipped
+                mid-word ("SAMP…") - `top` was a single non-wrapping row with
+                justifyContent:"space-between", so a long badge label left the
+                tag too little width before its own numberOfLines={1} ellipsized
+                it. flexWrap lets the tag drop to its own full-width line
+                instead of fighting the badge for room on one line. */}
+            {dataTag ? <Text style={[st.tag, { color: dataTagColor }]}>{dataTag}</Text> : null}
+          </View>
+        </FlashHighlight>
+      )}
 
       <TouchableOpacity onPress={() => setTitleExpanded(v => !v)} activeOpacity={0.7}>
         <Text style={st.itemName} numberOfLines={titleExpanded ? undefined : 2}>{itemName}</Text>
@@ -173,7 +186,22 @@ export default function ProfitFlexHero({
       </TouchableOpacity>
       {categoryLine ? <Text style={st.itemMeta}>{categoryLine}</Text> : null}
 
-      {isSkip ? (
+      {noVerdictPrompt ? (
+        <>
+          {/* NO VERDICT YET (item 4): no buy price exists - the big number
+              is purely the typical-sale estimate (never a profit figure,
+              there's no cost basis to compute one from), and the one line
+              under it is a plain, honest prompt instead of any BUY/PASS
+              framing. */}
+          {!maxBuyLocked && (
+            <FlashHighlight flashSeq={flashSeq}>
+              <Text style={[st.hero, { color: outcome.accent }]} numberOfLines={1} adjustsFontSizeToFit>{heroText}</Text>
+            </FlashHighlight>
+          )}
+          {!maxBuyLocked && <Text style={st.heroLabel}>{profitLabel}</Text>}
+          <Text style={[st.noVerdictPrompt]}>{noVerdictPrompt}</Text>
+        </>
+      ) : isSkip ? (
         <>
           <Text style={[st.skipReason, { color: outcome.accent }]}>{outcome.copy}</Text>
           {skipDetail ? <Text style={st.skipDetail}>{skipDetail}</Text> : null}
@@ -228,6 +256,11 @@ export default function ProfitFlexHero({
                 all" (ai_only) - this is specifically maxBuy===0. */}
             <Text style={st.maxBuyHeadline}>{maxBuy === 0 ? "Not worth it at these prices" : `Max buy: ${money(maxBuy)}`}</Text>
             {maxBuyReasoning ? <Text style={st.maxBuyReasoning}>{maxBuyReasoning}</Text> : null}
+            {/* "Based on <planningBasis> ($planningPrice)" (2026-10-25
+                server contract) - the conservative figure max-buy/profit
+                math is actually built on, shown once, right under the
+                reasoning it explains. */}
+            {maxBuyBasis ? <Text style={st.maxBuyBasis}>{maxBuyBasis}</Text> : null}
           </View>
         </FlashHighlight>
       )}
@@ -270,5 +303,7 @@ const st = StyleSheet.create({
   maxBuyBox: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: C.border },
   maxBuyHeadline: { color: C.text1, fontSize: 13, fontWeight: "800", marginBottom: 3 },
   maxBuyReasoning: { color: C.text3, fontSize: 12, lineHeight: 17 },
+  maxBuyBasis: { color: C.text4, fontSize: 11, lineHeight: 15, marginTop: 4 },
+  noVerdictPrompt: { color: C.text2, fontSize: 13, fontWeight: "700", marginBottom: 14 },
   foot: { color: C.text4, fontSize: 11, fontStyle: "italic", marginTop: 8 },
 });
