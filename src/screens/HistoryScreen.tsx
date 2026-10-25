@@ -1017,11 +1017,20 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                                 <View style={{flex:1}}>
                                   <Text style={s.cardName} numberOfLines={1}>{item.itemName || "Item"}</Text>
                                   {/* HONESTY SWEEP (2026-09-18): bestPlatform
-                                      here is the fee guess, not a sell rec. */}
-                                  <Text style={s.cardPlatform} numberOfLines={1}>Pay {"\u2264"}${item.buyTarget} {"\u00B7"} low fee: {item.bestPlatform}</Text>
+                                      here is the fee guess, not a sell rec.
+                                      LOCKED (2026-10-25, null-safety audit):
+                                      item.buyTarget is null on a free-plan
+                                      scan (deal-ai-pro/lib/planGating.ts) -
+                                      used to render the literal text
+                                      "Pay \u2264$null". */}
+                                  <Text style={s.cardPlatform} numberOfLines={1}>Pay {"\u2264"}${item.buyTarget != null ? item.buyTarget : "\uD83D\uDD12"} {"\u00B7"} low fee: {item.bestPlatform}</Text>
                                 </View>
+                                {/* LOCKED DECISION - same "UNKNOWN" check as
+                                    DashboardScreen.tsx's identical card; a
+                                    free-plan item used to fall through to a
+                                    false "PASS" here. */}
                                 <Text style={[s.profit, {fontSize:14, color:(item.decision==="BUY"?C.green:C.text4)}]}>
-                                  {item.decision==="BUY" ? "+$"+Math.round(item.profit||0) : "PASS"}
+                                  {item.decision==="BUY" ? "+$"+Math.round(item.profit||0) : item.decision==="UNKNOWN" ? "\uD83D\uDD12" : "PASS"}
                                 </Text>
                               </View>
                               <FlipActionsRow
@@ -1067,7 +1076,11 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                   const isSel = !!selected[item.id];
                   let appr: any = {};
                   try { appr = JSON.parse(item.specialty_data || "{}"); } catch { appr = {}; }
-                  const decColor = item.decision === "BUY" ? C.green : item.decision === "WATCH" ? C.yellow : C.red;
+                  // LOCKED DECISION (2026-10-25, null-safety audit): a
+                  // downgraded-to-free account's specialty_scan row reads
+                  // "UNKNOWN" here (deal-ai-pro/lib/planGating.ts) - used to
+                  // render as a red PASS-colored badge.
+                  const decColor = item.decision === "BUY" ? C.green : item.decision === "WATCH" ? C.yellow : item.decision === "UNKNOWN" ? C.text4 : C.red;
                   return (
                     <TouchableOpacity
                       key={item.id}
@@ -1103,7 +1116,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                           </View>
                         ) : (
                           <View style={[s.verdictBadge, {backgroundColor: decColor + "20"}]}>
-                            <Text style={[s.verdictBadgeTxt, {color: decColor}]}>{item.decision || "WATCH"}</Text>
+                            <Text style={[s.verdictBadgeTxt, {color: decColor}]}>{item.decision === "UNKNOWN" ? "🔒" : (item.decision || "WATCH")}</Text>
                           </View>
                         )}
                       </View>

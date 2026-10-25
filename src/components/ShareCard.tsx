@@ -54,8 +54,15 @@ export default function ShareCard({ result, oracle, photoBase64, photoUri, onPho
   const agreementBadge: string | null = result?.agreementBadge || oracle?.badge || null;
 
   const decision = result?.decision || "PASS";
-  const verdictColor = decision === "BUY" ? C.green : decision === "WATCH" ? C.yellow : C.red;
-  const verdictLabel = decision === "BUY" ? "BUY IT" : decision === "WATCH" ? "WATCH IT" : "PASS";
+  // LOCKED DECISION (2026-10-25, null-safety audit): a free-plan scan's
+  // decision comes back "UNKNOWN" (deal-ai-pro/lib/planGating.ts), never
+  // null - without this check it fell through the else branch below and
+  // this card rendered a false, SHARED "PASS" verdict on an item the
+  // server never actually judged. Neutral gray + a lock, matching the
+  // same 🔒-for-locked convention ScannerScreen.tsx/HistoryScreen.tsx use.
+  const isLockedDecision = decision === "UNKNOWN";
+  const verdictColor = isLockedDecision ? C.text4 : decision === "BUY" ? C.green : decision === "WATCH" ? C.yellow : C.red;
+  const verdictLabel = isLockedDecision ? "🔒 LOCKED" : decision === "BUY" ? "BUY IT" : decision === "WATCH" ? "WATCH IT" : "PASS";
 
   const pred = oracle?.prediction;
   const profit = fmtMoney(pred?.medianProfit ?? result?.netProfit);

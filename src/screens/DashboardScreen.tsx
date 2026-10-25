@@ -478,12 +478,17 @@ export default function DashboardScreen({ token, plan, planLoaded = true, scansL
                         <Text style={{fontSize:20}}>📷</Text>
                       </View>
                     )}
+                    {/* LOCKED DECISION (2026-10-25, null-safety audit): a
+                        free-plan scan's decision is "UNKNOWN" (deal-ai-pro/
+                        lib/planGating.ts), never null - without this check
+                        it fell through to the PASS/red branch below, a
+                        false verdict on an item the server never judged. */}
                     <View style={[s.verdict, {
-                      backgroundColor:scan.decision==="BUY"?C.green+"20":scan.decision==="WATCH"?C.yellow+"20":"#ff6b6b20"
+                      backgroundColor:scan.decision==="BUY"?C.green+"20":scan.decision==="WATCH"?C.yellow+"20":scan.decision==="UNKNOWN"?C.text4+"20":"#ff6b6b20"
                     }]}>
                       <Text style={[s.verdictTxt, {
-                        color:scan.decision==="BUY"?C.green:scan.decision==="WATCH"?C.yellow:C.red
-                      }]}>{scan.decision==="BUY"?"BUY":scan.decision==="WATCH"?"WATCH":"PASS"}</Text>
+                        color:scan.decision==="BUY"?C.green:scan.decision==="WATCH"?C.yellow:scan.decision==="UNKNOWN"?C.text4:C.red
+                      }]}>{scan.decision==="BUY"?"BUY":scan.decision==="WATCH"?"WATCH":scan.decision==="UNKNOWN"?"🔒":"PASS"}</Text>
                     </View>
                     <View style={{flex:1}}>
                       <Text style={s.scanName} numberOfLines={1}>{scan.item_name || "Item"}</Text>
