@@ -971,7 +971,21 @@ export default function App() {
                   return (
                     <TouchableOpacity
                       key={t.id} style={s.tabItem}
-                      onPress={()=>setScreen(t.id)}
+                      // HISTORY RESULTS REUSE (stale-state fix): was a bare
+                      // setScreen(t.id), which left `navData` exactly as it
+                      // was - so tapping the Scan tab after ScannerScreen
+                      // had been opened with { viewScan } (History's "View
+                      // result", or a just-completed re-run) silently
+                      // reopened that SAME saved result instead of a fresh
+                      // camera, on the very next remount (App.tsx renders
+                      // SCREENS[screen], one screen node at a time, so
+                      // ScannerScreen remounts here and reads whatever
+                      // navData still holds). navigate() already resets
+                      // both navData and the back-stack for every tab
+                      // screen (see its own comment) - using it here
+                      // instead makes a direct tab tap behave the same as
+                      // every other way of reaching a tab.
+                      onPress={()=>navigate(t.id)}
                       onLongPress={t.id === "profile" ? () => {
                         const { Alert } = require("react-native");
                         Alert.alert("Sign Out", "Sign out of ValuIQ?", [

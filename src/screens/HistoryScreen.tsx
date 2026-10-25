@@ -845,6 +845,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                           onSold={() => setLogSaleScan(scan)}
                           onViewReveal={() => openReveal(scan)}
                           onEdit={() => onNavigate("scan-confirm", { scan })}
+                          onViewResult={() => onNavigate("scanner", { viewScan: scan })}
                           onShare={() => shareHistoryRow(scan)}
                           sharing={sharingRow && shareTarget?.id === scan.id}
                           onDelete={() => deleteItem(scan.id, "scan", scan.item_name||"Item")}

@@ -19,6 +19,13 @@ interface Props {
   sold?: boolean;
   onViewReveal?: () => void;
   onEdit: () => void;
+  // HISTORY RESULTS REUSE (2026-10-25): opens the full scan-result page for
+  // THIS saved row (scans.specialty_data), the same screen a fresh scan
+  // ends on, with no new scan/API call/credits spent - see
+  // HistoryScreen.tsx's Scans-tab call site and lib/viewSavedScan.ts. Omit
+  // (as Thrift/Specialty's own FlipActionsRow call sites do) to hide the
+  // pill entirely - those two tabs are unchanged by this feature.
+  onViewResult?: () => void;
   // Caller-owned: builds and captures the branded ShareCard image for THIS
   // row and opens the native share sheet (see HistoryScreen.tsx's
   // shareHistoryRow) - replaces the old shareMessage:string prop, which
@@ -36,7 +43,7 @@ interface Props {
   onDelete?: () => void;
 }
 
-export default function FlipActionsRow({ hasPhoto, onView, onSold, sold, onViewReveal, onEdit, onShare, sharing, onDelete }: Props) {
+export default function FlipActionsRow({ hasPhoto, onView, onSold, sold, onViewReveal, onEdit, onViewResult, onShare, sharing, onDelete }: Props) {
   return (
     <View style={s.row}>
       {hasPhoto && onView ? (
@@ -56,6 +63,11 @@ export default function FlipActionsRow({ hasPhoto, onView, onSold, sold, onViewR
       <TouchableOpacity style={s.pill} onPress={onEdit}>
         <Text style={s.pillTxt}>{"✏️"} Edit</Text>
       </TouchableOpacity>
+      {onViewResult && (
+        <TouchableOpacity style={s.pill} onPress={onViewResult}>
+          <Text style={s.pillTxt}>{"📊"} View result</Text>
+        </TouchableOpacity>
+      )}
       {/* Sold items already have a superior share path - "View reveal" opens
           the branded-image win share. A second Share pill here would be
           redundant for the same card. Not-sold items get the SAME branded

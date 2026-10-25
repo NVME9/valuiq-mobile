@@ -120,7 +120,12 @@ export default function ScanConfirmScreen({ token, onNavigate, onBack, navData }
       && effectiveBuyPrice === (Number(scan.buy_price) || 0);
     if (nothingChanged) {
       Alert.alert("No changes", "Nothing about this item changed - the saved result is unchanged.");
-      onNavigate("history");
+      // HISTORY RESULTS REUSE (BUG 1, "nothing changed" shortcut): open the
+      // saved result instead of silently dropping back to History - same
+      // { viewScan } route param ScannerScreen's load effect reads for
+      // HistoryScreen's "View result" button (lib/viewSavedScan.ts), here
+      // handed the UNMODIFIED scan since nothing about it actually changed.
+      onNavigate("scanner", { viewScan: scan });
       return;
     }
 
@@ -168,7 +173,14 @@ export default function ScanConfirmScreen({ token, onNavigate, onBack, navData }
         if (CONDITION_TO_DB[effectiveConditionChip]) updates.condition = CONDITION_TO_DB[effectiveConditionChip];
         try { await updateScan(token, scan.id, updates); } catch {}
         invalidateScanHistoryCache(token);
-        onNavigate("history");
+        // HISTORY RESULTS REUSE (BUG 1): open the full results page for
+        // THIS scan with the new numbers, instead of bouncing back to the
+        // History list - the same screen a fresh scan ends on (see
+        // ScannerScreen.tsx's navData handling), fed the UPDATED row
+        // (scan.id unchanged - same scan, never a new one) rather than a
+        // second round trip back to the server to re-fetch what was just
+        // written.
+        onNavigate("scanner", { viewScan: { ...scan, ...updates } });
       } else {
         Alert.alert("Re-run failed", "Could not re-analyze. Try again.");
       }

@@ -19,6 +19,7 @@ import ApiDebugPanel from "../components/ApiDebugPanel";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { deriveTagConfirmPending, confirmTagRead, editTagRead } from "../lib/tagConfirmState";
 import { shouldPatchSettledVerdict, settleSignature, type BuyPriceSource } from "../lib/scanSettleState";
+import { buildSavedScanView } from "../lib/viewSavedScan";
 import { scheduleSaleCheckIn, requestNotificationPermission } from "../lib/notifications";
 import StagedProgress from "../components/StagedProgress";
 import * as Notifications from "expo-notifications";
@@ -80,6 +81,16 @@ interface Props {
   onLogout: () => void;
   firstScanNudge?: boolean;
   onDismissFirstScanNudge?: () => void;
+  // HISTORY RESULTS REUSE (2026-10-25): { viewScan: <scans row> } opens this
+  // screen straight onto the results step for an already-saved scan - no
+  // camera, no review, no analyze() call - instead of the normal camera-
+  // first mount. The ONE route param both HistoryScreen's new "View result"
+  // button and ScanConfirmScreen's confirmAndRerun use (see
+  // lib/viewSavedScan.ts) - this screen remounts fresh every time it
+  // becomes the active tab (App.tsx renders SCREENS[screen], one at a time),
+  // so reading this once at mount is enough; nothing here needs to react to
+  // it changing while already mounted.
+  navData?: { viewScan?: any } | null;
 }
 
 // Reusable collapsed-by-default section: the hero answers the question
@@ -127,7 +138,7 @@ let cameraPermissionKnownGranted = false;
 // priceBasis.ts, deal-ai-pro).
 const OWNER_EMAILS = ["natev9@comcast.net", "nvisionsinc@gmail.com", "nathanrussell9@outlook.com"];
 
-export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, onNavigate, onLogout, firstScanNudge, onDismissFirstScanNudge }: Props) {
+export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, onNavigate, onLogout, firstScanNudge, onDismissFirstScanNudge, navData }: Props) {
   const isOwner = OWNER_EMAILS.includes(emailFromToken(token).toLowerCase());
   const [permission, requestPermission] = useCameraPermissions();
   // Mirrors permission.granted into the module-level cache the instant it's
@@ -189,6 +200,24 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // once this is null, so a rejected-then-abandoned or merely-suggested
   // read can never reach the stored row.
   const [buyPriceSource, setBuyPriceSource] = useState<BuyPriceSource>(null);
+  // HISTORY RESULTS REUSE: true for the whole time this mount is showing a
+  // SAVED scan's result (navData.viewScan - see the load effect below and
+  // lib/viewSavedScan.ts), covering both HistoryScreen's "View result"
+  // button and a just-completed Edit & Re-run landing here instead of
+  // bouncing back to History. false for a normal camera-first mount.
+  // Read by: the back chevron (goes to History instead of the camera/review
+  // step), the Oracle fetch effect (skipped entirely - BUG 2's "no API
+  // call, no credits used" requirement), and the PATCH-on-settle effect via
+  // savedViewBaselineRef below.
+  const [viewingSavedScan, setViewingSavedScan] = useState(false);
+  // Snapshot of the EXACT (buyPrice, buyPriceSource, resultCondition) this
+  // saved view loaded with - null for a normal fresh-scan mount. The PATCH-
+  // on-settle effect skips its debounced write entirely while the live
+  // state still matches this baseline: just OPENING a saved result (or
+  // landing here right after a re-run that already persisted these same
+  // values) must never fire a redundant PATCH - only a genuine edit (price
+  // typed, condition changed) that moves state away from the baseline may.
+  const savedViewBaselineRef = useRef<{ buyPrice: string; buyPriceSource: BuyPriceSource; resultCondition: string } | null>(null);
   // SCAN ATTEMPT GUARD (2026-10-25): bumped at the start of every analyze()/
   // handleBarcode() call AND on reset() - finishAnalyze bails immediately
   // if its own attempt number no longer matches this, i.e. the user has
@@ -265,6 +294,44 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       setSharingImage(false);
     }
   }
+  // HISTORY RESULTS REUSE (BUG 1 + BUG 2): opens straight onto the results
+  // step for navData.viewScan instead of the normal camera-first mount -
+  // see lib/viewSavedScan.ts and this screen's navData Props comment. Mount-
+  // only ([] deps): this component remounts fresh every time it becomes the
+  // active tab (App.tsx renders SCREENS[screen], one screen node at a time),
+  // so navData is whatever the navigate() call that brought us here passed,
+  // for the lifetime of this mount - nothing here needs to react to it
+  // changing while already mounted, and nothing else may write it.
+  useEffect(() => {
+    const viewScan = navData?.viewScan;
+    if (!viewScan) return;
+    setViewingSavedScan(true);
+    const built = buildSavedScanView(viewScan);
+    if (!built) {
+      // BUG 2, rule: "if a saved result is missing or can't be shown, show
+      // a short message offering Re-run" - _savedScanUnavailable/_savedScan
+      // are read by the step==="result" error branch below, which renders
+      // that message instead of the generic "Scan Failed/Try Again" copy
+      // (there is no camera retry to offer here - there was never a fresh
+      // scan attempt to retry).
+      setResult({ _error: "Couldn't load this saved result.", _savedScanUnavailable: true, _savedScan: viewScan });
+      setStep("result");
+      return;
+    }
+    setResult(built.result);
+    setBuyPrice(built.buyPrice);
+    setBuyPriceSource(built.buyPriceSource);
+    setResultCondition(built.resultCondition);
+    setTagConfirmPending(false);
+    // Nothing to re-confirm on a saved/already-settled scan - re-asking
+    // "is this what you read off the tag?" for a past result makes no sense
+    // (see deriveTagConfirmPending's own callers, all fresh-scan-only).
+    savedViewBaselineRef.current = { buyPrice: built.buyPrice, buyPriceSource: built.buyPriceSource, resultCondition: built.resultCondition };
+    latestVerdictRef.current = null;
+    lastPatchedRef.current = "";
+    setStep("result");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // PATCH-ON-SETTLE: persists whatever the result-step render most recently
   // computed (latestVerdictRef, written during render - see its own
   // comment) back to the stored scans row, debounced 900ms after price/
@@ -276,6 +343,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // never got persisted before this existed.
   useEffect(() => {
     if (step !== "result" || !result || result._error) return;
+    // HISTORY RESULTS REUSE (BUG 2 - "no API call, no credits used" for
+    // just OPENING a saved result): still exactly matches what this view
+    // loaded with (or what a just-completed re-run already persisted) -
+    // nothing to settle, so don't even start the debounce timer. The
+    // instant the user actually edits price/condition this stops matching
+    // and the normal settle/PATCH behavior below takes over unchanged.
+    const baseline = savedViewBaselineRef.current;
+    if (baseline && baseline.buyPrice === buyPrice && baseline.buyPriceSource === buyPriceSource && baseline.resultCondition === resultCondition) {
+      return;
+    }
     const timer = setTimeout(() => {
       const v = latestVerdictRef.current;
       // shouldPatchSettledVerdict (lib/scanSettleState.ts) is the ONE gate:
@@ -297,6 +374,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   useEffect(() => {
     let alive = true;
     setOracle(null);
+    // HISTORY RESULTS REUSE (BUG 2 - "no API call, no credits used"): the
+    // Oracle fetch only ever feeds ShareCard's off-screen share image (see
+    // its own comment a few lines down) - nothing this screen actually
+    // DISPLAYS reads it. Skipped entirely while viewing a saved result, so
+    // opening one from History (or landing here after a re-run, which
+    // already made its own real network call) never makes a second,
+    // unnecessary one.
+    if (viewingSavedScan) return;
     const r = result;
     if (r && !r._error && (r.itemName || r.item_name)) {
       getProfitOracle(token, {
@@ -322,7 +407,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     return () => { alive = false; };
     // buyPrice matters: without it the Oracle is computed once at scan time and
     // never updates when the user enters what they're actually paying.
-  }, [result, buyPrice]);
+  }, [result, buyPrice, viewingSavedScan]);
   // STORE REVIEW - ACTUAL TRIGGER: fires once per scan the moment its hero
   // headline first resolves to SOLID or WORTH A LOOK (never on PASS/THIN/
   // ai_only - reviewHeadlineRef.current.headline is null for all of those,
@@ -330,7 +415,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // ERROR exclusion is automatic: this never runs outside step==="result"
   // with a non-error result).
   useEffect(() => {
-    if (step !== "result") return;
+    // HISTORY RESULTS REUSE (BUG 2 - "no API call, no credits used"):
+    // requestReviewIfEligible calls getScanCount (a real network call) and,
+    // when eligible, opens the NATIVE review modal and stamps last-asked -
+    // none of that may ever fire from just reopening a past result, which
+    // would otherwise re-prompt for a review (or spend a network call)
+    // every time someone revisits a SOLID/WORTH A LOOK item in History.
+    if (step !== "result" || viewingSavedScan) return;
     const snap = reviewHeadlineRef.current;
     if (!snap.headline || !snap.scanKey) return;
     if (reviewPromptedKeyRef.current === snap.scanKey) return;
@@ -339,15 +430,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       requestReviewIfEligible(token, "verdict").then(setReviewDebug);
     }, REVIEW_PROMPT_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [step, result, buyPrice, resultCondition, token]);
+  }, [step, result, buyPrice, resultCondition, token, viewingSavedScan]);
   // STORE REVIEW - OWNER-ONLY LIVE READOUT: side-effect-free re-evaluation
   // (never opens the real modal, never writes last-asked) so isOwner can
   // see eligible/failing-condition/last-asked on the result screen at any
   // time, not only in the instant the real trigger above actually fires.
+  // Still a real getScanCount network call though (see evaluateReview's own
+  // comment) - same "no API call" reasoning as the trigger effect above
+  // applies while viewing a saved result.
   useEffect(() => {
-    if (!isOwner || step !== "result" || result?._error) return;
+    if (!isOwner || step !== "result" || result?._error || viewingSavedScan) return;
     evaluateReview(token, "verdict").then(setReviewDebug);
-  }, [isOwner, step, result, token]);
+  }, [isOwner, step, result, token, viewingSavedScan]);
   const [barcodeScanned, setBarcodeScanned] = useState(false);
   const cameraRef        = useRef<any>(null);
   // CLIENT TIMING INSTRUMENTATION (2026-09-11): real, measured time spent
@@ -391,6 +485,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     latestVerdictRef.current = null;
     lastPatchedRef.current = "";
     scanAttemptRef.current++;
+    // HISTORY RESULTS REUSE: "New Scan" from a saved-result view abandons
+    // that view entirely - without this, the just-cleared result/buyPrice
+    // state would still be treated as "viewing a saved scan" (no Oracle
+    // fetch, PATCH-on-settle still comparing against the old baseline) for
+    // whatever the user scans next.
+    setViewingSavedScan(false);
+    savedViewBaselineRef.current = null;
   }
 
   async function takePhoto() {
@@ -738,22 +839,46 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
   // - RESULT -
   if (step === "result") {
-    if (result?._error) return (
-      <SafeAreaView style={s.safe}>
-        <View style={s.nav}>
-          <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
-          <HeaderLogo textStyle={s.logoText}/>
-        </View>
-        <View style={s.center}>
-          <Text style={{ fontSize: 36, marginBottom: 16 }}></Text>
-          <Text style={s.h2}>Scan Failed</Text>
-          <Text style={[s.body, { textAlign: "center" }]}>{result._error}</Text>
-          <TouchableOpacity style={[s.greenBtn, { marginTop: 24 }]} onPress={reset}>
-            <Text style={s.greenBtnText}>Try Again</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
+    if (result?._error) {
+      // HISTORY RESULTS REUSE (BUG 2 - "missing or can't be shown" saved
+      // result): a distinct message + action from the generic scan-failure
+      // copy below - there was never a fresh scan attempt here to retry,
+      // so "Try Again"/reset() (back to the camera) would be meaningless.
+      // Offers Re-run instead, same screen ScanConfirmScreen's own Edit
+      // entry point uses, and Back goes straight to History (no camera/
+      // review step was ever entered on this mount).
+      if (result._savedScanUnavailable) return (
+        <SafeAreaView style={s.safe}>
+          <View style={s.nav}>
+            <TouchableOpacity onPress={() => onNavigate("history")} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
+            <HeaderLogo textStyle={s.logoText}/>
+          </View>
+          <View style={s.center}>
+            <Text style={s.h2}>Couldn't load this result</Text>
+            <Text style={[s.body, { textAlign: "center" }]}>This scan's saved details are missing or unreadable. Re-run it to get a fresh result.</Text>
+            <TouchableOpacity style={[s.greenBtn, { marginTop: 24 }]} onPress={() => onNavigate("scan-confirm", { scan: result._savedScan })}>
+              <Text style={s.greenBtnText}>Re-run</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      );
+      return (
+        <SafeAreaView style={s.safe}>
+          <View style={s.nav}>
+            <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
+            <HeaderLogo textStyle={s.logoText}/>
+          </View>
+          <View style={s.center}>
+            <Text style={{ fontSize: 36, marginBottom: 16 }}></Text>
+            <Text style={s.h2}>Scan Failed</Text>
+            <Text style={[s.body, { textAlign: "center" }]}>{result._error}</Text>
+            <TouchableOpacity style={[s.greenBtn, { marginTop: 24 }]} onPress={reset}>
+              <Text style={s.greenBtnText}>Try Again</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      );
+    }
 
     const hasGoodData   = result.dataQuality === "strong";
     const hasLimitedData = result.dataQuality === "limited";
@@ -1051,7 +1176,32 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // else still reads result.agreeingCount directly, this is purely for
     // the sentence text.
     const agreeingCountForCopy = Number(result.agreeingCount) || 0;
-    let outcome = (enteredBp > 0 && hasItemLevelSellEvidence)
+    // LOCKED VERDICT (2026-10-25, HISTORY-RESULTS FIX: no false PASS): both
+    // classifyOutcome below and classifyHeroVerdictLocal further down take
+    // heroProfit/heroRoi as inputs, which are forced to 0 (never null) once
+    // maxBuyLocked - NOT "unknown," a real, honest 0. Every tier classifier
+    // in this codebase treats netProfit<=0 as a hard SKIP/PASS (see
+    // lib/outcomeTier.ts's own rule 1/2 and classifyHeroVerdictLocal's first
+    // real gate) - so a free-plan viewer who had ANY buy price on screen
+    // (typed here, or carried over from a saved scan's own buy_price - see
+    // lib/viewSavedScan.ts) would see a confident "SKIP"/"PASS" the server
+    // never actually computed, on a ceiling it explicitly withheld. Short-
+    // circuits to the same neutral 🔒 convention used everywhere else
+    // (HistoryScreen.tsx's rowLocked, this file's own maxBuyLocked ternaries
+    // a few lines up) instead of ever reaching either classifier with
+    // zeroed-but-real-looking numbers.
+    const lockedPricedOutcome = maxBuyLocked && enteredBp > 0;
+    let outcome = lockedPricedOutcome
+      ? {
+          tier: "estimate" as const,
+          emoji: "🔒",
+          label: "LOCKED",
+          copy: "Your plan locks the buy/pass verdict and profit math for this item.",
+          accent: C.text4,
+          adjustedROI: 0,
+          daysUsed: 0,
+        }
+      : (enteredBp > 0 && hasItemLevelSellEvidence)
       ? classifyOutcome({
           noFlipMargin: !!result.noFlipMargin,
           netProfit: heroProfit,
@@ -1139,7 +1289,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // owner's real Walmart scans all stored buy_price=0/decision=UNKNOWN
     // because nothing ever wrote the price shown here back to the row).
     let finalHeadline: HeroVerdict = null;
-    if (enteredBp > 0) {
+    // LOCKED VERDICT: never reaches classifyHeroVerdictLocal while
+    // maxBuyLocked - see lockedPricedOutcome's own comment above for why
+    // (heroProfit/heroRoi are a real, zeroed 0 here, not "no data," and
+    // every classifier reads netProfit<=0 as a hard PASS).
+    if (enteredBp > 0 && !maxBuyLocked) {
       const segOut: any = result.segmentOutcomes;
       const tier: string = result.priceBasisTier || (result.confirmedByMoat ? "item_moat" : segOut ? "segment" : "ai_only");
       // sellThroughPct: the EXACT value classifyHeroVerdict used server-side
@@ -1423,7 +1577,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         />
         {/* Nav */}
         <View style={s.nav}>
-          <TouchableOpacity onPress={() => setStep("review")} style={s.navBack}>
+          {/* HISTORY RESULTS REUSE: this mount never went through camera/
+              review (navData.viewScan skipped straight to "result" - see
+              this screen's own load effect), so there is no earlier step to
+              go back to. Back means History instead. */}
+          <TouchableOpacity onPress={() => (viewingSavedScan ? onNavigate("history") : setStep("review"))} style={s.navBack}>
             <Text style={s.navBackText}>{"\u2039"}</Text>
           </TouchableOpacity>
           <HeaderLogo textStyle={s.logoText}/>
