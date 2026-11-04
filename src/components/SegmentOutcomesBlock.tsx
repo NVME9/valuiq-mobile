@@ -39,19 +39,35 @@ const CONDITION_BADGE: Record<SegmentOutcomesData["conditionBasis"], string> = {
   "mixed": "mixed condition",
 };
 
+// SAMPLE FLOOR (2026-11-04, result-screen-clarity item 3): a median is a
+// claim about real outcomes, not a guess - never shown off a sample thinner
+// than the floor this screen uses everywhere else for a percentile/median
+// to be honest (matches flexReveal.ts's MIN_SEGMENT_FOR_PERCENTILE). Checked
+// independently for Paid (resolvedCount - anyone who logged a buy price)
+// and Sold (soldCount - a strict subset of resolvedCount, only the ones
+// that actually sold) since one can clear the floor while the other doesn't.
+const MIN_SAMPLE_FOR_MEDIAN = 15;
+
 export default function SegmentOutcomesBlock({ segment }: { segment: SegmentOutcomesData | null | undefined }) {
   if (!segment) return null;
   const flipWord = segment.soldCount === 1 ? "flip" : "flips";
   // Exactly one condition badge per result - CONDITION_BADGE is a total
   // function over conditionBasis's three values, so this is never blank.
-  const footer = `From ${segment.soldCount} real ${flipWord} · ${CONDITION_BADGE[segment.conditionBasis]}`;
+  const footer = `${segment.soldCount} real ${flipWord} · ${CONDITION_BADGE[segment.conditionBasis]}`;
+  const showPaidMedian = segment.medianBuyPrice != null && segment.resolvedCount >= MIN_SAMPLE_FOR_MEDIAN;
+  const showSoldMedian = segment.medianSoldPrice != null && segment.soldCount >= MIN_SAMPLE_FOR_MEDIAN;
 
   return (
     <View style={s.card}>
-      <Text style={s.eyebrow}>What resellers made</Text>
+      {/* HEADER (2026-11-04, result-screen-clarity item 2): names the real
+          population behind these numbers - a DIFFERENT, broader group than
+          whatever item-level sold-comp count the hero above shows - so a
+          viewer never mistakes this card's N for the hero's N, even when
+          the two numbers happen to look similar (e.g. 48 vs 40). */}
+      <Text style={s.eyebrow}>From {segment.resolvedCount} ValuIQ resellers</Text>
       <Text style={s.title}>{segment.segmentLabel}</Text>
-      {segment.medianBuyPrice != null && <Text style={s.line}>Paid: ${Math.round(segment.medianBuyPrice)} median</Text>}
-      {segment.medianSoldPrice != null && <Text style={s.line}>Sold: ${Math.round(segment.medianSoldPrice)} median</Text>}
+      {showPaidMedian && <Text style={s.line}>Paid: ${Math.round(segment.medianBuyPrice!)} median</Text>}
+      {showSoldMedian && <Text style={s.line}>Sold: ${Math.round(segment.medianSoldPrice!)} median</Text>}
       {segment.sellThroughPct != null && <Text style={s.line}>Sold through: {Math.round(segment.sellThroughPct)}%</Text>}
       {segment.medianDaysToSell != null && <Text style={s.line}>Days to sell: {Math.round(segment.medianDaysToSell)}</Text>}
       <Text style={s.footer}>{footer}</Text>

@@ -1710,8 +1710,15 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 </View>
               ) : (
                 <>
+                  {/* STALE HEADER FIX (2026-11-04, result-screen-clarity item
+                      4): this used to echo result.retailPriceRead (the
+                      frozen, scan-time OCR read) forever, even after the
+                      field below was edited to a different value - the label
+                      kept saying "Tag: $14.99" while the input showed $22.
+                      Reads the live `buyPrice` field state instead, so this
+                      line always matches what's actually in the box below it. */}
                   <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
-                    {Number(result.retailPriceRead) > 0 ? `Tag: $${result.retailPriceRead} (tap to change)` : "Enter price for your verdict"}
+                    {enteredBp > 0 ? `Tag: $${buyPrice} (tap to change)` : "Enter price for your verdict"}
                   </Text>
                   <View style={s.priceFieldWrap}>
                     <Text style={s.priceFieldDollar}>$</Text>
