@@ -159,7 +159,7 @@ export function classifyOutcome(input: OutcomeTierInput): OutcomeTierInfo {
 // inline there, now shared so the new tag-price-aware PATCH effect (see
 // ScannerScreen.tsx's patch-on-price-settle useEffect) can compute the SAME
 // verdict without a second, drifting copy of this logic.
-export type HeroVerdict = "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" | null;
+export type HeroVerdict = "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" | "CHECK ITEM" | null;
 
 // ALWAYS-ANSWER TIER 4 (2026-10-18) - mirrors deal-ai-pro's lib/priceBasis.ts
 // classifyHeroVerdict's identical, same-date update: "comparable_range" is
@@ -171,10 +171,20 @@ export type HeroVerdict = "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" | null;
 export function classifyHeroVerdictLocal(opts: {
   tier: string; buyPrice: number; netProfit: number; roi: number; sellThroughPct: number | null;
   comparableRangeConfidence?: "low" | "medium" | null;
+  // BARE-CATEGORY FALLBACK OVERRIDE (2026-11-04, owner phone bug) - mirrors
+  // deal-ai-pro's lib/priceBasis.ts classifyHeroVerdict's identical,
+  // same-date update. Server now sends this on every response (see
+  // app/api/lens/route.ts's "comparableRangeScope" field, right next to
+  // comparableRangeConfidence) specifically so this local mirror can stay
+  // in sync - a scan this screen's own price-edit recompute touches must
+  // never show PASS/BUY off a bare-category match the server itself would
+  // have called CHECK ITEM.
+  comparableRangeScope?: "title_tokens" | "brand_category" | "category" | null;
 }): HeroVerdict {
-  const { tier, buyPrice, netProfit, roi, sellThroughPct, comparableRangeConfidence } = opts;
+  const { tier, buyPrice, netProfit, roi, sellThroughPct, comparableRangeConfidence, comparableRangeScope } = opts;
   if (tier === "ai_only") return null;
   if (!(buyPrice > 0)) return null;
+  if (tier === "comparable_range" && comparableRangeScope === "category") return "CHECK ITEM";
   if (netProfit <= 0) return "PASS";
   if (roi < ROI_BUY_MIN) return "THIN";
   if (tier === "comparable_range") return comparableRangeConfidence === "low" ? "THIN" : "WORTH A LOOK";
@@ -186,6 +196,10 @@ export function classifyHeroVerdictLocal(opts: {
 export function decisionFromVerdict(verdict: HeroVerdict): "BUY" | "WATCH" | "PASS" | "UNKNOWN" {
   if (verdict == null) return "UNKNOWN";
   if (verdict === "PASS") return "PASS";
-  if (verdict === "THIN") return "WATCH";
+  // CHECK ITEM maps to WATCH, same bucket THIN uses - mirrors deal-ai-pro's
+  // lib/priceBasis.ts decisionFromVerdict. Checked explicitly (not folded
+  // into the THIN case above) so a future HeroVerdict addition can't
+  // silently fall through to the BUY default below.
+  if (verdict === "THIN" || verdict === "CHECK ITEM") return "WATCH";
   return "BUY";
 }
