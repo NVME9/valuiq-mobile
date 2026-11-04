@@ -103,5 +103,30 @@ assertEqual(
   assertEqual("numeric scan id is coerced to a string on result.id", view?.result?.id, "42");
 }
 
+// ── photoBase64 (item 7, 2026-11-04 owner phone bug): the photo lives ONLY
+// in scan.image_url - specialty_data never carries it. ──
+{
+  const scan = {
+    id: "s4", buy_price: 0,
+    specialty_data: "{}",
+    image_url: "data:image/jpeg;base64,/9j/AAA==",
+  };
+  const view = buildSavedScanView(scan);
+  assertEqual("stored data: URI is stripped to raw base64", view?.photoBase64, "/9j/AAA==");
+}
+{
+  const scan = { id: "s5", buy_price: 0, specialty_data: "{}", image_url: null };
+  const view = buildSavedScanView(scan);
+  assertEqual("no image_url on the row: photoBase64 is null, never a blank string", view?.photoBase64, null);
+}
+{
+  // Defensive only - no real row in this account has ever stored a plain
+  // URL here, but photoBase64 must never pass one through unchanged (it's
+  // not the data: URI shape ProfitFlexHero/ShareCard expect).
+  const scan = { id: "s6", buy_price: 0, specialty_data: "{}", image_url: "https://example.com/photo.jpg" };
+  const view = buildSavedScanView(scan);
+  assertEqual("an http(s) image_url is not treated as inline base64", view?.photoBase64, null);
+}
+
 console.log(`\n${failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`}`);
 process.exit(failures === 0 ? 0 : 1);

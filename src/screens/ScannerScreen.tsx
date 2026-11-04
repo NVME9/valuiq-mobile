@@ -322,6 +322,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setBuyPrice(built.buyPrice);
     setBuyPriceSource(built.buyPriceSource);
     setResultCondition(built.resultCondition);
+    // PHOTO (item 7) - see lib/viewSavedScan.ts's SavedScanView.photoBase64
+    // comment. `photos` is otherwise only ever populated by this screen's
+    // own camera-capture flow, which a saved-view mount never runs.
+    setPhotos(built.photoBase64 ? [built.photoBase64] : []);
     setTagConfirmPending(false);
     // Nothing to re-confirm on a saved/already-settled scan - re-asking
     // "is this what you read off the tag?" for a past result makes no sense
@@ -1309,6 +1313,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       const headline: HeroVerdict = classifyHeroVerdictLocal({
         tier, buyPrice: enteredBp, netProfit: heroProfit, roi: heroRoi, sellThroughPct: heroSellThroughPct,
         comparableRangeConfidence: result.comparableRangeConfidence ?? null,
+        comparableRangeScope: result.comparableRangeScope ?? null,
       });
       finalHeadline = headline;
       // STORE REVIEW: real-data tier only (ai_only already headline:null

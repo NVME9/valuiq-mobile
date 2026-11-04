@@ -22,6 +22,24 @@ export interface SavedScanView {
   buyPrice: string;
   buyPriceSource: BuyPriceSource;
   resultCondition: string;
+  // PHOTO (2026-11-04, owner phone bug, item 7) - specialty_data NEVER
+  // carries the photo (confirmed against this account's real rows: no
+  // imageUrl/image/photoUrl field on any saved specialty_data snapshot,
+  // fresh scan or re-run) - the ONLY place a scan's photo lives is the
+  // scans.image_url column itself. A fresh scan's result-step photo comes
+  // from this screen's OWN `photos` capture-state array, which a saved-view
+  // mount never populates - so a reopened scan showed no photo even once
+  // the "load the stored row, no network call" fix (BUG 1/2) was in,
+  // because that fix only ever read specialty_data. Raw base64 (NOT a
+  // data: URI) - same shape ScannerScreen.tsx's own `photos` entries are in
+  // (ProfitFlexHero/ShareCard's photoBase64 prop prepends the data: URI
+  // prefix itself) - stripped here so this is a drop-in match for
+  // setPhotos([...]) regardless of which shape the stored column is in.
+  photoBase64: string | null;
+}
+
+function stripDataUriPrefix(value: string): string {
+  return value.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "");
 }
 
 // BUY-PRICE SOURCE FOR A SAVED ROW (rule (e)): scans.buy_price_source is
@@ -61,6 +79,15 @@ export function buildSavedScanView(scan: any): SavedScanView | null {
 
   const savedBuyPrice = Number(scan.buy_price) || 0;
   const buyPriceSource = resolveSavedBuyPriceSource(savedBuyPrice, full);
+  // This account's rows store image_url as an inline base64 data: URI
+  // (confirmed against real rows) - an http(s) URL isn't this screen's
+  // photoBase64 shape (ProfitFlexHero/ShareCard always wrap it in a
+  // data:image/jpeg;base64, prefix themselves) and is left out rather than
+  // passed through broken; no real row currently has one of those, but
+  // this is cheap insurance against a future storage-URL row silently
+  // rendering a corrupt image.
+  const rawImage = typeof scan.image_url === "string" ? scan.image_url.trim() : "";
+  const imageUrl = rawImage && !/^https?:\/\//i.test(rawImage) ? rawImage : "";
   return {
     // id forced to the real scan row id (never whatever specialty_data's
     // own `id` field says, which is normally the same but shouldn't be the
@@ -70,5 +97,6 @@ export function buildSavedScanView(scan: any): SavedScanView | null {
     buyPrice: buyPriceSource ? String(savedBuyPrice) : "",
     buyPriceSource,
     resultCondition: full.conditionAssessment || "",
+    photoBase64: imageUrl ? stripDataUriPrefix(imageUrl) : null,
   };
 }
