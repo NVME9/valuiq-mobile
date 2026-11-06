@@ -94,7 +94,7 @@ export default function CommunityScreen({ token, onNavigate, onBack, navData }: 
   const topFlips = [...wins].sort((a, b) => b.profit - a.profit).slice(0, 10);
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={["top","left","right"]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
 
       <View style={s.nav}>

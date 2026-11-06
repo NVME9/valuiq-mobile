@@ -451,14 +451,14 @@ export default function ProfileScreen({ token, refreshToken, plan, onLogout, onN
 
   if (loading && !profile) {
     return (
-      <SafeAreaView style={[s.safe, {backgroundColor: C.bg, alignItems:"center", justifyContent:"center"}]}>
+      <SafeAreaView style={[s.safe, {backgroundColor: C.bg, alignItems:"center", justifyContent:"center"}]} edges={["top","left","right"]}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
         <ActivityIndicator size="large" color={C.green} />
       </SafeAreaView>
     );
   }
 
-  return (    <SafeAreaView style={[s.safe, {backgroundColor: C.bg}]}>
+  return (    <SafeAreaView style={[s.safe, {backgroundColor: C.bg}]} edges={["top","left","right"]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
 
       {/* Emoji picker modal */}

@@ -234,7 +234,7 @@ export default function DashboardScreen({ token, plan, planLoaded = true, scansL
   const win        = wins.length > 0 ? wins[liveIdx % wins.length] : null;
 
   return (
-    <SAV style={s.safe}>
+    <SAV style={s.safe} edges={["top","left","right"]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
       {/* Nav */}
       <View style={s.nav}>

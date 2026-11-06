@@ -265,8 +265,13 @@ export default function ProfitFlexHero({
                 server contract) - the conservative figure max-buy/profit
                 math is actually built on, shown once, right under the
                 reasoning it explains. */}
-            {maxBuyBasis ? <Text style={st.maxBuyBasis}>{maxBuyBasis}</Text> : null}
-            {maxBuyBasisLine ? <Text style={st.maxBuyBasis}>{maxBuyBasisLine}</Text> : null}
+            {/* DUPLICATE LINE (item 3, owner phone bug): maxBuyBasis (older,
+                client-built "Based on <planningBasis> ($X)") and
+                maxBuyBasisLine (server-owned, lib/priceBasis.ts) both named
+                the SAME typical-sale number in two back-to-back sentences.
+                Server line wins when present; the client one is only a
+                fallback for a response that predates it. */}
+            {maxBuyBasisLine ? <Text style={st.maxBuyBasis}>{maxBuyBasisLine}</Text> : (maxBuyBasis ? <Text style={st.maxBuyBasis}>{maxBuyBasis}</Text> : null)}
             {riskAtLowEndLine ? <Text style={st.maxBuyBasis}>{riskAtLowEndLine}</Text> : null}
           </View>
         </FlashHighlight>

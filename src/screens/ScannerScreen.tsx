@@ -717,10 +717,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // withheld pending the user's own Confirm/Edit tap below).
     setBuyPriceSource(confidentTagRead ? "tag" : null);
     setTagConfirmPending(deriveTagConfirmPending(d));
-    // PACKAGING CUE OVERRIDE: sealed retail packaging is a stronger, more
-    // literal signal than the model's own free-text conditionAssessment -
-    // preselect New / Sealed even if conditionAssessment disagrees.
-    setResultCondition(d.conditionHint === "sealed_retail_packaging" ? "new-in-box" : (d.conditionAssessment || ""));
+    // PACKAGING CUE OVERRIDE REMOVED (item 1, owner phone bug, fix/reopen-
+    // and-copy): deal-ai-pro's lib/lensPricing.ts (resolveEffectiveCondition)
+    // now resolves the sealed-packaging override SERVER-side, once, before
+    // conditionTier/pricing run and before specialty_data is persisted -
+    // d.conditionAssessment already IS "new-in-box" whenever d.conditionHint
+    // said sealed. Re-deriving it here too used to be the bug: this client
+    // override only ever changed what was DISPLAYED, never what got priced
+    // or saved, so a reopened scan showed a different condition (and a
+    // different sample pool/headline) than the fresh one did. Trusting the
+    // server's own field directly is what makes reopen match fresh exactly.
+    setResultCondition(d.conditionAssessment || "");
     // SALE-CAPTURE MOAT: on a BUY, either schedule (if already allowed) or
     // surface the soft in-app ask. Never fire Apple's cold prompt directly.
     try {
@@ -759,7 +766,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     return <View style={s.center}><ActivityIndicator color={C.green} size="large" /></View>;
   }
   if (permission && !permission.granted) return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={["top","left","right"]}>
       <View style={s.center}>
         <Text style={{ fontSize: 48, marginBottom: 16 }}></Text>
         <Text style={s.h2}>Camera Required</Text>
@@ -789,7 +796,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // src/components/StagedProgress.tsx). Forward-only, never loops, never
   // claims done before the real response arrives.
   if (step === "loading") return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={["top","left","right"]}>
       <View style={s.center}>
         <View style={s.navLogoRow}>
           <HeaderLogo textStyle={s.logoText}/>
@@ -809,7 +816,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
   // - UPGRADE -
   if (step === "upgrade") return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={["top","left","right"]}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 24, paddingBottom: 60 }}>
         <Text style={{ fontSize: 52, textAlign: "center", marginBottom: 16 }}></Text>
         <Text style={[s.h1, { textAlign: "center" }]}>Free scans used up</Text>
@@ -855,7 +862,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       // entry point uses, and Back goes straight to History (no camera/
       // review step was ever entered on this mount).
       if (result._savedScanUnavailable) return (
-        <SafeAreaView style={s.safe}>
+        <SafeAreaView style={s.safe} edges={["top","left","right"]}>
           <View style={s.nav}>
             <TouchableOpacity onPress={() => onNavigate("history")} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
             <HeaderLogo textStyle={s.logoText}/>
@@ -870,7 +877,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         </SafeAreaView>
       );
       return (
-        <SafeAreaView style={s.safe}>
+        <SafeAreaView style={s.safe} edges={["top","left","right"]}>
           <View style={s.nav}>
             <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
             <HeaderLogo textStyle={s.logoText}/>
@@ -965,7 +972,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // Any other case: result.sellPrice/priceRange IS the authoritative
     // number (already condition-aware server-side), and the local recompute
     // must defer to it instead of recomputing from a pre-correction anchor.
-    const resaleIsAuthoritative = !result.confirmedByMoat;
+    // TIER GATE WIDENED (item 2, owner phone bug, blanket scan): confirmedByMoat
+    // only ever flags item_moat (tier 2) - a comparable_range (tier 4) scan,
+    // which this blanket hit, left resaleIsAuthoritative true and this card's
+    // hero silently fell back to resaleFromModel*conditionFactor (the AI's
+    // PRE-tier anchor, $32) instead of the server's real comparable_range
+    // median (result.sellPrice, $30) - the exact hero-vs-basis mismatch. Any
+    // real tier (priceBasisTier !== "ai_only") means the server already
+    // picked the authoritative number; only a genuine ai_only scan has no
+    // server price to defer to.
+    const resaleIsAuthoritative = !result.confirmedByMoat && (!result.priceBasisTier || result.priceBasisTier === "ai_only");
     const hasRawModelResale = Number(result.resaleFromModel) > 0 && resaleIsAuthoritative;
     const conditionFactor = CONDITION_MULTIPLIER[resultCondition] ?? DEFAULT_CONDITION_MULTIPLIER;
     const adjustedResaleValue = hasRawModelResale
@@ -1566,7 +1582,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const noVerdictPrompt = noPriceEntered ? "Type the tag price to get Buy or Pass." : null;
 
     return (
-      <SafeAreaView style={s.safe}>
+      <SafeAreaView style={s.safe} edges={["top","left","right"]}>
         <StatusBar barStyle="light-content"/>
         {/* Off-screen branded card, captured (not displayed) when sharing as an image */}
         <View style={{ position: "absolute", top: 0, left: -9999 }} pointerEvents="none">
@@ -2309,7 +2325,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
   // - REVIEW (photo added, before analyze) -
   if (step === "review") return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={["top","left","right"]}>
       <StatusBar barStyle="light-content" />
       <View style={s.nav}>
         {/* result survives here only when this screen was reached via the

@@ -607,7 +607,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   const statFmt = (n: number) => `${n}${effWinsSummary.scansCeilingHit ? "+" : ""}`;
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={["top","left","right"]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
       {/* Header */}
       <View style={s.header}>
