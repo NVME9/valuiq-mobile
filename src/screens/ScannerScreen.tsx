@@ -1955,14 +1955,22 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 <TouchableOpacity style={[s.goodBanner, { marginTop: 16 }]} onPress={()=>Linking.openURL(result.priceData.ebaySearchUrl)}>
                   <Text></Text>
                   <View style={{flex:1}}>
-                    {/* SAY IT ONCE - same fix as maxBuyPrefix above: when
-                        tier==="estimate", the hero copy already states
-                        "Based on N real reseller outcomes" - repeating it
-                        here too (same string, both visible at once) was
-                        the measured UA-polo triple-repeat's third copy.
-                        The avg/range line below is still new information
-                        either way. */}
-                    <Text style={s.goodBannerTitle}>{outcome.tier === "estimate" ? "Real sold data" : result.agreementBadge}</Text>
+                    {/* MISLABEL FIX (2026-11-05): this box is only ever shown
+                        when result.confirmedByMoat is true (see the gate
+                        above), i.e. the server has real item-level sell
+                        evidence - never active-listing-only data. A prior
+                        OTA (group cb4241f1) keyed the title/sub off
+                        outcome.tier==="estimate", which per outcomeTier.ts
+                        means "no verdict yet" (no price entered, or the
+                        plan locks it) - NOT "data is listed, not sold". That
+                        hardcoded "Listed prices (not sold)" / "active
+                        listings asking" / "no sold data for this item" onto
+                        genuine moat-confirmed sold data for every user who
+                        hadn't yet entered a buy price. Reverted to the one
+                        honest source for this label - result.agreementBadge,
+                        the server's own string - never guessed client-side
+                        from outcome.tier or any other unrelated flag. */}
+                    <Text style={s.goodBannerTitle}>{result.agreementBadge}</Text>
                     <Text style={s.goodBannerSub}>avg ${result.priceData.avgPrice} · range ${result.priceData.minPrice}–${result.priceData.maxPrice}</Text>
                   </View>
                   <Text style={{color:C.green}}>{'>'}</Text>

@@ -1176,8 +1176,23 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                               banner has been silently hidden on every
                               specialty item since then regardless of real
                               comp data. */}
+                          {/* MISLABEL FIX (2026-11-05): isRealData alone
+                              doesn't say sold vs. active (see isThinData
+                              above - active-only comps still set isRealData
+                              true), so a prior OTA (group cb4241f1) hardcoding
+                              "active listings asking ~$X / no sold data" here
+                              for every isRealData row mislabeled genuinely
+                              sold comps too. Reverted to the one honest
+                              source for this label - appr.agreementBadge,
+                              the server's own string - never guessed
+                              client-side from isRealData or any other
+                              unrelated flag. Mirrors ScannerScreen.tsx/
+                              SpecialtyScreen.tsx's identical goodBanner. */}
                           {appr.priceData && appr.priceData.isRealData && appr.priceData.count > 0 ? (
-                            <Text style={{color:C.green, fontSize:12, marginBottom:10}}>{appr.priceData.count} recent sold prices {"\u00B7"} ${appr.priceData.minPrice}-${appr.priceData.maxPrice} (avg ${Math.round(appr.priceData.avgPrice)})</Text>
+                            <>
+                              <Text style={{color:C.green, fontSize:12, marginBottom:2}}>{appr.agreementBadge || `${appr.priceData.count} comps`}</Text>
+                              <Text style={{color:C.text3, fontSize:11, marginBottom:10}}>avg ${Math.round(appr.priceData.avgPrice)} {"\u00B7"} range ${appr.priceData.minPrice}-${appr.priceData.maxPrice}</Text>
+                            </>
                           ) : null}
                           {appr.variantCheck ? (
                             <View style={s.apprSection}><Text style={[s.apprLabel,{color:C.green}]}>Variant check</Text><Text style={s.apprText}>{appr.variantCheck}</Text></View>
