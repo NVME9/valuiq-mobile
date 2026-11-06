@@ -48,6 +48,11 @@ interface ProfitFlexHeroProps {
   // "Based on <planningBasis> ($planningPrice)" (2026-10-25 server
   // contract). Shown whenever present, independent of noVerdictPrompt/isSkip.
   maxBuyBasis?: string | null;
+  // SERVER-OWNED BASIS/RISK LINES (lib/priceBasis.ts's maxBuyBasisLine /
+  // riskAtLowEndLine) - rendered verbatim, never paraphrased client-side,
+  // under the same max-buy box as maxBuyBasis above.
+  maxBuyBasisLine?: string | null;
+  riskAtLowEndLine?: string | null;
 
   // NO VERDICT YET (2026-10-25, item 4): no buy price exists (tag unread or
   // rejected) - there is nothing to verdict ON, so this replaces the
@@ -93,7 +98,7 @@ function money(n: number): string {
 
 export default function ProfitFlexHero({
   outcome, itemName, categoryLine, photoBase64, onEdit, isSkip,
-  heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, maxBuyBasis, maxBuyLocked = false, onUpgradePress, dataTag, dataTagColor, secondaryStats = [], footNote,
+  heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, maxBuyBasis, maxBuyBasisLine, riskAtLowEndLine, maxBuyLocked = false, onUpgradePress, dataTag, dataTagColor, secondaryStats = [], footNote,
   skipDetail, noVerdictPrompt, flashSeq = 0,
 }: ProfitFlexHeroProps) {
   // MEASURED BUG: a long AI-generated item name ("American Flag with Fish
@@ -261,6 +266,8 @@ export default function ProfitFlexHero({
                 math is actually built on, shown once, right under the
                 reasoning it explains. */}
             {maxBuyBasis ? <Text style={st.maxBuyBasis}>{maxBuyBasis}</Text> : null}
+            {maxBuyBasisLine ? <Text style={st.maxBuyBasis}>{maxBuyBasisLine}</Text> : null}
+            {riskAtLowEndLine ? <Text style={st.maxBuyBasis}>{riskAtLowEndLine}</Text> : null}
           </View>
         </FlashHighlight>
       )}

@@ -885,6 +885,19 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
 
                         {full && (
                           <>
+                            {/* DEFERRED REFINE (lib/scanRecompute.ts's
+                                buildRefineUpdatePayload, firstPassWasShown
+                                branch): a background re-check landed AFTER
+                                this scan's own headline was already shown -
+                                shown here as a clearly labeled secondary
+                                line, server strings only, never swapped in
+                                for the headline the user actually saw. */}
+                            {full.refinedUpdate && (
+                              <Text style={{color:C.text3, fontSize:12, marginBottom:8}}>
+                                Updated result: {full.refinedUpdate.decision || "—"} · ${Math.round(Number(full.refinedUpdate.sellPrice) || 0)}
+                                {full.refinedUpdate.buyTarget != null ? ` · pay ≤$${Math.round(Number(full.refinedUpdate.buyTarget))}` : ""}
+                              </Text>
+                            )}
                             {full.platformBreakdown && full.platformBreakdown.length > 0 && (
                               <View style={s.apprSection}>
                                 <Text style={s.apprLabel}>Platform breakdown</Text>

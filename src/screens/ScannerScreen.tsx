@@ -717,7 +717,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // withheld pending the user's own Confirm/Edit tap below).
     setBuyPriceSource(confidentTagRead ? "tag" : null);
     setTagConfirmPending(deriveTagConfirmPending(d));
-    setResultCondition(d.conditionAssessment || "");
+    // PACKAGING CUE OVERRIDE: sealed retail packaging is a stronger, more
+    // literal signal than the model's own free-text conditionAssessment -
+    // preselect New / Sealed even if conditionAssessment disagrees.
+    setResultCondition(d.conditionHint === "sealed_retail_packaging" ? "new-in-box" : (d.conditionAssessment || ""));
     // SALE-CAPTURE MOAT: on a BUY, either schedule (if already allowed) or
     // surface the soft in-app ask. Never fire Apple's cold prompt directly.
     try {
@@ -1782,6 +1785,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   maxBuy={maxBuy}
                   maxBuyReasoning={maxBuyReasoning}
                   maxBuyBasis={maxBuyBasis}
+                  maxBuyBasisLine={result.maxBuyBasisLine ?? null}
+                  riskAtLowEndLine={result.riskAtLowEndLine ?? null}
                   maxBuyLocked={maxBuyLocked}
                   onUpgradePress={() => {
                     logEvent(token, "lock_tap", { item: "maxBuy" });
@@ -1819,6 +1824,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   nothing like that exists. */}
               {!!result.priceBasisContext && (
                 <Text style={{ color: C.text3, fontSize: 12, marginHorizontal: 16, marginTop: 4 }}>{result.priceBasisContext}</Text>
+              )}
+
+              {/* THIN CONDITION SAMPLE (lib/priceBasis.ts's conditionThinSampleNote):
+                  server string shown verbatim whenever the condition-filtered
+                  sample was too thin to trust on its own. */}
+              {!!result.conditionThinSampleNote && (
+                <Text style={{ color: C.text3, fontSize: 12, marginHorizontal: 16, marginTop: 4 }}>{result.conditionThinSampleNote}</Text>
               )}
 
               {/* OWNER DEBUG READOUT (2026-10-08): the price-basis hierarchy's
