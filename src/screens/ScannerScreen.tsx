@@ -244,6 +244,25 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // verdict (e.g. a re-render with no real change) never fires a redundant
   // network call.
   const lastPatchedRef = useRef<string>("");
+  // CONDITION SETTLE (2026-11-06, item 1 reopen bug): the buy-price settle
+  // effect above never sent `condition`, so a chip tap only ever lived in
+  // this component's state - buildSavedScanView's reopen path (lib/
+  // viewSavedScan.ts) always rebuilds resultCondition from the scan's
+  // ORIGINAL specialty_data.conditionAssessment, silently discarding any
+  // tap the instant the owner left History and came back. Independent of
+  // the buy-price provenance gate on purpose - a condition pick needs no
+  // "was this really typed/confirmed" proof the way a price does. Merges
+  // conditionAssessment into the SAME specialty_data blob already on this
+  // row (every other field, including the real photosSent/cosmetic
+  // `condition` the server's zero-photo-rerun guard checks, is passed
+  // through unchanged) so the next reopen reads back the exact chip value,
+  // not a lossy New/Good/Fair round-trip through the old DB column.
+  const lastPatchedConditionRef = useRef<string>("");
+  // Whatever resultCondition was SEEDED with (fresh scan's conditionAssessment,
+  // or a reopened scan's) - the settle effect below only fires once the
+  // owner's tap actually moves resultCondition away from this, never on the
+  // initial seed/mount itself.
+  const conditionBaselineRef = useRef<string>("");
   const priceInputRef = useRef<TextInput>(null);
   // STORE REVIEW PROMPT: reviewHeadlineRef captures THIS render's hero
   // headline (SOLID/WORTH A LOOK only, else null) for the effect below to
@@ -322,6 +341,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setBuyPrice(built.buyPrice);
     setBuyPriceSource(built.buyPriceSource);
     setResultCondition(built.resultCondition);
+    conditionBaselineRef.current = built.resultCondition;
     // PHOTO (item 7) - see lib/viewSavedScan.ts's SavedScanView.photoBase64
     // comment. `photos` is otherwise only ever populated by this screen's
     // own camera-capture flow, which a saved-view mount never runs.
@@ -333,6 +353,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     savedViewBaselineRef.current = { buyPrice: built.buyPrice, buyPriceSource: built.buyPriceSource, resultCondition: built.resultCondition };
     latestVerdictRef.current = null;
     lastPatchedRef.current = "";
+    lastPatchedConditionRef.current = "";
     setStep("result");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -375,6 +396,22 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     }, 900);
     return () => clearTimeout(timer);
   }, [step, result, buyPrice, resultCondition, buyPriceSource, token]);
+  useEffect(() => {
+    if (step !== "result" || !result || result._error || !resultCondition) return;
+    const scanId = (result.id ?? result.scanId ?? result.scan_id) != null ? String(result.id ?? result.scanId ?? result.scan_id) : null;
+    if (!scanId) return;
+    const sig = `${scanId}:${resultCondition}`;
+    if (lastPatchedConditionRef.current === sig) return;
+    if (lastPatchedConditionRef.current === "" && resultCondition === conditionBaselineRef.current) return;
+    const timer = setTimeout(() => {
+      lastPatchedConditionRef.current = sig;
+      updateScan(token, scanId, {
+        condition: CONDITION_TO_DB[resultCondition],
+        specialty_data: JSON.stringify({ ...result, conditionAssessment: resultCondition }),
+      }).catch(() => {});
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [step, result, resultCondition, token]);
   useEffect(() => {
     let alive = true;
     setOracle(null);
@@ -471,6 +508,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setBrandInput("");
     setBuyPrice("");
     setResultCondition("");
+    conditionBaselineRef.current = "";
     setBarcodeScanned(false);
     setMode("photo");
     compressMsTotalRef.current = 0;
@@ -488,6 +526,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setBuyPriceSource(null);
     latestVerdictRef.current = null;
     lastPatchedRef.current = "";
+    lastPatchedConditionRef.current = "";
     scanAttemptRef.current++;
     // HISTORY RESULTS REUSE: "New Scan" from a saved-result view abandons
     // that view entirely - without this, the just-cleared result/buyPrice
@@ -563,10 +602,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const myAttempt = ++scanAttemptRef.current;
     setBuyPrice("");
     setResultCondition("");
+    conditionBaselineRef.current = "";
     setTagConfirmPending(false);
     setBuyPriceSource(null);
     latestVerdictRef.current = null;
     lastPatchedRef.current = "";
+    lastPatchedConditionRef.current = "";
     const tDetect = Date.now();
     try {
       const lookup = await lookupUpcFast(token, data);
@@ -612,6 +653,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // or sit stale on screen while the new one is in flight.
     setBuyPrice("");
     setResultCondition("");
+    conditionBaselineRef.current = "";
     // STALE-STATE FIX: see scanAttemptRef's own comment - finishAnalyze
     // below bails if a NEWER analyze()/handleBarcode()/reset() has already
     // superseded this one by the time the network response lands, so a
@@ -625,6 +667,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setBuyPriceSource(null);
     latestVerdictRef.current = null;
     lastPatchedRef.current = "";
+    lastPatchedConditionRef.current = "";
     let photosForRefine: string[] = [];
     try {
       const p = customPhotos || photos;
@@ -728,6 +771,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // different sample pool/headline) than the fresh one did. Trusting the
     // server's own field directly is what makes reopen match fresh exactly.
     setResultCondition(d.conditionAssessment || "");
+    conditionBaselineRef.current = d.conditionAssessment || "";
     // SALE-CAPTURE MOAT: on a BUY, either schedule (if already allowed) or
     // surface the soft in-app ask. Never fire Apple's cold prompt directly.
     try {
@@ -1128,14 +1172,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       ? Math.max(0, Math.floor(Math.min(roiCeilingBuy, profitFloorBuy)))
       : null;
     const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
-    // "Typical recent sale $X" (item 2): the no-price-entered hero number
-    // is always sellPriceForProfit (the headline/display price) - relabel
-    // it explicitly as the TYPICAL sale only when that number actually
-    // differs from planningPrice (the conservative figure captioned under
-    // Max buy below), so the two numbers on screen are never confusable as
-    // the same claim. When they're equal, the existing generic "sell
-    // price"/"typical sell price" label already says the same thing.
-    const showTypicalSaleLabel = sellPriceForProfit > 0 && planningPrice > 0 && sellPriceForProfit !== planningPrice;
 
     // ROI MUST be computed against the SAME cost basis as heroProfit - the
     // entered price when one exists, else the max-buy ceiling. This used to
@@ -1513,6 +1549,42 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       ? `Based on ${planningBasis} ($${planningPrice})`
       : null;
 
+    // MAX-BUY BASIS/RISK FALLBACK (2026-11-06, item 3): deal-ai-pro's
+    // lens/route.ts nulls BOTH maxBuyBasisLine and riskAtLowEndLine
+    // whenever its own buyTarget is null - which it deliberately is not
+    // just for ai_only but ALSO whenever conditionThinSampleNote fired
+    // ("Only N sales in this condition. Showing all conditions.") - see
+    // that route's own buyTarget/riskAtLowEndLine comments. `maxBuy` above
+    // is THIS screen's own recompute and only ever checks isAiOnly/
+    // planningPrice, never conditionThinSampleNote - so a condition-
+    // fallback scan shows a real Max Buy ceiling with neither line
+    // explaining it, while the exact same item's Used-Good scan (real
+    // condition-matched sample, no fallback, server's buyTarget non-null)
+    // shows both. Mirrors the server's own formulas off the SAME
+    // planningPrice/shippingCost/feeRate this screen already used to
+    // compute maxBuy itself, plus priceRange.low - lib/lensPricing.ts's
+    // priceRange.low IS priceBasis.priceLow verbatim for every tier that
+    // has one, the one number the server's (otherwise un-sent) priceLow
+    // genuinely shares with the client. Only ever fills in for the null
+    // case - never overrides a real line the server did send.
+    const fallbackLowEnd = Number(result.priceRange?.low) || Number(result.priceLow) || null;
+    const maxBuyBasisLineFallback = (maxBuy != null && planningPrice > 0)
+      ? `Based on a typical sale of $${Math.round(planningPrice)}, after fees${shippingCost ? ` and about $${Math.round(shippingCost)} shipping` : ""}.`
+      : null;
+    const riskAtLowEndLineFallback = (maxBuy != null && fallbackLowEnd != null && fallbackLowEnd < planningPrice)
+      ? (() => {
+          const costBasis = enteredBp > 0 ? enteredBp : maxBuy;
+          if (!(costBasis > 0)) return null;
+          const feesAtTypical = Math.round(planningPrice * feeRate * 100) / 100;
+          const typicalNet = Math.round((planningPrice - feesAtTypical - costBasis - shippingCost) * 100) / 100;
+          const feesAtLow = Math.round(fallbackLowEnd * feeRate * 100) / 100;
+          const lowNet = Math.round((fallbackLowEnd - feesAtLow - costBasis - shippingCost) * 100) / 100;
+          const typicalPart = `about ${typicalNet >= 0 ? "+" : "-"}$${Math.abs(typicalNet)} if it sells at the typical $${Math.round(planningPrice)}`;
+          const lowPart = `about ${lowNet >= 0 ? "+" : "-"}$${Math.abs(lowNet)} if it sells at the low end ($${Math.round(fallbackLowEnd)})`;
+          return `At $${Math.round(costBasis)}: ${typicalPart}, ${lowPart}.`;
+        })()
+      : null;
+
     // ONE BADGE PER RESULT (2026-10-06, MEASURED: both badges stacked -
     // "✅ REAL DATA" + "● REAL DATA", "🏷️ ESTIMATE" + "● ESTIMATE"): the
     // DECLUTTER pass above this only suppressed the one case it named
@@ -1794,15 +1866,24 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   // "● REAL DATA") was the Under Armour polo's exact
                   // contradiction - "estimated" now only applies when the
                   // price genuinely isn't confirmed.
-                  // "Typical recent sale" (item 2): only when that number
-                  // actually differs from the planningPrice captioned under
-                  // Max buy below - see showTypicalSaleLabel's own comment.
-                  profitLabel={enteredBp > 0 ? profitLabel : (showTypicalSaleLabel ? "Typical recent sale" : (result.confirmedByMoat ? "sell price" : "typical sell price"))}
+                  // ONE HERO LABEL (2026-11-06, item 4): used to pick between
+                  // three different client-written strings here ("typical
+                  // sell price" / "sell price" / "Typical recent sale")
+                  // depending on confirmedByMoat/showTypicalSaleLabel - the
+                  // exact inconsistency the owner flagged (same no-price-
+                  // entered state, different heading text scan to scan). No
+                  // server field backs any of these three (confirmed against
+                  // deal-ai-pro's lens/specialty routes - neither ships a
+                  // hero-label string), so there is no real distinction to
+                  // preserve: one literal, always, whenever no price is
+                  // entered. A genuine server-provided label would replace
+                  // this literal outright, not add a fourth branch.
+                  profitLabel={enteredBp > 0 ? profitLabel : "typical sell price"}
                   maxBuy={maxBuy}
                   maxBuyReasoning={maxBuyReasoning}
                   maxBuyBasis={maxBuyBasis}
-                  maxBuyBasisLine={result.maxBuyBasisLine ?? null}
-                  riskAtLowEndLine={result.riskAtLowEndLine ?? null}
+                  maxBuyBasisLine={result.maxBuyBasisLine ?? maxBuyBasisLineFallback}
+                  riskAtLowEndLine={result.riskAtLowEndLine ?? riskAtLowEndLineFallback}
                   maxBuyLocked={maxBuyLocked}
                   onUpgradePress={() => {
                     logEvent(token, "lock_tap", { item: "maxBuy" });

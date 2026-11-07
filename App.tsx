@@ -964,7 +964,14 @@ export default function App() {
         ) : (
           <View style={s.root}>
             <View style={{flex:1}}>{SCREENS[screen]}</View>
-            <SafeAreaView style={{backgroundColor:C.surface}}>
+            {/* GRAY BAND FIX (2026-11-06, item 2): this SafeAreaView had no
+                `edges` prop, so react-native-safe-area-context's default
+                (all four sides) padded its TOP by insets.top too - a chunk
+                of ITS OWN C.surface background sitting above the actual tab
+                icons, on every screen, below whatever content each screen
+                scrolled. Only the bottom inset is real here; top/left/right
+                insets belong to each screen's own SafeAreaView above. */}
+            <SafeAreaView edges={["bottom","left","right"]} style={{backgroundColor:C.surface}}>
               <View style={s.tabBar}>
                 {TABS.map(t => {
                   const active = activeTab === t.id;
