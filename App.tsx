@@ -6,7 +6,8 @@ import {
 import { C } from "./src/lib/theme";
 import LogoBadge from "./src/components/LogoBadge";
 import ScopeBackground from "./src/components/ScopeBackground";
-import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache, getScanById, invalidateScanHistoryCache, SessionRestoreNetworkError } from "./src/lib/api";
+import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache, getScanById, invalidateScanHistoryCache, SessionRestoreNetworkError, logClientError } from "./src/lib/api";
+import ErrorBoundary from "./src/components/ErrorBoundary";
 import { supabase } from "./src/lib/supabase";
 import { addSaleCheckInTapListener } from "./src/lib/notifications";
 import LogSaleModal from "./src/components/LogSaleModal";
@@ -273,6 +274,11 @@ export default function App() {
   const [planLoaded, setPlanLoaded] = useState(false);
   const [scansLeft, setScansLeft]   = useState<number|null>(null);
   const [screen, setScreen]         = useState<Screen>("dashboard");
+  // CRASH HARDENING (2026-11-08, scan->result flow crash): bumped by the
+  // ErrorBoundary's retry button below to force React to remount the
+  // crashed screen (same `screen` value, so React alone won't remount it -
+  // getDerivedStateFromError's hasError otherwise stays true forever).
+  const [screenCrashResetKey, setScreenCrashResetKey] = useState(0);
   const [history, setHistory]       = useState<Screen[]>([]);
   const [navData, setNavData]       = useState<any>(null);
   const [appReady, setAppReady]     = useState(false);
@@ -963,7 +969,23 @@ export default function App() {
           }} />
         ) : (
           <View style={s.root}>
-            <View style={{flex:1}}>{SCREENS[screen]}</View>
+            <View style={{flex:1}}>
+              {/* CRASH HARDENING (2026-11-08, scan->result flow crash):
+                  a bad/unexpected field in a scan result (or any other
+                  screen) now degrades to a retry fallback instead of
+                  taking the whole app down. Scoped per-screen (key
+                  includes `screen`) so switching tabs always gets a clean
+                  mount; screenCrashResetKey lets the retry button force a
+                  remount of the SAME screen without navigating away. */}
+              <ErrorBoundary
+                key={`${screen}-${screenCrashResetKey}`}
+                fallbackMessage="Couldn't read that one. Try again."
+                onRetry={() => setScreenCrashResetKey(k => k + 1)}
+                onError={(error, info) => logClientError(token || "", error, { screen, componentStack: info?.componentStack?.slice(0, 1000) })}
+              >
+                {SCREENS[screen]}
+              </ErrorBoundary>
+            </View>
             {/* GRAY BAND FIX (2026-11-06, item 2): this SafeAreaView had no
                 `edges` prop, so react-native-safe-area-context's default
                 (all four sides) padded its TOP by insets.top too - a chunk

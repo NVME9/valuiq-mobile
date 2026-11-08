@@ -7,7 +7,7 @@
 // boundaries require componentDidCatch/getDerivedStateFromError, which
 // have no hook equivalent.
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { C } from "../lib/theme";
 
 interface Props {
@@ -15,6 +15,15 @@ interface Props {
   // Shown in place of the crashed subtree - keep it short, this is a
   // degraded state, not a dead end (the rest of the screen still works).
   fallbackMessage?: string;
+  // CRASH HARDENING (2026-11-08, scan->result flow crash): optional - when
+  // given, the fallback renders a retry button that calls this instead of
+  // dead-ending. The caller is responsible for actually recovering (e.g.
+  // bumping a key so this boundary remounts) - this component has no way
+  // to know what "retry" means for its children.
+  onRetry?: () => void;
+  // Fire-and-forget crash reporting - never let a THROWING reporter take
+  // down the fallback render itself, so this call is wrapped below.
+  onError?: (error: Error, info: React.ErrorInfo) => void;
 }
 interface State { hasError: boolean }
 
@@ -34,6 +43,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
     // user-facing signal is the fallback text below, not a console line
     // only a developer plugged into Metro would ever see.
     this.lastError = error;
+    try { this.props.onError?.(error, info); } catch {}
   }
   lastError: Error | null = null;
   render() {
@@ -41,6 +51,11 @@ export default class ErrorBoundary extends React.Component<Props, State> {
       return (
         <View style={st.wrap}>
           <Text style={st.text}>{this.props.fallbackMessage || "Something went wrong showing this section."}</Text>
+          {this.props.onRetry && (
+            <TouchableOpacity style={st.retryBtn} onPress={this.props.onRetry}>
+              <Text style={st.retryText}>Try again</Text>
+            </TouchableOpacity>
+          )}
         </View>
       );
     }
@@ -51,4 +66,6 @@ export default class ErrorBoundary extends React.Component<Props, State> {
 const st = StyleSheet.create({
   wrap: { padding: 14, backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.border, marginVertical: 8 },
   text: { color: C.text3, fontSize: 13, textAlign: "center" as const },
+  retryBtn: { marginTop: 10, alignSelf: "center", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, backgroundColor: C.green },
+  retryText: { color: "#fff", fontSize: 14, fontWeight: "700" as const },
 });

@@ -1149,7 +1149,7 @@ export async function shareWin(
 // in this app follows (see recordSaleOutcome's own fetch). token may be
 // empty for a genuinely anonymous caller - /api/events treats that as
 // user_id:null rather than rejecting the call.
-export async function logEvent(token: string, event: "lock_tap" | "paywall_view" | "first_scan", props: Record<string, any> = {}): Promise<void> {
+export async function logEvent(token: string, event: "lock_tap" | "paywall_view" | "first_scan" | "client_error", props: Record<string, any> = {}): Promise<void> {
   try {
     await fetch(`${API_BASE}/api/events`, {
       method: "POST",
@@ -1159,4 +1159,20 @@ export async function logEvent(token: string, event: "lock_tap" | "paywall_view"
   } catch {
     // best-effort only
   }
+}
+
+// CRASH HARDENING (2026-11-08, scan->result flow crash): reports a caught
+// render error to /api/events as "client_error" so a bad/unexpected server
+// field that breaks rendering leaves a trail, instead of only ever being
+// visible as a silent on-screen fallback. Needs the matching
+// ALLOWED_EVENTS entry server-side (app/api/events/route.ts) - until that
+// ships, this still never throws (logEvent swallows the 400), it just
+// silently fails to persist. Best-effort only, same as every other logger
+// here - never let error reporting itself become a second crash.
+export function logClientError(token: string, error: Error, context: Record<string, any> = {}): void {
+  logEvent(token, "client_error", {
+    message: error?.message ? String(error.message).slice(0, 500) : "unknown",
+    stack: error?.stack ? String(error.stack).slice(0, 2000) : undefined,
+    ...context,
+  }).catch(() => {});
 }
