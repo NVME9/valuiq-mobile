@@ -183,14 +183,43 @@ export function classifyHeroVerdictLocal(opts: {
   // never show PASS/BUY off a bare-category match the server itself would
   // have called CHECK ITEM.
   comparableRangeScope?: "title_tokens" | "brand_category" | "category" | null;
+  // BRAND-AGNOSTIC SEGMENT OVERRIDE (2026-11-09, ZURU rejection follow-up) -
+  // mirrors deal-ai-pro's lib/priceBasis.ts classifyHeroVerdict's identical,
+  // same-date update. true only for tier "segment" at level "itemtype" -
+  // the broadest, brand/product-line-agnostic fallback (exists only
+  // because brand_itemtype didn't clear 15 rows, matches ANY brand sharing
+  // the item-type words). MEASURED on a real scan: ZURU's $7 blind-box
+  // mini-figure set's "collectible action figure sets" segment (40 rows,
+  // $40 median, real BUY/$22.69/324% ROI) turned out to be LEGO sets
+  // ($60-120), a Lionel train set ($255), a Hasbro G.I. Joe 4-pack ($135) -
+  // zero ZURU rows. Caps the verdict at THIN - brand_itemtype/brand_category
+  // both anchor on this item's own brand and keep the existing WORTH A
+  // LOOK ladder.
+  segmentBrandAgnostic?: boolean | null;
+  // SANITY GUARD (2026-11-09, ZURU rejection follow-up) - mirrors deal-ai-
+  // pro's lib/priceBasis.ts classifyHeroVerdict's identical, same-date
+  // update. true when, for any NON-exact_item tier, the tier's own median/
+  // typical price is more than 4x the price actually paid (or the tag read,
+  // when no price was entered) - a loose category/segment/comparable-range
+  // match whose "typical sale" sits 4x+ above the item's own tag is very
+  // likely pricing a different, pricier kind of item. exact_item is exempt
+  // (a live eBay sold signal for THIS exact item is real information, not
+  // a mismatched pool, even at a large price jump).
+  priceVsReferenceSanityCapped?: boolean | null;
 }): HeroVerdict {
-  const { tier, buyPrice, netProfit, roi, sellThroughPct, comparableRangeConfidence, comparableRangeScope } = opts;
+  const { tier, buyPrice, netProfit, roi, sellThroughPct, comparableRangeConfidence, comparableRangeScope, segmentBrandAgnostic, priceVsReferenceSanityCapped } = opts;
   if (tier === "ai_only") return null;
   if (!(buyPrice > 0)) return null;
   if (tier === "comparable_range" && comparableRangeScope === "category") return "CHECK ITEM";
   if (netProfit <= 0) return "PASS";
   if (roi < ROI_BUY_MIN) return "THIN";
+  // SANITY GUARD - see its own param comment above. Checked before any
+  // tier-specific WORTH A LOOK path can fire, same placement as the
+  // server's classifyHeroVerdict.
+  if (tier !== "exact_item" && priceVsReferenceSanityCapped) return "THIN";
   if (tier === "comparable_range") return "THIN";
+  // BRAND-AGNOSTIC SEGMENT OVERRIDE - see its own param comment above.
+  if (tier === "segment" && segmentBrandAgnostic) return "THIN";
   if (tier === "segment") return "WORTH A LOOK";
   if (roi >= 50 && sellThroughPct != null && sellThroughPct >= 50) return "WORTH A LOOK";
   return "SOLID";

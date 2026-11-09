@@ -422,6 +422,38 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       updateScan(token, scanId, {
         condition: CONDITION_TO_DB[resultCondition],
         specialty_data: JSON.stringify({ ...result, conditionAssessment: resultCondition }),
+      }).then((resp: any) => {
+        // APPLY THE SERVER'S AUTHORITATIVE RECOMPUTE (2026-11-09, ZURU
+        // rejection follow-up) - the specialty_data this PATCH just sent
+        // was THIS screen's own (possibly pre-fix, stale-embedded-numbers)
+        // `result` object; the server's recompute (lib/scanRecompute.ts,
+        // now carrying the segment-confidence/thin-sample withholding
+        // rules) is the honest answer. Without this, `result.buyTarget`/
+        // `result.netProfit`/`result.decision` would keep whatever this
+        // screen's OWN local recompute never touches (it only ever reads
+        // these for the owner-only dev mismatch tripwire and the saved
+        // specialty_data blob - see that code's own comments) - applying
+        // the response here closes that gap instead of leaving it for
+        // whatever future code path might read them directly.
+        // STALE-STATE GUARD: only merge if `result` (at resolution time)
+        // is still THIS same scan - a late response landing after the
+        // user has moved on (New Scan, a different saved scan) must never
+        // write into whatever is on screen now. Guarded throughout (`?.`/
+        // `??`) so a response shape from an older server build, or a
+        // network hiccup leaving `scan` absent, can never throw here.
+        const scan = resp?.scan;
+        if (!scan) return;
+        setResult((r: any) => {
+          const currentScanId = r ? String(r.id ?? r.scanId ?? r.scan_id ?? "") : null;
+          if (!r || currentScanId !== scanId) return r;
+          return {
+            ...r,
+            buyTarget: scan.buy_target ?? null,
+            netProfit: scan.net_profit ?? null,
+            roi: scan.roi ?? null,
+            decision: scan.decision ?? r.decision,
+          };
+        });
       }).catch(() => {});
     }, 900);
     return () => clearTimeout(timer);
@@ -1260,7 +1292,24 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // genuine loss as PASS rather than everything reading as a fabricated
     // break-even (see this file's own LOCKED VERDICT comment for why a
     // forced 0 there would be a second, different lie).
-    const withholdConfidentNumbers = isAiOnly || !!result.conditionThinSampleNote;
+    // BRAND-AGNOSTIC SEGMENT OVERRIDE + SANITY GUARD (2026-11-09, ZURU
+    // rejection follow-up) - mirrors deal-ai-pro's app/api/lens/route.ts
+    // segmentBrandAgnostic/priceVsReferenceSanityCapped exactly, same
+    // formulas. Recomputed FRESH here (not read off result.
+    // conditionThinSampleNote, which is frozen at scan time) because
+    // priceVsReferenceSanityCapped depends on enteredBp - a price EDITED
+    // after the scan can move this item in or out of the 4x sanity bound,
+    // and the server's own static field can't track that. Guarded with
+    // `?.`/`??` throughout - a response from an older server build (or a
+    // saved-scan reopen predating this field) simply reads as "not
+    // brand-agnostic, not sanity-capped," never a thrown error.
+    const segmentBrandAgnostic = result.priceBasisTier === "segment" && result.segmentOutcomes?.level === "itemtype";
+    const referencePriceForSanity = enteredBp > 0 ? enteredBp : (Number(result.detectedTagPrice) > 0 ? Number(result.detectedTagPrice) : 0);
+    const priceVsReferenceSanityCapped = !!(
+      result.priceBasisTier && result.priceBasisTier !== "exact_item" &&
+      referencePriceForSanity > 0 && planningPrice > referencePriceForSanity * 4
+    );
+    const withholdConfidentNumbers = isAiOnly || !!result.conditionThinSampleNote || segmentBrandAgnostic || priceVsReferenceSanityCapped;
     // FLOORED AT 0, NOT CLAMPED TO A FAKE $1 (2026-10-19) - 0 is a real,
     // honest answer ("no price clears the bar"), not a sentinel. null
     // stays reserved for "no price data at all" (ai_only, or now any other
@@ -1467,6 +1516,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         tier, buyPrice: enteredBp, netProfit: heroProfit, roi: heroRoi, sellThroughPct: heroSellThroughPct,
         comparableRangeConfidence: result.comparableRangeConfidence ?? null,
         comparableRangeScope: result.comparableRangeScope ?? null,
+        // BRAND-AGNOSTIC SEGMENT OVERRIDE + SANITY GUARD (2026-11-09) -
+        // same two flags computed above (this file's own withholdConfidentNumbers
+        // comment), reused here so the headline badge and the withheld
+        // dollar figures can never disagree.
+        segmentBrandAgnostic, priceVsReferenceSanityCapped,
       });
       finalHeadline = headline;
       // STORE REVIEW: real-data tier only (ai_only already headline:null
