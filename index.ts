@@ -1,3 +1,8 @@
+// MUST be the very first import - see its own header comment for why
+// ordering matters (it patches react-native's Text/TextInput submodules
+// in place before anything else in the app can require them).
+import './src/lib/disableFontScaling';
+
 import { registerRootComponent } from 'expo';
 
 import App from './App';
