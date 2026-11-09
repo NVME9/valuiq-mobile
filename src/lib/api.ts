@@ -260,6 +260,25 @@ export async function deleteAccount(token: string): Promise<{ success: boolean; 
     return { success: false, error: "Network error" };
   }
 }
+// CREATOR PARTNER PROGRAM (2026-11-09): POST /api/referral — see
+// deal-ai-pro's app/api/referral/route.ts for the full rule set (approved
+// codes only, self-referral rejected, never overwrites an existing
+// attribution). Never throws - a failed submit must never break signup or
+// the Profile screen around it; the caller shows whatever message comes
+// back (or the network-error fallback) and moves on either way.
+export async function submitReferralCode(token: string, code: string): Promise<{ success: boolean; error?: string; code?: string }> {
+  try {
+    const r = await fetch(`${API_BASE}/api/referral`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, code, source: "app_code" }),
+    });
+    const d = await r.json().catch(() => ({}));
+    return { success: !!d?.success, error: d?.error, code: d?.code };
+  } catch {
+    return { success: false, error: "Network error" };
+  }
+}
 export async function updateScan(token: string, id: string, updates: any): Promise<any> {
   const r = await fetch(`${API_BASE}/api/scan-history?token=${token}&id=${id}`, {
     method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updates),

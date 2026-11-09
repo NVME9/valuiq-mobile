@@ -43,6 +43,7 @@ import SourcingAlertsScreen from "./src/screens/SourcingAlertsScreen";
 import InventoryScreen from "./src/screens/InventoryScreen";
 import ProfitTrackerScreen from "./src/screens/ProfitTrackerScreen";
 import OnboardingScreen from "./src/screens/OnboardingScreen";
+import ReferralCodeEntry from "./src/components/ReferralCodeEntry";
 import AIConsentScreen from "./src/screens/AIConsentScreen";
 import AICoachScreen from "./src/screens/AICoachScreen";
 import HistoryScreen from "./src/screens/HistoryScreen";
@@ -343,6 +344,14 @@ export default function App() {
   const [aiConsented, setAiConsented] = useState(false);
   const [firstScanNudge, setFirstScanNudge] = useState(false); // one-line prompt shown on the Scan screen, first launch only
   const firstScanAutoFired = useRef(false);  // auto-drop-into-Scan fires at most once per app session
+  // CREATOR PARTNER PROGRAM (2026-11-09): skippable "have a code from a
+  // creator?" step, sequenced right after AI consent and before the main
+  // app - same one-shot-per-signup semantics as justSignedUpRef above (set
+  // true only in handleLogin when justSignedUp is true; never persisted to
+  // AsyncStorage, so a returning session reload never shows it). Entirely
+  // independent of justSignedUpRef/maybeStartFirstScan - this never touches
+  // or is touched by the Scan-nudge consumption below.
+  const [referralPromptPending, setReferralPromptPending] = useState(false);
   // MEASURED BUG: this used to be set for ANY fresh login (sign-in OR
   // sign-up), gated only by the separate @valuiq_tour_done AsyncStorage flag
   // - that flag is unreliable (cleared by a dev reset, a reinstall, or a
@@ -750,6 +759,7 @@ export default function App() {
     // navigate("scanner") for an already-consented user replaying first
     // launch via the dev reset.
     justSignedUpRef.current = !!justSignedUp;
+    if (justSignedUp) setReferralPromptPending(true);
     setSession(s);
     await loadUserData(s.access_token);
   }
@@ -991,6 +1001,11 @@ export default function App() {
             } catch (e) { console.warn("consent save failed", e); }
             setAiConsented(true);
           }} />
+        ) : referralPromptPending && !previewNewUser ? (
+          // Preview mode skips this too (previewNewUser guard) - same
+          // reasoning as dismissFirstScanNudge: preview must never show
+          // one-time real-account UI to a tester walking the preview flow.
+          <ReferralCodeEntry token={token} mode="screen" onDone={() => setReferralPromptPending(false)} />
         ) : (
           <View style={s.root}>
             <View style={{flex:1}}>

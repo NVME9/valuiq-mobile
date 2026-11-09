@@ -11,6 +11,7 @@ import HeaderLogo from "../components/HeaderLogo";
 import UserAvatar from "../components/UserAvatar";
 import ApiDebugPanel from "../components/ApiDebugPanel";
 import DeleteAccountModal, { type DeleteAccountDebugState } from "../components/DeleteAccountModal";
+import ReferralCodeEntry from "../components/ReferralCodeEntry";
 import { isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric, getBiometricLabel, authenticateWithBiometrics } from "../lib/biometrics";
 import { API_BASE, deleteAccount, getProfileData, peekProfileData, invalidateProfileCache, setCachedAvatar } from "../lib/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -889,6 +890,11 @@ export default function ProfileScreen({ token, refreshToken, plan, onLogout, onN
           <Text style={ps.navLabel}>AI Coach</Text>
           <Text style={ps.navArrow}>›</Text>
         </TouchableOpacity>
+        {/* CREATOR PARTNER PROGRAM (2026-11-09) - always available here,
+            not just at signup, so an Apple/Google first-time sign-in (which
+            never sets justSignedUp - see App.tsx's handleAppleSignIn/
+            handleGoogleSignIn) still has a way to enter a code. */}
+        <ReferralCodeEntry token={token} mode="inline" />
 
         {/* ── ACCOUNT, SECTION — always visible regardless of tab ── */}
         <View style={s.accountSection}>
