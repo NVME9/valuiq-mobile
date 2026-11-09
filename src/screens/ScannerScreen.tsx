@@ -9,6 +9,7 @@ import * as ImagePicker from "expo-image-picker";
 import ViewShot from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { markScanStage, clearScanStage } from "../lib/scanStage";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
@@ -229,6 +230,19 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // on from, so latestVerdictRef/lastPatchedRef below can never be fed a
   // stale (scanId, buyPrice) pair that didn't come from the CURRENT scan.
   const scanAttemptRef = useRef(0);
+  // LAST-SENT PHOTOS (2026-11-08, crash-trip memory audit): a snapshot of
+  // the full photo set a scan actually uploaded - captured in
+  // finishAnalyze right before `photos` state itself gets trimmed down to
+  // just photos[0] (see that trim's own comment). Exists ONLY so "Edit &
+  // Rerun" (the result screen's pencil icon) can restore the full set when
+  // the user explicitly asks to go back and add more photos/details - the
+  // one real case that still needs more than the single display thumbnail
+  // after a scan completes.
+  const lastSentPhotosRef = useRef<string[]>([]);
+  // Pending lib/scanStage.ts timers (see analyze()'s own comment) - cleared
+  // whenever a NEWER attempt supersedes them, or the real response lands
+  // first, so a stale timer can never overwrite a later scan's own stage.
+  const scanStageTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   // PATCH-ON-SETTLE (2026-10-12, MEASURED: the owner's 9 real Walmart scans
   // all stored buy_price=0/decision=UNKNOWN in production - this screen
   // already auto-fills buyPrice from a confident tag read and recomputes a
@@ -503,6 +517,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   function reset() {
     setStep("camera");
     setResult(null);
+    scanStageTimersRef.current.forEach(clearTimeout);
+    scanStageTimersRef.current = [];
+    clearScanStage();
     setPhotos([]); setWinShared(false);
     setDescription("");
     setBrandInput("");
@@ -539,6 +556,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
   async function takePhoto() {
     if (!cameraRef.current) return;
+    markScanStage("capture");
+    // WRAPPED (2026-11-08, crash-trip audit): a native capture/compress
+    // failure used to be an unhandled rejection with no user-facing
+    // feedback at all (stuck on the camera screen) - now surfaces the
+    // SAME "Scan Failed / Try Again" screen every other stage's own
+    // try/catch already shows, instead of silently doing nothing.
+    try {
     const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
     if (photo?.base64) {
       // Only the FIRST photo overall gets full-res "primary" treatment -
@@ -556,33 +580,55 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         return next;
       });
     }
+    } catch (e: any) {
+      clearScanStage();
+      setResult({ _error: e?.message || "Couldn't capture that photo." });
+      setStep("result");
+    }
   }
 
   async function pickLibrary() {
     const remaining = MAX_PHOTOS - photos.length;
     if (remaining <= 0) return;
+    // WRAPPED (2026-11-08, crash-trip audit) - same reasoning as
+    // takePhoto's own try/catch.
+    try {
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"], base64: true, quality: 0.7,
       allowsMultipleSelection: true, selectionLimit: remaining,
     });
     if (res.canceled || !res.assets?.length) return;
+    markScanStage("capture");
     const picked = res.assets.slice(0, remaining);
     // startIndex: where these land in the FINAL photos array - only the
-    // one that ends up at overall index 0 is "primary". Compressed in
-    // PARALLEL (was a sequential for-await loop) - no reason to make the
-    // user wait for each image to compress one at a time.
+    // one that ends up at overall index 0 is "primary".
+    // SEQUENTIAL, NOT PARALLEL (2026-11-08, crash-trip memory audit,
+    // reverted from a 2026-10 change that made this a Promise.all batch):
+    // expo-image-manipulator decodes each full-res source image into
+    // native memory to resize it - running that for every picked photo AT
+    // ONCE multiplies peak memory by however many the user selected,
+    // right as the app is also about to hold all of them in JS state for
+    // upload. One at a time bounds peak memory to a single photo's decode,
+    // regardless of selectionLimit.
     const startIndex = photos.length;
     const _ct0 = Date.now();
-    const compressed = (await Promise.all(
-      picked.map((a, i) => a.base64 ? compressPhoto(a.base64, a.width, a.height, startIndex + i === 0 ? "primary" : "secondary") : Promise.resolve(null))
-    )).filter((c): c is string => !!c);
-    // Wall-clock time of the whole concurrent batch (not summed per-photo -
-    // these run in parallel via Promise.all, so summing would overcount vs.
-    // what the user actually waited).
+    const compressed: string[] = [];
+    for (let i = 0; i < picked.length; i++) {
+      const a = picked[i];
+      if (!a.base64) continue;
+      const c = await compressPhoto(a.base64, a.width, a.height, startIndex + i === 0 ? "primary" : "secondary");
+      compressed.push(c);
+    }
+    // Wall-clock time of the whole sequential batch.
     compressMsTotalRef.current += Date.now() - _ct0;
     if (compressed.length) {
       setPhotos(p => [...p, ...compressed].slice(0, MAX_PHOTOS));
       setStep("review");
+    }
+    } catch (e: any) {
+      clearScanStage();
+      setResult({ _error: e?.message || "Couldn't load those photos." });
+      setStep("result");
     }
   }
 
@@ -638,6 +684,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       }
       await finishAnalyze(d, [], true, myAttempt);
     } catch (e: any) {
+      clearScanStage();
       if (myAttempt !== scanAttemptRef.current) return;
       setBarcodeScanned(false);
       setResult({ _error: e.message });
@@ -675,12 +722,33 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         setStep("review"); return;
       }
       photosForRefine = p;
+      // SCAN STAGE MARKER (2026-11-08, crash-trip audit, no crash reporter
+      // in this app) - "upload" now, with best-guess "identify"/"price"
+      // transitions timed off the SAME ms budgets the loading screen's own
+      // StagedProgress steps use (5000ms "Uploading", 3000ms "Identifying")
+      // - approximate, not server-confirmed (see lib/scanStage.ts's own
+      // header), but the best signal available for "which stage was this
+      // scan in" if the app never comes back to clear it.
+      markScanStage("upload");
+      scanStageTimersRef.current.forEach(clearTimeout);
+      scanStageTimersRef.current = [
+        setTimeout(() => markScanStage("identify"), 5000),
+        setTimeout(() => markScanStage("price"), 8000),
+      ];
       // No price is ever collected pre-scan any more - the scan itself is
       // what reads the price tag (retailPriceRead). See the results step
       // below for where a price is now entered/edited.
       const d = await scanImage(token, p, (brandInput ? "Brand: " + brandInput + ". " : "") + description, undefined, compressMsTotalRef.current);
+      scanStageTimersRef.current.forEach(clearTimeout);
+      scanStageTimersRef.current = [];
       await finishAnalyze(d, photosForRefine, false, myAttempt);
     } catch (e: any) {
+      scanStageTimersRef.current.forEach(clearTimeout);
+      scanStageTimersRef.current = [];
+      // A caught error is a CLEAN failure (the app handled it, didn't
+      // crash) - clear the marker so it's never mistaken for a suspected
+      // crash on next launch.
+      clearScanStage();
       if (myAttempt !== scanAttemptRef.current) return;
       setResult({ _error: e.message });
       setStep("result");
@@ -704,8 +772,23 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       return;
     }
     if (!d.success) throw new Error(d.error || "Analysis failed");
+    // A clean result - clear the scan-stage marker (lib/scanStage.ts).
+    clearScanStage();
     setResult(d);
     setRefineSeq(0);
+    // DROP UPLOADED SECONDARY PHOTOS FROM STATE (2026-11-08, crash-trip
+    // memory audit): the upload is done - only photos[0] is ever read
+    // again on the result screen itself (ProfitFlexHero's photoBase64
+    // prop), so a scan with 2-5 photos no longer needs to hold the rest in
+    // React state through the entire "identify -> price -> result"
+    // lifecycle. `photosForRefine` (this function's own param, a local
+    // closure over the pre-trim array, not this state) still carries the
+    // full set to the deferred background refine call below - trimming
+    // state here doesn't touch that. lastSentPhotosRef keeps the full set
+    // reachable for "Edit & Rerun" (see its own comment) - the one UI path
+    // that still needs more than photos[0] after this point.
+    lastSentPhotosRef.current = photosForRefine;
+    setPhotos(p => p.length > 1 ? [p[0]] : p);
     // TWO-STAGE SCAN RENDER (2026-09-11): d IS the final, complete result
     // already (identify now runs allowSearch:false on this path - see
     // app/api/lens/route.ts) - this fires the deferred, search-enabled
@@ -1164,11 +1247,26 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // is the server's own tier for THIS basis price - null it out here
     // rather than threading a guard through ProfitFlexHero.
     const isAiOnly = result.priceBasisTier === "ai_only";
+    // THIN-RESULT NUMBER WITHHOLDING (2026-11-08, Superman Mr. Terrific
+    // crash-trip audit) - mirrors deal-ai-pro's app/api/lens/route.ts
+    // withholdConfidentNumbers exactly. result.conditionThinSampleNote is
+    // now set by the server for EVERY comparable_range result (not just
+    // the condition-filter fallback subcase - see that route's own
+    // comment), so this single flag covers every thin case the server
+    // itself withholds Max Buy/profit/ROI for. Used below to null maxBuy
+    // and to swap the hero/ROI DISPLAY numbers for an honest fallback -
+    // never to zero heroProfit/heroRoi THEMSELVES, which classifyOutcome/
+    // classifyHeroVerdictLocal still need as real numbers to classify a
+    // genuine loss as PASS rather than everything reading as a fabricated
+    // break-even (see this file's own LOCKED VERDICT comment for why a
+    // forced 0 there would be a second, different lie).
+    const withholdConfidentNumbers = isAiOnly || !!result.conditionThinSampleNote;
     // FLOORED AT 0, NOT CLAMPED TO A FAKE $1 (2026-10-19) - 0 is a real,
     // honest answer ("no price clears the bar"), not a sentinel. null
-    // stays reserved for "no price data at all" (ai_only) - ProfitFlexHero
-    // (below) tells these apart via maxBuy===0 vs maxBuy===null.
-    const maxBuy = (!maxBuyLocked && !isAiOnly && planningPrice > 0)
+    // stays reserved for "no price data at all" (ai_only, or now any other
+    // withheld-confidence case) - ProfitFlexHero (below) tells these apart
+    // via maxBuy===0 vs maxBuy===null.
+    const maxBuy = (!maxBuyLocked && !withholdConfidentNumbers && planningPrice > 0)
       ? Math.max(0, Math.floor(Math.min(roiCeilingBuy, profitFloorBuy)))
       : null;
     const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
@@ -1473,7 +1571,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // before that - ProfitFlexHero just renders whatever it's handed under
     // `profitLabel`, no component change needed for this to work.
     // Reads sellPriceForProfit (canonical, rounded), not adjustedResaleValue.
-    const heroDisplayValue = enteredBp > 0 ? heroProfit : sellPriceForProfit;
+    // withholdConfidentNumbers (2026-11-08) - a thin comparable_range match
+    // can still reach a non-"estimate" outcome.tier (e.g. "THIN" is a real,
+    // if marginal, judgment call for most tiers - hideProfitHero above
+    // wouldn't catch this case), so this is checked explicitly rather than
+    // relying on outcome.tier alone: falls back to the SAME typical-sale-
+    // price display the no-price-entered state already uses, never a
+    // profit figure computed off a 3-row comparable_range match.
+    const heroDisplayValue = (enteredBp > 0 && !withholdConfidentNumbers) ? heroProfit : sellPriceForProfit;
 
     // REMOVED (2026-10-04, decision 8, Walmart-aisle testing): this used to
     // prepend "Most sold on {platform} —" from result.realPlatformClaim - a
@@ -1616,7 +1721,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // elsewhere - a condition edit must move both together.
     const secondaryStats = [
       { label: "sell price", value: sellPriceForProfit > 0 ? "$" + sellPriceForProfit : "—" },
-      { label: "ROI", value: maxBuyLocked ? "🔒" : (heroRoi ? heroRoi + "%" : "—") },
+      { label: "ROI", value: maxBuyLocked ? "🔒" : (withholdConfidentNumbers ? "—" : (heroRoi ? heroRoi + "%" : "—")) },
       { label: "to sell", value: oracleDaysTxt },
     ];
     // TEXT (item 5): never the server's own reasoning text here any more -
@@ -1677,7 +1782,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               review (navData.viewScan skipped straight to "result" - see
               this screen's own load effect), so there is no earlier step to
               go back to. Back means History instead. */}
-          <TouchableOpacity onPress={() => (viewingSavedScan ? onNavigate("history") : setStep("review"))} style={s.navBack}>
+          <TouchableOpacity onPress={() => {
+            if (viewingSavedScan) { onNavigate("history"); return; }
+            // RESTORE FULL PHOTO SET - see the ProfitFlexHero onEdit
+            // pencil's own comment; this top-nav back button reaches the
+            // same review screen and needs the same restoration.
+            if (lastSentPhotosRef.current.length) setPhotos(lastSentPhotosRef.current);
+            setStep("review");
+          }} style={s.navBack}>
             <Text style={s.navBackText}>{"\u2039"}</Text>
           </TouchableOpacity>
           <HeaderLogo textStyle={s.logoText}/>
@@ -1857,6 +1969,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     // screen's back button tell "editing an existing result"
                     // apart from "starting a fresh scan" and return to it.
                     setDescription(result.itemName||"");
+                    // RESTORE FULL PHOTO SET (2026-11-08) - `photos` was
+                    // trimmed to [photos[0]] right after this scan's own
+                    // upload completed (finishAnalyze's own comment) to
+                    // stop holding 2-5 full-size base64 strings in state
+                    // for no reason once the normal path never revisits
+                    // them - Edit & Rerun is the one path that does.
+                    if (lastSentPhotosRef.current.length) setPhotos(lastSentPhotosRef.current);
                     setStep("review");
                   }}
                   isSkip={hideProfitHero}
@@ -1878,7 +1997,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   // preserve: one literal, always, whenever no price is
                   // entered. A genuine server-provided label would replace
                   // this literal outright, not add a fourth branch.
-                  profitLabel={enteredBp > 0 ? profitLabel : "typical sell price"}
+                  profitLabel={(enteredBp > 0 && !withholdConfidentNumbers) ? profitLabel : "typical sell price"}
                   maxBuy={maxBuy}
                   maxBuyReasoning={maxBuyReasoning}
                   maxBuyBasis={maxBuyBasis}

@@ -6,8 +6,9 @@ import {
 import { C } from "./src/lib/theme";
 import LogoBadge from "./src/components/LogoBadge";
 import ScopeBackground from "./src/components/ScopeBackground";
-import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache, getScanById, invalidateScanHistoryCache, SessionRestoreNetworkError, logClientError } from "./src/lib/api";
+import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache, getScanById, invalidateScanHistoryCache, SessionRestoreNetworkError, logClientError, logEvent } from "./src/lib/api";
 import ErrorBoundary from "./src/components/ErrorBoundary";
+import { readScanStage, clearScanStage } from "./src/lib/scanStage";
 import { supabase } from "./src/lib/supabase";
 import { addSaleCheckInTapListener } from "./src/lib/notifications";
 import LogSaleModal from "./src/components/LogSaleModal";
@@ -628,6 +629,29 @@ export default function App() {
   }
 
   async function init() {
+    // SUSPECTED-CRASH CHECK (2026-11-08, crash-trip audit) - this app has
+    // no native crash reporter (no Sentry/Bugsnag/Crashlytics), so a true
+    // native crash (OOM/watchdog) is otherwise completely invisible - it
+    // never runs any JS, so it can't log anything AT the moment it
+    // happens. src/lib/scanStage.ts's marker is written at each scan
+    // stage and cleared on a clean result/New Scan/caught error
+    // (ScannerScreen.tsx) - if it's STILL set on this cold launch, the
+    // previous session died mid-scan without reaching any of those clean
+    // end states. Fire-and-forget, never blocks first paint - reads and
+    // clears the marker regardless of whether the report itself lands.
+    (async () => {
+      const suspected = await readScanStage();
+      if (!suspected) return;
+      await clearScanStage();
+      logEvent("", "client_crash_suspected", {
+        stage: suspected.stage,
+        msSinceMarked: Date.now() - suspected.at,
+        updateId: Updates.updateId || null,
+        channel: Updates.channel || null,
+        runtimeVersion: Updates.runtimeVersion || null,
+        platform: `${Platform.OS} ${Platform.Version}`,
+      }).catch(() => {});
+    })();
     // MEASURED BUG: this app had zero custom expo-updates code anywhere,
     // running purely on the SDK default (checkAutomatically: "ON_LOAD") -
     // that mode checks for and DOWNLOADS an update on a cold launch, but

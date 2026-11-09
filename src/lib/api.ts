@@ -1149,7 +1149,7 @@ export async function shareWin(
 // in this app follows (see recordSaleOutcome's own fetch). token may be
 // empty for a genuinely anonymous caller - /api/events treats that as
 // user_id:null rather than rejecting the call.
-export async function logEvent(token: string, event: "lock_tap" | "paywall_view" | "first_scan" | "client_error", props: Record<string, any> = {}): Promise<void> {
+export async function logEvent(token: string, event: "lock_tap" | "paywall_view" | "first_scan" | "client_error" | "client_crash_suspected", props: Record<string, any> = {}): Promise<void> {
   try {
     await fetch(`${API_BASE}/api/events`, {
       method: "POST",

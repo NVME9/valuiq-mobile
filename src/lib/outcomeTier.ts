@@ -161,13 +161,16 @@ export function classifyOutcome(input: OutcomeTierInput): OutcomeTierInfo {
 // verdict without a second, drifting copy of this logic.
 export type HeroVerdict = "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" | "CHECK ITEM" | null;
 
-// ALWAYS-ANSWER TIER 4 (2026-10-18) - mirrors deal-ai-pro's lib/priceBasis.ts
-// classifyHeroVerdict's identical, same-date update: "comparable_range" is
-// capped at WORTH A LOOK (never SOLID), same ceiling as "segment" - EXCEPT a
-// Low-identity-confidence match, which caps one rung lower (THIN). Without
-// this, a comparable_range-tier scan fell through to the generic tail below
-// and could show SOLID - exactly what the spec forbids ("comparable_range
-// verdicts are capped at WORTH A LOOK/THIN/PASS, never SOLID").
+// ALWAYS-ANSWER TIER 4 (2026-10-18, UPDATED 2026-11-08) - mirrors deal-ai-
+// pro's lib/priceBasis.ts classifyHeroVerdict's identical, same-date update.
+// "comparable_range" NEVER reaches WORTH A LOOK/BUY any more, regardless of
+// confidence - it used to cap at WORTH A LOOK on a "medium"-confidence
+// match (title_tokens/brand_category scope, 15+ rows), but a real scan
+// (Superman Mr. Terrific, 3 brand_category rows) showed how thin "medium"
+// confidence can still be: this tier's own floor (COMPARABLE_RANGE_MIN_N,
+// deal-ai-pro's lib/profitOracle.ts) is too low to ever justify this app's
+// strongest buy signal alone. Always THIN now. "segment" keeps its own
+// WORTH A LOOK ceiling (never SOLID) - unaffected by this change.
 export function classifyHeroVerdictLocal(opts: {
   tier: string; buyPrice: number; netProfit: number; roi: number; sellThroughPct: number | null;
   comparableRangeConfidence?: "low" | "medium" | null;
@@ -187,7 +190,7 @@ export function classifyHeroVerdictLocal(opts: {
   if (tier === "comparable_range" && comparableRangeScope === "category") return "CHECK ITEM";
   if (netProfit <= 0) return "PASS";
   if (roi < ROI_BUY_MIN) return "THIN";
-  if (tier === "comparable_range") return comparableRangeConfidence === "low" ? "THIN" : "WORTH A LOOK";
+  if (tier === "comparable_range") return "THIN";
   if (tier === "segment") return "WORTH A LOOK";
   if (roi >= 50 && sellThroughPct != null && sellThroughPct >= 50) return "WORTH A LOOK";
   return "SOLID";
