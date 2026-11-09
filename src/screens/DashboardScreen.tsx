@@ -270,20 +270,30 @@ export default function DashboardScreen({ token, plan, planLoaded = true, scansL
           onRefresh={() => { setRefresh(true); loadData(); }}/>}
       >
 
-        {/* SALE-CAPTURE MOAT: passive nudge for aging BUY scans still needing an outcome */}
-        <SaleCapturePrompt token={token} onNavigate={onNavigate} />
-
-        {/* HERO SCAN BUTTON */}
+        {/* HERO SCAN BUTTON - always the first card under the header, above
+            every banner/nudge below it (SaleCapturePrompt, the wins bar,
+            the live ticker, plan/upgrade cards) - this is the one thing a
+            returning user should see and be able to tap into the camera
+            before anything else loads in. Title stays on exactly one line
+            (numberOfLines+adjustsFontSizeToFit is a pure safety net for an
+            unusually narrow phone - it never wraps or shrinks on a normal
+            width) and the icon sits in its own fixed-size, non-shrinking
+            box so a long title can never push it aside. */}
         <Animated.View style={{transform:[{scale:scanPulse}]}}>
           <TouchableOpacity style={s.hero} onPress={() => onNavigate("scanner")} activeOpacity={0.9}>
-            <View style={{flex:1}}>
+            <View style={{flex:1, minWidth:0}}>
               <Text style={s.heroEye}>SCAN ANYTHING · GET INSTANT PROFIT</Text>
-              <Text style={s.heroTitle}>Point. Shoot. Profit.</Text>
-              <Text style={s.heroSub}>Find your next flip in seconds →</Text>
+              <Text style={s.heroTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>Point. Shoot. Profit.</Text>
+              <Text style={s.heroSub} numberOfLines={1}>Find your next flip in seconds →</Text>
             </View>
-            <Text style={{fontSize:44}}>📷</Text>
+            <View style={s.heroIconBox}>
+              <Text style={s.heroIcon}>📷</Text>
+            </View>
           </TouchableOpacity>
         </Animated.View>
+
+        {/* SALE-CAPTURE MOAT: passive nudge for aging BUY scans still needing an outcome */}
+        <SaleCapturePrompt token={token} onNavigate={onNavigate} />
 
         {/* WINS - real, logged sales; mirrors LIVE FEED's prominence right
             below the hero button. winsSummary is the shared, unbounded
@@ -531,11 +541,16 @@ const s = StyleSheet.create({
   scansBadge:    { backgroundColor:C.greenBg, borderRadius:100, paddingHorizontal:8, paddingTop:16, paddingBottom:10, borderWidth:1, borderColor:C.greenBorder },
   scansBadgeTxt: { color:C.green, fontSize:10, fontWeight:"700" },
   scroll:        { padding:16, paddingBottom:100 },
-  // Hero
-  hero:          { backgroundColor:C.greenBg, borderWidth:2, borderColor:C.green+"60", borderRadius:22, padding:22, flexDirection:"row", alignItems:"center", justifyContent:"space-between", marginBottom:12 },
-  heroEye:       { color:C.green, fontSize:8, fontWeight:"900", letterSpacing:2, marginBottom:6 },
-  heroTitle:     { color:C.text1, fontSize:26, fontWeight:"900", letterSpacing:-0.8, marginBottom:4 },
-  heroSub:       { color:C.text3, fontSize:13 },
+  // Hero - bigger/bolder/taller: the first thing under the header, full
+  // width, always above every banner/nudge (see render's own comment).
+  hero:          { backgroundColor:C.greenBg, borderWidth:2, borderColor:C.green+"60", borderRadius:24, paddingVertical:28, paddingHorizontal:22, flexDirection:"row", alignItems:"center", justifyContent:"space-between", marginBottom:14 },
+  heroEye:       { color:C.green, fontSize:9, fontWeight:"900", letterSpacing:2, marginBottom:7 },
+  heroTitle:     { color:C.text1, fontSize:30, fontWeight:"900", letterSpacing:-1, marginBottom:5 },
+  heroSub:       { color:C.text3, fontSize:14, fontWeight:"600" },
+  // Fixed-size, non-shrinking box - the title's flex:1 sibling can never
+  // compress this regardless of how long the title text gets.
+  heroIconBox:   { width:72, height:72, borderRadius:20, backgroundColor:C.green+"20", alignItems:"center", justifyContent:"center", marginLeft:14, flexShrink:0, flexGrow:0 },
+  heroIcon:      { fontSize:38 },
   // Wins
   winsBar:       { flexDirection:"row", alignItems:"center", backgroundColor:C.greenBg, borderWidth:1.5, borderColor:C.green+"50", borderRadius:16, padding:16, marginBottom:16 },
   winsBarIcon:   { fontSize:22, marginRight:12 },

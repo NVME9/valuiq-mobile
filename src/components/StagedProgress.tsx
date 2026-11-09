@@ -55,7 +55,7 @@ export default function StagedProgress({ steps, active }: Props) {
                 <ActivityIndicator size="small" color={C.greenDark} />
               ) : null}
             </View>
-            <Text style={[s.label, (done || isActive) && s.labelActive]}>{step.label}</Text>
+            <Text style={[s.label, (done || isActive) && s.labelActive]} numberOfLines={1}>{step.label}</Text>
           </View>
         );
       })}
@@ -64,7 +64,17 @@ export default function StagedProgress({ steps, active }: Props) {
 }
 
 const s = StyleSheet.create({
-  wrap: { width: "100%", maxWidth: 320, marginTop: 24 },
+  // Fit-content, not stretch-to-parent: width:"100%" used to make this
+  // stretch across the whole screen (minus the caller's own padding),
+  // which isn't the same thing as being centered - the list's own left
+  // edge only lined up with the screen's center by accident, and its
+  // right edge sat wherever the longest label happened to end. alignSelf
+  // "center" + no explicit width lets Yoga size the column to its widest
+  // child (the longest step label) and center THAT block, so the steps'
+  // shared left edge sits in the middle of the screen with equal margins
+  // on both sides, and short labels never look stranded in a sea of
+  // their own blank space.
+  wrap: { alignSelf: "center", maxWidth: "88%", marginTop: 24 },
   row: { flexDirection: "row", alignItems: "center", marginBottom: 14 },
   dot: {
     width: 26, height: 26, borderRadius: 13, marginRight: 12,
