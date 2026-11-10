@@ -1537,11 +1537,23 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               segOut.resolvedCount > 0 ? `${segOut.resolvedCount} resale outcomes` : null,
             ].filter(Boolean).join(" · ") || null
           : null);
+        // CRASH FIX (2026-11-09, app_events client_error audit: "Cannot
+        // read property 'tier' of undefined", 3x in 24h): headline is
+        // typed HeroVerdict, which also includes "CHECK ITEM" (lib/
+        // outcomeTier.ts's classifyHeroVerdictLocal, mirroring deal-ai-
+        // pro's classifyHeroVerdict low-identity-confidence override) -
+        // META here never had that key, so `META[headline].tier` a few
+        // lines down threw on every scan whose headline resolved to it.
+        // This computation runs unconditionally before render even decides
+        // whether the separate isCheckItem/noDataCard branch below ends up
+        // showing instead - a thrown TypeError here crashed the whole
+        // screen regardless of which branch would have rendered.
         const META: Record<string, { emoji: string; accent: string; tier: "hot" | "solid" | "thin" | "skip" }> = {
           "PASS": { emoji: "🚫", accent: C.red, tier: "skip" },
           "THIN": { emoji: "🤏", accent: C.yellow, tier: "thin" },
           "SOLID": { emoji: "✅", accent: C.green, tier: "solid" },
           "WORTH A LOOK": { emoji: "🔥", accent: C.green, tier: "hot" },
+          "CHECK ITEM": { emoji: "❓", accent: C.yellow, tier: "thin" },
         };
         const meta = META[headline];
         outcome = {
