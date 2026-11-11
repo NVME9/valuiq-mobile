@@ -15,7 +15,7 @@ import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareCard from "../components/ShareCard";
-import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, logEvent, logClientError } from "../lib/api";
+import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, logEvent, logClientError, peekProfileData } from "../lib/api";
 import ApiDebugPanel from "../components/ApiDebugPanel";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { deriveTagConfirmPending, confirmTagRead, editTagRead } from "../lib/tagConfirmState";
@@ -33,6 +33,7 @@ import LogSaleModal from "../components/LogSaleModal";
 import { toPendingScan } from "../lib/saleCapture";
 import { CONDITION_OPTIONS, CONDITION_TO_DB } from "../lib/condition";
 import { evaluateReview, requestReviewIfEligible, REVIEW_PROMPT_DELAY_MS, ReviewDebugState } from "../lib/storeReview";
+import RevealScreen from "../components/RevealScreen";
 
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
@@ -554,6 +555,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // completely - "Try again" re-renders the identical screen, it doesn't
   // restart the scan.
   const [resultBoundaryKey, setResultBoundaryKey] = useState(0);
+  // SHARE REVEAL (2026-11-11): available on every scan, not just a BUY -
+  // see the "Share reveal" button's own comment below for why.
+  const [revealOpen, setRevealOpen] = useState(false);
 
   function reset() {
     setStep("camera");
@@ -1870,6 +1874,32 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const confidenceLabel = confidenceTier === "high" ? "High confidence" : confidenceTier === "medium" ? "Medium confidence" : "Estimate - verify";
     const confidenceColor = confidenceTier === "high" ? C.green : confidenceTier === "medium" ? C.yellow : C.text4;
 
+    // SHARE REVEAL DATA (2026-11-11): the ONE place this screen decides
+    // what the reveal card is allowed to show - RevealScreen itself never
+    // recomputes anything (see its own header comment), so every gate that
+    // withholds a number on THIS proof screen (maxBuyLocked,
+    // withholdConfidentNumbers) must be applied here too, before the value
+    // ever reaches that component. revealProfitAfterFees mirrors heroProfit
+    // when a price was entered, or projects the SAME formula against the
+    // max-buy ceiling when it wasn't - "profit after fees" always means
+    // something concrete, never a bare $0 for an unpriced scan.
+    const revealCostBasis = enteredBp > 0 ? enteredBp : (maxBuy || 0);
+    const revealProfitAfterFees = (!maxBuyLocked && !withholdConfidentNumbers && revealCostBasis > 0 && planningPrice > 0)
+      ? Math.round((planningPrice - localFees - revealCostBasis - shippingCost) * 100) / 100
+      : null;
+    const revealProfitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
+    const revealVerdictLabel = maxBuyLocked ? null : outcome.label;
+    // CREATOR CODE (item 3): read from whatever profile data is ALREADY
+    // cached (peekProfileData - zero network calls from this screen, see
+    // its own "no API call" comment elsewhere in this file) - no confirmed
+    // field name exists for this yet server-side, so every plausible one is
+    // tried and this just quietly renders nothing if none match ("skip if
+    // not available," per spec - never a placeholder or an error).
+    const cachedProfile: any = peekProfileData(token)?.profile;
+    const revealCreatorCode: string | null =
+      cachedProfile?.creatorCode || cachedProfile?.creator_code || cachedProfile?.myCreatorCode || cachedProfile?.my_creator_code || null;
+    const revealDisplayName: string | null = cachedProfile?.display_name || cachedProfile?.full_name || null;
+
     // TOP-LEVEL ERROR BOUNDARY (2026-11-10, proof-screen - finishes the
     // "top-level ErrorBoundary around scan->result flow" crash-hardening
     // work the 2026-11-08 commit named but only ever wrapped the price
@@ -1912,6 +1942,24 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           token={token}
           scan={result.id ? toPendingScan(result) : null}
           onClose={() => setShowLogSale(false)}
+        />
+        <RevealScreen
+          visible={revealOpen}
+          onClose={() => setRevealOpen(false)}
+          token={token}
+          scanId={(result.id ?? result.scanId ?? result.scan_id) != null ? String(result.id ?? result.scanId ?? result.scan_id) : null}
+          itemName={result.itemName || result.item_name || "Unknown Item"}
+          photoBase64={photos[0] || null}
+          enteredPrice={enteredBp > 0 ? enteredBp : null}
+          typicalPrice={sellPriceForProfit > 0 ? sellPriceForProfit : null}
+          priceLow={hasServerRange ? serverPriceLow : null}
+          priceHigh={hasServerRange ? serverPriceHigh : null}
+          profitAfterFees={revealProfitAfterFees}
+          profitLabel={revealProfitLabel}
+          verdictLabel={revealVerdictLabel}
+          verdictAccent={outcome.accent}
+          displayName={revealDisplayName}
+          creatorCode={revealCreatorCode}
         />
         {/* Nav */}
         <View style={s.nav}>
@@ -2713,6 +2761,25 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
             </>
           )}
+
+          {/* SHARE REVEAL (item 1, 2026-11-11): deliberately OUTSIDE both
+              the CHECK ITEM and main-proof branches above - this button
+              shows on EVERY scan result, priced or not, buy or skip. "It is
+              acquisition": a SKIP is just as shareable a moment as a BUY
+              (mirrors FlexRevealBody's own "a PASS has just as real a card
+              to share as a BUY" reasoning), and a scan the user hasn't
+              priced yet still has a real item/photo/typical-sale-range to
+              show off. See the SHARE REVEAL DATA block above this return
+              for the one place every number shown here is gated to
+              "already unlocked on the proof screen." */}
+          <TouchableOpacity
+            style={{backgroundColor:C.surface,borderRadius:14,paddingVertical:15,paddingHorizontal:12,marginBottom:12,alignItems:"center",justifyContent:"center",flexDirection:"row",gap:8,minHeight:52,borderWidth:1,borderColor:C.green+"40"}}
+            activeOpacity={0.85}
+            onPress={() => setRevealOpen(true)}
+          >
+            <Text style={{fontSize:16}}>{"✨"}</Text>
+            <Text style={{color:C.green,fontSize:15,fontWeight:"900"}}>Share reveal</Text>
+          </TouchableOpacity>
 
           {/* Upgrade nudge for free users */}
           {plan==="free" && scansLeft !== null && scansLeft <= 3 && (
