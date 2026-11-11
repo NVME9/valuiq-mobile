@@ -42,6 +42,13 @@ interface ProfitFlexHeroProps {
   onUpgradePress?: () => void;
   dataTag?: string;               // "● REAL DATA" / "Based on N listings" / "ESTIMATE"
   dataTagColor?: string;
+  // CONFIDENCE BADGE (2026-11-10, proof-screen): a second, orthogonal signal
+  // from dataTag above - how confident the PRICE itself is (high/medium/low),
+  // not whether it's "real data." "Estimate - verify" is the low-confidence
+  // label text specifically (not a generic word choice) - callers pass it
+  // verbatim so this component never invents its own wording per tier.
+  confidenceLabel?: string | null;
+  confidenceColor?: string;
   secondaryStats?: SecondaryStat[]; // ROI, sell-time
   footNote?: string;
   // Small caption rendered under maxBuyReasoning, inside the max-buy box -
@@ -70,6 +77,12 @@ interface ProfitFlexHeroProps {
   // (see FlashHighlight) so the update reads as the number resolving, not
   // silently swapping. 0/unset = no flash (default, normal render).
   flashSeq?: number;
+
+  // SMALL HERO (2026-11-10, proof-screen): true when the server's own
+  // typicalPriceHeroSize says "small" - a handful of items (e.g. a $0.50
+  // single) make the default 48px hero number look like a typo rather than
+  // a real price. Shrinks ONLY the big number, never the rest of the card.
+  heroSizeSmall?: boolean;
 }
 
 const GLOW_W = 340;
@@ -98,8 +111,8 @@ function money(n: number): string {
 
 export default function ProfitFlexHero({
   outcome, itemName, categoryLine, photoBase64, onEdit, isSkip,
-  heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, maxBuyBasis, maxBuyBasisLine, riskAtLowEndLine, maxBuyLocked = false, onUpgradePress, dataTag, dataTagColor, secondaryStats = [], footNote,
-  skipDetail, noVerdictPrompt, flashSeq = 0,
+  heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, maxBuyBasis, maxBuyBasisLine, riskAtLowEndLine, maxBuyLocked = false, onUpgradePress, dataTag, dataTagColor, confidenceLabel, confidenceColor, secondaryStats = [], footNote,
+  skipDetail, noVerdictPrompt, flashSeq = 0, heroSizeSmall = false,
 }: ProfitFlexHeroProps) {
   // MEASURED BUG: a long AI-generated item name ("American Flag with Fish
   // Trucker Hat (likely...") had no way to be seen in full - numberOfLines
@@ -190,6 +203,7 @@ export default function ProfitFlexHero({
         <Text style={st.itemNameToggle}>{titleExpanded ? "▲ Show less" : "▼ Tap to see full name"}</Text>
       </TouchableOpacity>
       {categoryLine ? <Text style={st.itemMeta}>{categoryLine}</Text> : null}
+      {confidenceLabel ? <Text style={[st.confidenceBadge, { color: confidenceColor || C.text4 }]}>{confidenceLabel}</Text> : null}
 
       {noVerdictPrompt ? (
         <>
@@ -200,7 +214,7 @@ export default function ProfitFlexHero({
               framing. */}
           {!maxBuyLocked && (
             <FlashHighlight flashSeq={flashSeq}>
-              <Text style={[st.hero, { color: outcome.accent }]} numberOfLines={1} adjustsFontSizeToFit>{heroText}</Text>
+              <Text style={[st.hero, heroSizeSmall && st.heroSmall, { color: outcome.accent }]} numberOfLines={1} adjustsFontSizeToFit>{heroText}</Text>
             </FlashHighlight>
           )}
           {!maxBuyLocked && <Text style={st.heroLabel}>{profitLabel}</Text>}
@@ -220,7 +234,7 @@ export default function ProfitFlexHero({
               badge/copy above and the range/stats below are untouched. */}
           {!maxBuyLocked && (
             <FlashHighlight flashSeq={flashSeq}>
-              <Text style={[st.hero, { color: outcome.accent }]} numberOfLines={1} adjustsFontSizeToFit>{heroText}</Text>
+              <Text style={[st.hero, heroSizeSmall && st.heroSmall, { color: outcome.accent }]} numberOfLines={1} adjustsFontSizeToFit>{heroText}</Text>
             </FlashHighlight>
           )}
           {!maxBuyLocked && <Text style={st.heroLabel}>{profitLabel}</Text>}
@@ -303,7 +317,9 @@ const st = StyleSheet.create({
   itemName: { color: C.text1, fontSize: 16, fontWeight: "700", marginBottom: 2 },
   itemNameToggle: { color: C.text4, fontSize: 11, fontWeight: "700", marginBottom: 4 },
   itemMeta: { color: C.text3, fontSize: 12, marginBottom: 12 },
+  confidenceBadge: { fontSize: 11, fontWeight: "800", letterSpacing: 0.3, marginTop: -8, marginBottom: 10 },
   hero: { fontSize: 48, fontWeight: "900", letterSpacing: -1.5, marginTop: 2 },
+  heroSmall: { fontSize: 30 },
   heroLabel: { color: C.text4, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8, marginTop: -4, marginBottom: 8 },
   copy: { fontSize: 14, fontWeight: "700", marginBottom: 14 },
   skipReason: { fontSize: 16, fontWeight: "800", lineHeight: 24, marginBottom: 8 },

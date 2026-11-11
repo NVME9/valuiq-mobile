@@ -62,6 +62,18 @@ export const ROI_PASS_MIN = 10;         // %, rule 2 - after-fees ROI below this
 export const ROI_BUY_MIN = 30;          // %, rule 5 - after-fees ROI at/above this (and clear of the profit floor) is a confident BUY; this is the "target ROI" max-buy solves for
 export const ROI_HOT_MIN = 75;          // %, rule 6 - after-fees ROI at/above this is a HOT BUY
 
+// MAX-BUY FALLBACK FLOOR (2026-11-10, proof-screen): used ONLY by
+// ScannerScreen.tsx's own local max-buy recompute, and ONLY as a fallback
+// for a response that doesn't carry a server buyTarget/maxBuy - the server
+// field is now read verbatim whenever present (matching History/Specialty,
+// which never recompute this locally at all - see SpecialtyScreen.tsx's
+// `result.buyTarget`). Deliberately looser than PROFIT_JUDGMENT_FLOOR
+// (rule 3, $5): a client-side fallback nobody server-side has vetted should
+// err toward quoting a real, if thin, ceiling over showing none at all.
+// Never read by classifyOutcome itself - the verdict's own BUY/JUDGMENT
+// CALL split still runs off PROFIT_JUDGMENT_FLOOR exactly as before.
+export const MAX_BUY_PROFIT_FLOOR = 3;
+
 function money(n: number): string {
   return (n < 0 ? "-$" : "$") + Math.round(Math.abs(n)).toLocaleString();
 }

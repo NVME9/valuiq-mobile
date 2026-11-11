@@ -15,7 +15,7 @@ import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareCard from "../components/ShareCard";
-import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, logEvent } from "../lib/api";
+import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, logEvent, logClientError } from "../lib/api";
 import ApiDebugPanel from "../components/ApiDebugPanel";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { deriveTagConfirmPending, confirmTagRead, editTagRead } from "../lib/tagConfirmState";
@@ -28,7 +28,7 @@ import { matchSpecialtyCategory } from "./SpecialtyScreen";
 import ProfitFlexHero from "../components/ProfitFlexHero";
 import FlashHighlight from "../components/FlashHighlight";
 import SegmentOutcomesBlock from "../components/SegmentOutcomesBlock";
-import { classifyOutcome, ROI_BUY_MIN, PROFIT_JUDGMENT_FLOOR, classifyHeroVerdictLocal, decisionFromVerdict, type HeroVerdict } from "../lib/outcomeTier";
+import { classifyOutcome, ROI_BUY_MIN, MAX_BUY_PROFIT_FLOOR, classifyHeroVerdictLocal, decisionFromVerdict, type HeroVerdict } from "../lib/outcomeTier";
 import LogSaleModal from "../components/LogSaleModal";
 import { toPendingScan } from "../lib/saleCapture";
 import { CONDITION_OPTIONS, CONDITION_TO_DB } from "../lib/condition";
@@ -545,6 +545,15 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [showVerify,     setShowVerify]     = useState(false);
   const [showPayout,     setShowPayout]     = useState(false);
   const [showRisk,       setShowRisk]       = useState(false);
+  // CRASH HARDENING (2026-11-10, proof-screen): bumped only by the result
+  // screen's own top-level ErrorBoundary's "Try again" below - remounts
+  // JUST that boundary + its subtree (a fresh ErrorBoundary instance means
+  // hasError resets to false) while every piece of real scan state
+  // (result/buyPrice/resultCondition/photos, all plain hooks on THIS
+  // component, untouched by a child subtree remounting) survives
+  // completely - "Try again" re-renders the identical screen, it doesn't
+  // restart the scan.
+  const [resultBoundaryKey, setResultBoundaryKey] = useState(0);
 
   function reset() {
     setStep("camera");
@@ -1053,9 +1062,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       );
     }
 
-    const hasGoodData   = result.dataQuality === "strong";
-    const hasLimitedData = result.dataQuality === "limited";
-    const hasNoData      = !hasGoodData && !hasLimitedData;
     const specialtyMatch  = matchSpecialtyCategory(result.category, result.itemName || result.item_name);
 
     // ONE RESALE REALITY (2026-09-17): tier is a real top-level field on
@@ -1267,7 +1273,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // buy price. shippingCost is the SAME value heroProfit already reads.
     const netAfterFeesAndShippingAtCeiling = planningPrice * (1 - feeRate) - shippingCost;
     const roiCeilingBuy = netAfterFeesAndShippingAtCeiling / (1 + ROI_BUY_MIN / 100);
-    const profitFloorBuy = netAfterFeesAndShippingAtCeiling - PROFIT_JUDGMENT_FLOOR;
+    const profitFloorBuy = netAfterFeesAndShippingAtCeiling - MAX_BUY_PROFIT_FLOOR;
     // AI-ONLY: NO MAX BUY (2026-10-09, MEASURED): sellPriceForProfit can
     // still be nonzero for tier "ai_only" - it falls back to the AI's own
     // raw anchor (adjustedResaleValue/result.resaleFromModel) whenever
@@ -1315,9 +1321,22 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // stays reserved for "no price data at all" (ai_only, or now any other
     // withheld-confidence case) - ProfitFlexHero (below) tells these apart
     // via maxBuy===0 vs maxBuy===null.
-    const maxBuy = (!maxBuyLocked && !withholdConfidentNumbers && planningPrice > 0)
+    // MAX BUY (2026-11-10, proof-screen): prefer the server's own
+    // buyTarget/maxBuy - the exact field History/Specialty already show
+    // verbatim (SpecialtyScreen.tsx's `result.buyTarget != null` read) -
+    // over this screen's own local recompute, so the two can never show a
+    // different ceiling for the identical scan. The local recompute below
+    // is now ONLY a fallback for a response that doesn't carry either field
+    // (an older saved scan, or a path that never computed one).
+    const serverMaxBuy = result.buyTarget != null ? Number(result.buyTarget)
+      : (result.maxBuy != null ? Number(result.maxBuy) : null);
+    const localMaxBuyFallback = planningPrice > 0
       ? Math.max(0, Math.floor(Math.min(roiCeilingBuy, profitFloorBuy)))
       : null;
+    const usingServerMaxBuy = !maxBuyLocked && !withholdConfidentNumbers && serverMaxBuy != null;
+    const maxBuy = (maxBuyLocked || withholdConfidentNumbers)
+      ? null
+      : (serverMaxBuy != null ? serverMaxBuy : localMaxBuyFallback);
     const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
 
     // ROI MUST be computed against the SAME cost basis as heroProfit - the
@@ -1699,7 +1718,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         ? (enteredBp <= maxBuy
             ? `${maxBuyPrefix}You paid $${enteredBp} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
             : `${maxBuyPrefix}You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
-        : `${maxBuyPrefix}Pay $${maxBuy} or less to make this a real flip (≥${ROI_BUY_MIN}% ROI, ≥$${PROFIT_JUDGMENT_FLOOR} profit after fees).`
+        : usingServerMaxBuy
+        ? `${maxBuyPrefix}Pay $${maxBuy} or less to make this a real flip.`
+        : `${maxBuyPrefix}Pay $${maxBuy} or less to make this a real flip (≥${ROI_BUY_MIN}% ROI, ≥$${MAX_BUY_PROFIT_FLOOR} profit after fees).`
     );
     // "Based on <planningBasis> ($planningPrice)" (item 2) - shown under
     // Max buy whenever the server sent a real basis for it. Absent (older
@@ -1812,7 +1833,69 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const noPriceEntered = !isCheckItem && enteredBp <= 0;
     const noVerdictPrompt = noPriceEntered ? "Type the tag price to get Buy or Pass." : null;
 
+    // NEEDS BETTER IDENTIFICATION (2026-11-10, proof-screen): distinct from
+    // CHECK ITEM above - the server still priced SOMETHING (this screen's
+    // proof stays fully visible, price/verdict included), it just wants a
+    // brand/model tag or barcode before it can trust that price. Both CTAs
+    // route to the SAME identity-confirm screen ScanConfirmScreen already
+    // provides - it already supports both adding a photo (pickFrom) and
+    // editing the item name in one place, re-running against this SAME
+    // scan.id (rerunScan, "never a new row" - see that screen's own header
+    // comment) - no second re-run mechanism to build or keep in sync.
+    const needsBetterIdentification = !!result.needsBetterIdentification;
+    const scanConfirmPayload = {
+      id: result.id ?? result.scanId ?? result.scan_id,
+      item_name: result.itemName || result.item_name || "",
+      brand: result.brand,
+      category: result.category,
+      condition: resultCondition ? (CONDITION_TO_DB[resultCondition] || undefined) : undefined,
+      buy_price: enteredBp || undefined,
+      image_url: photos[0] ? `data:image/jpeg;base64,${photos[0]}` : undefined,
+      specialty_data: JSON.stringify(result),
+    };
+
+    // CONFIDENCE BADGE (2026-11-10, proof-screen): a second, orthogonal
+    // signal from the REAL DATA/ESTIMATE dataTag above - how much to trust
+    // the PRICE itself, independent of whether it's "real data." High only
+    // for genuine item-level sell evidence (hasItemLevelSellEvidence,
+    // confirmedByMoat); medium for a real but broader match (segment/
+    // comparable_range); low - labeled "Estimate - verify" per spec - for
+    // everything else, INCLUDING every case this screen already withholds
+    // confident numbers for (withholdConfidentNumbers: ai_only, thin
+    // condition sample, brand-agnostic segment, sanity-capped).
+    const confidenceTier: "high" | "medium" | "low" = withholdConfidentNumbers ? "low"
+      : hasItemLevelSellEvidence ? "high"
+      : (result.priceBasisTier === "segment" || result.priceBasisTier === "comparable_range") ? "medium"
+      : "low";
+    const confidenceLabel = confidenceTier === "high" ? "High confidence" : confidenceTier === "medium" ? "Medium confidence" : "Estimate - verify";
+    const confidenceColor = confidenceTier === "high" ? C.green : confidenceTier === "medium" ? C.yellow : C.text4;
+
+    // TOP-LEVEL ERROR BOUNDARY (2026-11-10, proof-screen - finishes the
+    // "top-level ErrorBoundary around scan->result flow" crash-hardening
+    // work the 2026-11-08 commit named but only ever wrapped the price
+    // field with): wraps the ENTIRE result-step render, not just one piece
+    // of it, so a crash ANYWHERE in this tree degrades to a plain retry
+    // screen instead of a blank/frozen app. fallbackInSafeArea - see
+    // ErrorBoundary.tsx's own comment - because this boundary is replacing
+    // a subtree that itself starts with this screen's own SafeAreaView;
+    // losing that subtree must not also lose the notch/home-indicator
+    // insets. key={resultBoundaryKey} is what makes "Try again" actually
+    // retry: bumping it forces a brand-new ErrorBoundary instance (hasError
+    // reset to false) around the SAME JSX below, while result/buyPrice/
+    // resultCondition/photos - this component's OWN hooks, never reset by a
+    // child subtree remounting - carry the scan forward unchanged.
     return (
+      <ErrorBoundary
+        key={resultBoundaryKey}
+        fallbackInSafeArea
+        fallbackMessage="Something went wrong showing this scan. Your result is still saved."
+        onRetry={() => setResultBoundaryKey(k => k + 1)}
+        onError={(error, info) => logClientError(token, error, {
+          stage: "result-render",
+          componentStack: info.componentStack,
+          scanId: (result?.id ?? result?.scanId ?? result?.scan_id) ?? null,
+        })}
+      >
       <SafeAreaView style={s.safe} edges={["top","left","right"]}>
         <StatusBar barStyle="light-content"/>
         {/* Off-screen branded card, captured (not displayed) when sharing as an image */}
@@ -1854,18 +1937,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,paddingBottom:60}} showsVerticalScrollIndicator={false}>
 
-          {/* - UNKNOWN: need more info - */}
-          {hasNoData && (
-            <View style={s.noDataCard}>
-              <Text style={{color:C.text1,fontSize:15,fontWeight:"700",textAlign:"center",marginBottom:8}}>Need More Information</Text>
-              <Text style={{color:C.text3,fontSize:13,textAlign:"center",lineHeight:20,marginBottom:16}}>
-                Try scanning again with the brand name, model number, or a clearer photo for accurate pricing.
-              </Text>
-              <TouchableOpacity style={[s.navBtn,{alignSelf:"center",paddingHorizontal:24,paddingTop: 16, paddingBottom: 10}]} onPress={() => setStep("camera")}>
-                <Text style={s.navBtnText}>Scan Again</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+          {/* ALWAYS-ANSWER PROOF SCREEN (2026-11-10): there is no "not
+              enough data / can't price" dead end any more - a thin/no-data
+              scan still has a real item, photo, and (at worst) an honest
+              AI-estimate range/verdict to stand on (see outcome's own
+              "estimate"/"UNCONFIRMED" branch above). The old dataQuality-
+              gated "Need More Information" card used to replace the ENTIRE
+              proof (no photo, no range, nothing) whenever dataQuality
+              wasn't "strong"/"limited" - removed outright; CHECK ITEM below
+              remains the one deliberate exception (identity itself, not
+              pricing data, is what's missing there). */}
 
           {/* - CHECK ITEM (item 3, 2026-10-25 server contract) - identity is
               title-only/low-confidence; the server withheld netProfit/roi
@@ -1873,7 +1954,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               WATCH). No BUY/PASS, no profit figures - range only (server
               priceLow/priceHigh), the one honest sentence, and a button
               straight into the identity-confirm re-run screen. */}
-          {!hasNoData && isCheckItem && (
+          {isCheckItem && (
             <View style={s.noDataCard}>
               <Text style={{color:C.text1,fontSize:15,fontWeight:"700",textAlign:"center",marginBottom:8}}>Check This Item</Text>
               <Text style={{color:C.text3,fontSize:13,textAlign:"center",lineHeight:20,marginBottom: hasServerRange ? 10 : 16}}>
@@ -1886,25 +1967,47 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               ) : null}
               <TouchableOpacity
                 style={[s.navBtn,{alignSelf:"center",paddingHorizontal:24,paddingTop:16,paddingBottom:10}]}
-                onPress={() => onNavigate("scan-confirm", { scan: {
-                  id: result.id ?? result.scanId ?? result.scan_id,
-                  item_name: result.itemName || result.item_name || "",
-                  brand: result.brand,
-                  category: result.category,
-                  condition: resultCondition ? (CONDITION_TO_DB[resultCondition] || undefined) : undefined,
-                  buy_price: enteredBp || undefined,
-                  image_url: photos[0] ? `data:image/jpeg;base64,${photos[0]}` : undefined,
-                  specialty_data: JSON.stringify(result),
-                } })}
+                onPress={() => onNavigate("scan-confirm", { scan: scanConfirmPayload })}
               >
                 <Text style={s.navBtnText}>Is this what you're looking for?</Text>
               </TouchableOpacity>
             </View>
           )}
 
-          {/* - PROFIT (only when we have data) - */}
-          {!hasNoData && !isCheckItem && (
+          {/* - PROFIT (always, except the dedicated CHECK ITEM card above) - */}
+          {!isCheckItem && (
             <>
+              {/* NEEDS BETTER IDENTIFICATION (2026-11-10, proof-screen): the
+                  proof above (item/photo/range/verdict) stays fully visible
+                  - this is guidance, not a replacement, unlike CHECK ITEM's
+                  dedicated card. Both buttons open the SAME identity-confirm
+                  screen (see scanConfirmPayload's own comment) - one labeled
+                  for "I have more to show it," the other for "the name's
+                  wrong," so the user picks the right mental action even
+                  though both land in the same place. */}
+              {needsBetterIdentification && (
+                <View style={[s.noDataCard, { marginBottom: 14 }]}>
+                  <Text style={{color:C.text1,fontSize:14,fontWeight:"700",textAlign:"center",marginBottom:6}}>Help us nail this ID</Text>
+                  {result.brandTagPrompt ? (
+                    <Text style={{color:C.text3,fontSize:13,textAlign:"center",lineHeight:19,marginBottom:12}}>{result.brandTagPrompt}</Text>
+                  ) : null}
+                  <View style={{flexDirection:"row",gap:10}}>
+                    <TouchableOpacity
+                      style={[s.navBtn,{flex:1,paddingVertical:12,paddingHorizontal:8,alignItems:"center"}]}
+                      onPress={() => onNavigate("scan-confirm", { scan: scanConfirmPayload })}
+                    >
+                      <Text style={s.navBtnText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.85}>Scan the label or barcode</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[s.navBtn,{flex:1,paddingVertical:12,paddingHorizontal:8,alignItems:"center"}]}
+                      onPress={() => onNavigate("scan-confirm", { scan: scanConfirmPayload })}
+                    >
+                      <Text style={s.navBtnText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.85}>Edit name and re-check</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
               {/* REORDER (2026-09-16): price now renders FIRST - the
                   editable price input is the actual top-of-screen content,
                   above the fold, no scroll. The 2026-09-10 FIX 4 reorder
@@ -2064,13 +2167,44 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   }}
                   dataTag={dataTag}
                   dataTagColor={dataTagColor}
+                  confidenceLabel={confidenceLabel}
+                  confidenceColor={confidenceColor}
                   secondaryStats={noPriceEntered ? [] : secondaryStats}
                   footNote={footNote}
                   skipDetail={skipDetail}
                   noVerdictPrompt={noVerdictPrompt}
                   flashSeq={refineSeq}
+                  heroSizeSmall={result.typicalPriceHeroSize === "small"}
                 />
               </View>
+
+              {/* UPGRADE PROMPT BELOW THE PROOF (item 4, 2026-11-10): keyed
+                  on locked[] itself (scan 6+ on free plan - see maxBuyLocked
+                  above), not plan==="free" generally - this is the specific
+                  "your plan is withholding part of THIS result" moment, so
+                  it belongs right under the proof it's explaining, not
+                  buried after every collapsible section below. Replaces the
+                  old plan==="free"-gated card that used to sit at the very
+                  bottom of this fragment (same copy, moved up here and
+                  re-gated) - keeping both would have repeated the exact
+                  same pitch twice on one screen. */}
+              {locked.length > 0 && (
+                <TouchableOpacity
+                  style={{backgroundColor:"#0a1500",borderRadius:14,padding:16,marginBottom:12,borderWidth:1,borderColor:C.green+"40",alignItems:"center"}}
+                  onPress={()=>onNavigate("upgrade")}
+                  activeOpacity={0.85}
+                >
+                  <Text style={{fontSize:20,marginBottom:6}}></Text>
+                  <Text style={{color:C.green,fontSize:14,fontWeight:"900",marginBottom:4}}>Unlock Full Intelligence</Text>
+                  <Text style={{color:C.text3,fontSize:12,textAlign:"center",lineHeight:18,marginBottom:10}}>
+                    Max buy is on paid plans. Upgrade to see everything - one good flip pays for 6 months.
+                  </Text>
+                  <View style={{backgroundColor:C.green,borderRadius:8,paddingHorizontal:20,paddingVertical:8}}>
+                    <Text style={{color:C.greenDark,fontWeight:"900",fontSize:13}}>Upgrade from $14.99/mo {'>'}</Text>
+                  </View>
+                  <Text style={{color:C.text4,fontSize:10,marginTop:8}}>Used {scansLeft !== null ? 10 - scansLeft : "?"} of 10 free scans this month</Text>
+                </TouchableOpacity>
+              )}
 
               {/* SEGMENT OUTCOMES (replaces the old crowdVerdict "Category
                   trend" banner, 2026-10-06 - that banner read
@@ -2152,21 +2286,59 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   OutcomeTierInfo the verdict card renders (FIX 3,
                   2026-09-10) - so this can't contradict the verdict card. */}
               {/* RANGE (item 2/4, 2026-10-25): server priceLow/priceHigh
-                  only - never the local AI-derived range. Shown whenever
-                  there isn't already a full item-level verdict standing on
-                  its own real numbers (!hasItemLevelSellEvidence), OR no
-                  price has been entered yet at all (noPriceEntered) - item
-                  4 calls for the range alongside Max buy in that state
-                  regardless of moat confirmation. */}
-              {hasServerRange && (noPriceEntered || !hasItemLevelSellEvidence) ? (
+                  only - never the local AI-derived range.
+                  WIDENED (item 2, 2026-11-10): used to gate on
+                  (noPriceEntered || !hasItemLevelSellEvidence) - a real
+                  item-level verdict suppressed the range entirely. The
+                  range is part of the proof itself now (see the next
+                  comment), so it stands alongside a real verdict too,
+                  never conditional on whether one exists yet. */}
+              {/* PROOF (item 2, 2026-11-10): the range is part of the proof
+                  itself now - shown whenever the server sent one, same as
+                  item/photo/verdict above, not only while there's no
+                  standalone verdict yet to lean on. Includes the typical
+                  sale price alongside the low-high band (sellPriceForProfit
+                  - the SAME canonical rounded price everything else on this
+                  card already uses) so "range" and "typical" never need two
+                  separate reads to reconcile. */}
+              {hasServerRange ? (
                 <View style={[s.rangeBanner, { backgroundColor: outcome.accent + "1a", borderColor: outcome.accent + "55" }]}>
                   <Text></Text>
                   <FlashHighlight flashSeq={refineSeq}>
                     {/* ONE CAVEAT MAX: the "not yet confirmed" qualifier
                         lives once, in ProfitFlexHero's footNote above - not
                         repeated here. */}
-                    <Text style={[s.rangeBannerSub, { flex: 1 }]}>{`Typical range is $${serverPriceLow}-$${serverPriceHigh}.`}</Text>
+                    <Text style={[s.rangeBannerSub, { flex: 1 }]}>
+                      {`$${serverPriceLow}-$${serverPriceHigh}${sellPriceForProfit > 0 ? ` · typical $${sellPriceForProfit}` : ""}`}
+                    </Text>
                   </FlashHighlight>
+                </View>
+              ) : null}
+
+              {/* RECENT REAL SALES (item 2, 2026-11-10): the actual sold
+                  comps backing the range/verdict above - date, price, and
+                  condition for each, verbatim off result.sales. Absent or
+                  empty renders nothing (never a "no sales yet" caveat - see
+                  this screen's own always-answer rule). */}
+              {Array.isArray(result.sales) && result.sales.length > 0 ? (
+                <View style={[s.infoCard, { marginBottom: 12 }]}>
+                  <Text style={s.infoLabel}>Recent real sales</Text>
+                  {result.sales.slice(0, 5).map((sale: any, i: number) => (
+                    <View
+                      key={i}
+                      style={{
+                        flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+                        paddingVertical: 7, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: C.border,
+                      }}
+                    >
+                      <Text style={{ color: C.text3, fontSize: 12, flex: 1, flexShrink: 1 }} numberOfLines={1}>
+                        {[sale.date, sale.condition].filter(Boolean).join(" · ") || "—"}
+                      </Text>
+                      <Text style={{ color: C.text1, fontSize: 13, fontWeight: "700" }}>
+                        {sale.price != null ? `$${Math.round(Number(sale.price))}` : "—"}
+                      </Text>
+                    </View>
+                  ))}
                 </View>
               ) : null}
 
@@ -2539,24 +2711,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 </TouchableOpacity>
               )}
 
-              {/* FREE TIER PAYWALL - app-wide upsell, shown regardless of verdict */}
-              {plan === "free" && (
-                <TouchableOpacity
-                  style={{backgroundColor:"#0a1500",borderRadius:14,padding:16,marginBottom:12,borderWidth:1,borderColor:C.green+"40",alignItems:"center"}}
-                  onPress={()=>onNavigate("upgrade")}
-                  activeOpacity={0.85}
-                >
-                  <Text style={{fontSize:20,marginBottom:6}}></Text>
-                  <Text style={{color:C.green,fontSize:14,fontWeight:"900",marginBottom:4}}>Unlock Full Intelligence</Text>
-                  <Text style={{color:C.text3,fontSize:12,textAlign:"center",lineHeight:18,marginBottom:10}}>
-                    Max buy is on paid plans. Upgrade to see everything - one good flip pays for 6 months.
-                  </Text>
-                  <View style={{backgroundColor:C.green,borderRadius:8,paddingHorizontal:20,paddingVertical:8}}>
-                    <Text style={{color:C.greenDark,fontWeight:"900",fontSize:13}}>Upgrade from $14.99/mo {'>'}</Text>
-                  </View>
-                  <Text style={{color:C.text4,fontSize:10,marginTop:8}}>Used {scansLeft !== null ? 10 - scansLeft : "?"} of 10 free scans this month</Text>
-                </TouchableOpacity>
-              )}
             </>
           )}
 
@@ -2574,6 +2728,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
         </ScrollView>
       </SafeAreaView>
+      </ErrorBoundary>
     );
   }
 
