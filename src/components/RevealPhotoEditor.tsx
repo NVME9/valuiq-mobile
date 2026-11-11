@@ -20,8 +20,21 @@
 // on-screen pan/zoom state - never a running 60fps native crop.
 import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Image, PanResponder, Dimensions, ActivityIndicator, Modal } from "react-native";
-import * as ImageManipulator from "expo-image-manipulator";
+import type * as ImageManipulatorNS from "expo-image-manipulator";
 import { C } from "../lib/theme";
+
+// OTA-SAFE IMPORT (2026-11-11, crash incident): expo-image-manipulator's
+// native entry point resolves its native module at MODULE SCOPE - a static
+// top-level `import` can't be wrapped in try/catch (Metro evaluates it
+// unconditionally), so a missing native module would crash the whole app
+// at launch, not just this editor (this file is reachable from
+// RevealScreen.tsx, which ScannerScreen - eagerly imported by App.tsx -
+// always mounts). PHOTO_EDITOR_AVAILABLE lets RevealScreen hide the "Edit
+// photo" entry point entirely when this is null, rather than opening an
+// editor whose rotate/flip/crop buttons would throw on tap.
+export let ImageManipulator: typeof ImageManipulatorNS | null = null;
+try { ImageManipulator = require("expo-image-manipulator"); } catch { ImageManipulator = null; }
+export const PHOTO_EDITOR_AVAILABLE = ImageManipulator != null;
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const VIEWPORT_W = SCREEN_W - 32;
@@ -154,7 +167,8 @@ export default function RevealPhotoEditor({ visible, sourceBase64, originalBase6
     })
   ).current;
 
-  async function bake(actions: ImageManipulator.Action[]) {
+  async function bake(actions: ImageManipulatorNS.Action[]) {
+    if (!ImageManipulator) return;
     setBusy(true);
     try {
       const out = await ImageManipulator.manipulateAsync(workingUri, actions, {
@@ -179,6 +193,7 @@ export default function RevealPhotoEditor({ visible, sourceBase64, originalBase6
 
   function rotate90() { bake([{ rotate: 90 }]); }
   function flip() {
+    if (!ImageManipulator) return;
     setFlipped((f) => !f);
     bake([{ flip: ImageManipulator.FlipType.Horizontal }]);
   }
@@ -220,7 +235,7 @@ export default function RevealPhotoEditor({ visible, sourceBase64, originalBase6
   ).current;
 
   function save() {
-    if (!imgSize) { onSave(workingUri.replace(/^data:image\/\w+;base64,/, "")); return; }
+    if (!imgSize || !ImageManipulator) { onSave(workingUri.replace(/^data:image\/\w+;base64,/, "")); return; }
     const abs = coverScale(imgSize, frame) * userScale;
     // Visible window, in the image's OWN (unrotated-by-anything-further)
     // pixel space - see this file's header comment for why no rotation

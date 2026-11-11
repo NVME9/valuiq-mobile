@@ -13,8 +13,22 @@
 // show live eligibility/failing-condition state without actually spending
 // one of the limited OS-level review prompts.
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as StoreReview from "expo-store-review";
 import { getScanCount } from "./api";
+
+// OTA-SAFE IMPORT (2026-11-11, crash incident): expo-store-review's native
+// entry point calls `requireNativeModule('ExpoStoreReview')` at MODULE
+// SCOPE (see node_modules/expo-store-review/src/ExpoStoreReview.native.ts)
+// - that throws immediately, before React even mounts, if this binary
+// doesn't have the module registered. A static top-level `import` can't be
+// wrapped in try/catch (Metro hoists and evaluates it unconditionally); a
+// guarded require() can. See scripts/check-native-modules.ts for the
+// mechanical check this also guards against going forward.
+let StoreReview: typeof import("expo-store-review") | null = null;
+try {
+  StoreReview = require("expo-store-review");
+} catch {
+  StoreReview = null;
+}
 
 export type ReviewTrigger = "verdict" | "sale";
 
@@ -59,7 +73,7 @@ async function evaluate(token: string, trigger: ReviewTrigger): Promise<ReviewDe
   try { lastAskedAt = await AsyncStorage.getItem(LAST_ASKED_KEY); } catch {}
 
   let isAvailable: boolean | null = null;
-  try { isAvailable = await StoreReview.isAvailableAsync(); } catch { isAvailable = false; }
+  try { isAvailable = StoreReview ? await StoreReview.isAvailableAsync() : false; } catch { isAvailable = false; }
 
   let lifetimeScans: number | null = null;
   try { lifetimeScans = await getScanCount(token); } catch {}
@@ -102,7 +116,7 @@ export async function evaluateReview(token: string, trigger: ReviewTrigger = "ve
 // actually show, not the moment the triggering event fired.
 export async function requestReviewIfEligible(token: string, trigger: ReviewTrigger): Promise<ReviewDebugState> {
   const state = await evaluate(token, trigger);
-  if (!state.eligible) return state;
+  if (!state.eligible || !StoreReview) return state;
   try {
     await StoreReview.requestReview();
     const now = new Date().toISOString();

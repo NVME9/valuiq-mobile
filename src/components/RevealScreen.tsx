@@ -18,8 +18,7 @@ import {
   Modal, View, Text, StyleSheet, TouchableOpacity, Image, Animated, Easing,
   Dimensions, Share, TextInput, ScrollView, ActivityIndicator,
 } from "react-native";
-import ViewShot from "react-native-view-shot";
-import * as Sharing from "expo-sharing";
+import type ViewShotRef from "react-native-view-shot";
 import { C } from "../lib/theme";
 import ValuIQLogo from "./ValuIQLogo";
 import Wordmark from "./Wordmark";
@@ -27,7 +26,24 @@ import { useCountUp } from "./FlexRevealCard";
 import { money } from "../lib/flexReveal";
 import { loadRevealPrefs, saveRevealPrefs, RevealPrefs, RevealLook } from "../lib/revealPrefs";
 import { logEvent } from "../lib/api";
-import RevealPhotoEditor from "./RevealPhotoEditor";
+import RevealPhotoEditor, { PHOTO_EDITOR_AVAILABLE } from "./RevealPhotoEditor";
+
+// OTA-SAFE IMPORTS (2026-11-11, crash incident): react-native-view-shot's
+// and expo-sharing's native entry points both resolve their native module
+// at MODULE SCOPE (react-native-view-shot via
+// TurboModuleRegistry.getEnforcing, which throws outright if missing) -
+// a static top-level `import` of either can't be wrapped in try/catch
+// (Metro evaluates it unconditionally, before this file's own code runs),
+// so a missing native module would crash the WHOLE APP at launch, not just
+// this screen - this screen is reachable from ScannerScreen, which is
+// eagerly imported by App.tsx. A guarded require() can be wrapped, and
+// every call site below already null-checks and falls back to the plain
+// text Share.share() (core RN, never native-module-dependent) when either
+// is unavailable - see share() and the off-screen ViewShot render below.
+let ViewShot: typeof import("react-native-view-shot").default | null = null;
+try { ViewShot = require("react-native-view-shot").default; } catch { ViewShot = null; }
+let Sharing: typeof import("expo-sharing") | null = null;
+try { Sharing = require("expo-sharing"); } catch { Sharing = null; }
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const CARD_W = Math.min(SCREEN_W - 56, 300);
@@ -185,7 +201,7 @@ export default function RevealScreen(props: RevealScreenProps) {
   const [revealPhoto, setRevealPhoto] = useState<string | null>(photoBase64);
   const [playKey, setPlayKey] = useState(0);
   const [sharing, setSharing] = useState(false);
-  const shareCardRef = useRef<ViewShot>(null);
+  const shareCardRef = useRef<ViewShotRef>(null);
   const openedLoggedFor = useRef<string | null>(null);
 
   useEffect(() => {
@@ -216,8 +232,8 @@ export default function RevealScreen(props: RevealScreenProps) {
     if (sharing) return;
     setSharing(true);
     try {
-      const available = await Sharing.isAvailableAsync();
-      if (!available || !shareCardRef.current?.capture) {
+      const available = Sharing ? await Sharing.isAvailableAsync() : false;
+      if (!available || !Sharing || !shareCardRef.current?.capture) {
         await Share.share({ message: prefs.caption || "Check this out — ValuIQ" });
       } else {
         const uri = await shareCardRef.current.capture();
@@ -261,9 +277,11 @@ export default function RevealScreen(props: RevealScreenProps) {
           </TouchableOpacity>
           <Text style={st.replayHint}>Tap the card to replay</Text>
 
-          <TouchableOpacity style={st.editPhotoBtn} onPress={() => setEditorOpen(true)}>
-            <Text style={st.editPhotoText}>✏️  Edit photo</Text>
-          </TouchableOpacity>
+          {PHOTO_EDITOR_AVAILABLE ? (
+            <TouchableOpacity style={st.editPhotoBtn} onPress={() => setEditorOpen(true)}>
+              <Text style={st.editPhotoText}>✏️  Edit photo</Text>
+            </TouchableOpacity>
+          ) : null}
 
           <TouchableOpacity style={st.personalizeHeader} onPress={() => setPersonalizeOpen((v) => !v)}>
             <Text style={st.personalizeHeaderText}>Personalize</Text>
@@ -310,11 +328,13 @@ export default function RevealScreen(props: RevealScreenProps) {
             Same pattern FlexRevealCard.tsx uses for its own share image, so
             the exported PNG always shows the fully-resolved numbers, never
             a mid-count-up frame. */}
-        <View style={{ position: "absolute", top: 0, left: -9999 }} pointerEvents="none">
-          <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1, result: "tmpfile" }}>
-            <RevealCardContent {...cardProps} animate={false} />
-          </ViewShot>
-        </View>
+        {ViewShot ? (
+          <View style={{ position: "absolute", top: 0, left: -9999 }} pointerEvents="none">
+            <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1, result: "tmpfile" }}>
+              <RevealCardContent {...cardProps} animate={false} />
+            </ViewShot>
+          </View>
+        ) : null}
 
         <View style={st.bottomBar}>
           <TouchableOpacity style={st.shareBtn} onPress={share} disabled={sharing} activeOpacity={0.85}>
