@@ -16,15 +16,20 @@ import { isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiome
 import { API_BASE, deleteAccount, getProfileData, peekProfileData, invalidateProfileCache, setCachedAvatar } from "../lib/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Updates from "expo-updates";
+import Constants from "expo-constants";
 
-// Bump this string on every OTA publish (right before running `eas update`).
 // MEASURED INCIDENT (2026-08-31): three separate OTA publishes looked
 // identical on-device with no way to tell whether a new bundle had actually
-// loaded - this stamp, plus Updates.updateId/channel/runtimeVersion below,
-// is the ground truth: if BUILD_TAG on-device doesn't match what you just
-// published, the update didn't land (see App.tsx's init() for the
-// check-and-reload-immediately fix that was missing).
-const BUILD_TAG = "2026-10-18.1";
+// loaded. This used to be a hand-bumped string someone had to remember to
+// update right before every `eas update` - easy to forget, and useless the
+// moment it was. GIT_COMMIT_HASH (app.config.js's extra.gitCommitHash,
+// computed from the actual working tree at build/publish time) replaces
+// it: it's never stale, and a trailing "*" means it was published dirty
+// (see the clean-branch-deploy memory note). Paired with
+// Updates.updateId/channel/runtimeVersion below, this is the ground truth
+// for "did my publish land, and which one" (see App.tsx's init() for the
+// check-and-reload-immediately fix that applies updates in the first place).
+const GIT_COMMIT_HASH = Constants.expoConfig?.extra?.gitCommitHash || "unknown";
 
 // The single owner/dev allowlist for anything real users must never see -
 // dev-only tools (Reset onboarding, Preview new-user flow) and the build
@@ -963,12 +968,18 @@ export default function ProfileScreen({ token, refreshToken, plan, onLogout, onN
                 </Text>
               )}
 
-              {/* Build/version stamp - see BUILD_TAG comment above. updateId
-                  is null on the embedded (store) bundle, before any OTA has
-                  ever applied - shown as "embedded" so that state is
-                  unambiguous too. */}
+              {/* Build/version stamp - see GIT_COMMIT_HASH comment above.
+                  NOTE: as of expo-updates 29 (SDK 54), Updates.updateId is a
+                  real UUID for the EMBEDDED bundle too, not just for an
+                  OTA-fetched one (null only in dev / when updates are
+                  disabled) - so this id alone can look exactly like a
+                  landed OTA update when it's actually still the build's own
+                  embedded JS. GIT_COMMIT_HASH is what actually disambiguates
+                  "which commit is this" - cross-check it against
+                  `eas update:view <id>`'s gitCommitHash, or against this
+                  build's own git commit, to tell the two apart. */}
               <Text style={s.buildStamp} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-                {BUILD_TAG} · {Updates.updateId ? Updates.updateId.slice(0, 8) : "embedded"} · {Updates.channel || "no channel"} · {Updates.runtimeVersion || "?"}
+                {GIT_COMMIT_HASH} · {Updates.updateId ? Updates.updateId.slice(0, 8) : "embedded"} · {Updates.channel || "no channel"} · {Updates.runtimeVersion || "?"}
               </Text>
             </>
           )}

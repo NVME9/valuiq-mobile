@@ -691,6 +691,17 @@ export default function App() {
         }
       } catch (e) {
         console.log("[DIAG update-check] failed:", String(e));
+        // Only console.log'd before this - invisible in production, so a
+        // check that silently fails on every launch (network, store policy,
+        // timeout) looked identical to "no update published yet" with no
+        // way to tell them apart after the fact. Reported the same
+        // best-effort way as the crash-suspected check above.
+        logClientError("", e instanceof Error ? e : new Error(String(e)), {
+          context: "ota_update_check",
+          updateId: Updates.updateId || null,
+          channel: Updates.channel || null,
+          runtimeVersion: Updates.runtimeVersion || null,
+        });
       }
     }
     // Check if user has seen onboarding,

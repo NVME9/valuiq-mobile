@@ -123,8 +123,12 @@ function InlineWrapper({ children }: { children: React.ReactNode }) {
 }
 
 const st = StyleSheet.create({
-  navRow: { flexDirection: "row", alignItems: "center", backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 14, marginBottom: 10 },
-  navIcon: { fontSize: 18, marginRight: 10 },
+  // Matches ProfileScreen's ps.navRow exactly (flat divider row, not a
+  // boxed card) - this row sits in that same list, directly above the
+  // Account section's own border-top divider, and a different box style
+  // here read as a stray/empty-looking row breaking up the list.
+  navRow: { flexDirection: "row", alignItems: "center", padding: 16, borderBottomWidth: 1, borderBottomColor: C.border, gap: 12 },
+  navIcon: { fontSize: 20, width: 28, textAlign: "center" },
   navLabel: { flex: 1, color: C.text1, fontSize: 14, fontWeight: "600" },
   navArrow: { color: C.text4, fontSize: 18 },
   screenRoot: { flex: 1, backgroundColor: C.bg, alignItems: "center", justifyContent: "center", padding: 24 },
