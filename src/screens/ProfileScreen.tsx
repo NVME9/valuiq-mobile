@@ -1168,7 +1168,16 @@ const s = StyleSheet.create({
   referralBtn:       { backgroundColor:C.green, borderRadius:10, padding:12, alignItems:"center" },
   referralBtnText:   { color:C.greenDark, fontSize:14, fontWeight:"800" },
   promoCard:         { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:14, padding:16 },
-  accountSection:    { marginTop:24, borderTopWidth:1, borderTopColor:C.border, paddingTop:20 },
+  // BLANK ROW FIX (2026-11-11, round 2): this used to ALSO carry its own
+  // borderTopWidth/borderTopColor + marginTop:24 + paddingTop:20 - the row
+  // directly above (ReferralCodeEntry's collapsed prompt, ps.navRow-styled)
+  // already supplies its own bottom divider, so stacking a second divider
+  // 24-45px below it, with nothing in between, read as an empty ~70px row
+  // bounded by two lines - no icon/label/chevron, exactly matching Nate's
+  // report. The earlier fix (4163f13) only restyled ReferralCodeEntry's
+  // row itself and never touched this redundant second divider, so it
+  // never actually removed the gap. One margin, no second border.
+  accountSection:    { marginTop:20 },
   accountSectionTitle:{ color:C.text1, fontSize:16, fontWeight:"900", marginBottom:14 },
   // Renamed from cancelBtn (BEASTMODE FIX 3, 2026-09-13) - was a duplicate
   // StyleSheet.create key with Edit-Profile's plain "cancelBtn" above; object-

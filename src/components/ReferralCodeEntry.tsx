@@ -53,10 +53,18 @@ export default function ReferralCodeEntry({ token, mode, onDone }: Props) {
   }
 
   if (mode === "inline" && !expanded) {
+    // GUARD (2026-11-11, blank-row round 2): this is the one row of this
+    // component that lives permanently in ProfileScreen's nav list (see
+    // that file's own blank-row fix) - if its label is ever empty (a
+    // future edit that parameterizes it, a bad translation, etc.), render
+    // nothing instead of an icon+chevron row with a blank middle, which is
+    // exactly the bug this guard exists to prevent from coming back as.
+    const label = "Have a code from a creator?";
+    if (!label) return null;
     return (
       <TouchableOpacity style={st.navRow} onPress={() => setExpanded(true)}>
         <Text style={st.navIcon}>🎟️</Text>
-        <Text style={st.navLabel}>Have a code from a creator?</Text>
+        <Text style={st.navLabel}>{label}</Text>
         <Text style={st.navArrow}>›</Text>
       </TouchableOpacity>
     );
