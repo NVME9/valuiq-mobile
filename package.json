@@ -7,7 +7,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "check:native-modules": "tsx scripts/check-native-modules.ts",
+    "check:native-modules": "npx tsx scripts/check-native-modules.ts",
     "publish:ota": "npm run check:native-modules && eas update"
   },
   "dependencies": {

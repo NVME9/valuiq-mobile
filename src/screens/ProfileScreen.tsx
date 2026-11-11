@@ -131,6 +131,14 @@ export default function ProfileScreen({ token, refreshToken, plan, onLogout, onN
   const [deleteDebugState, setDeleteDebugState] = useState<DeleteAccountDebugState>({
     modalOpen: false, typedMatches: false, holding: false, holdProgressMs: 0, submitting: false,
   });
+  // STARTUP ERROR DEBUG ROW (2026-11-11, OTA crash incident) - collapsed by
+  // default, loaded lazily on first expand (never on mount: readLogEntriesAsync
+  // is a real disk read, no reason to pay for it unless someone actually
+  // opens this). See startupErrorTrap.ts for what lastStartupError is.
+  const [debugExpanded, setDebugExpanded] = useState(false);
+  const [debugLoaded, setDebugLoaded] = useState(false);
+  const [debugStartupError, setDebugStartupError] = useState<string | null>(null);
+  const [debugLogEntries, setDebugLogEntries] = useState<string[]>([]);
 
   // 2026-10-11: the two-tap native Alert that used to live here is gone -
   // see DeleteAccountModal.tsx's own header for why (the owner's own
@@ -178,6 +186,35 @@ export default function ProfileScreen({ token, refreshToken, plan, onLogout, onN
       ]
     );
   }
+
+  // STARTUP ERROR DEBUG ROW - loads once, the first time it's expanded;
+  // toggling closed and back open again just re-shows what's already in
+  // state (no re-fetch - this is a point-in-time snapshot of "what did the
+  // trap catch this app lifetime," not a live tail).
+  async function toggleDebugRow() {
+    const next = !debugExpanded;
+    setDebugExpanded(next);
+    if (!next || debugLoaded) return;
+    setDebugLoaded(true);
+    try {
+      // The ARCHIVE copy, not "lastStartupError" itself - App.tsx's init()
+      // reports and clears that one almost immediately on every launch
+      // (see its own comment), which would make this row read empty
+      // nearly every time. The archive persists until the NEXT startup
+      // error overwrites it, so it's the one actually worth showing here.
+      const raw = await AsyncStorage.getItem("lastStartupErrorArchive");
+      setDebugStartupError(raw || "(none captured)");
+    } catch (e) {
+      setDebugStartupError(`(failed to read: ${String(e)})`);
+    }
+    try {
+      const entries = await Updates.readLogEntriesAsync();
+      setDebugLogEntries(entries.slice(-10).map((e: any) => JSON.stringify(e)));
+    } catch (e) {
+      setDebugLogEntries([`(failed to read log entries: ${String(e)})`]);
+    }
+  }
+
   const [loading, setLoading]       = useState(!cachedAtMount);
   const [editing, setEditing]       = useState(false);
   const [editName, setEditName]     = useState("");
@@ -981,6 +1018,26 @@ export default function ProfileScreen({ token, refreshToken, plan, onLogout, onN
               <Text style={s.buildStamp} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                 {GIT_COMMIT_HASH} · {Updates.updateId ? Updates.updateId.slice(0, 8) : "embedded"} · {Updates.channel || "no channel"} · {Updates.runtimeVersion || "?"}
               </Text>
+
+              {/* DEBUG ROW (2026-11-11, OTA crash incident) - collapsed by
+                  default, see toggleDebugRow above for load timing. */}
+              <TouchableOpacity onPress={toggleDebugRow} style={s.debugRow}>
+                <Text style={s.debugRowTitle}>{debugExpanded ? "▲" : "▼"} Debug</Text>
+              </TouchableOpacity>
+              {debugExpanded && (
+                <View style={s.debugPanel}>
+                  <Text style={s.debugLabel}>lastStartupError</Text>
+                  <Text style={s.debugText} selectable>{debugStartupError ?? "loading…"}</Text>
+                  <Text style={[s.debugLabel, { marginTop: 10 }]}>readLogEntriesAsync (last 10)</Text>
+                  {debugLogEntries.length === 0 ? (
+                    <Text style={s.debugText} selectable>loading…</Text>
+                  ) : (
+                    debugLogEntries.map((e, i) => (
+                      <Text key={i} style={s.debugText} selectable>{e}</Text>
+                    ))
+                  )}
+                </View>
+              )}
             </>
           )}
 
@@ -1133,6 +1190,11 @@ const s = StyleSheet.create({
   devResetBtn:       { padding:10, alignItems:"center", marginTop:4 },
   devResetBtnTxt:    { color:C.text4, fontSize:11, fontWeight:"500", textAlign:"center" as any },
   buildStamp:        { color:C.text4, fontSize:9, fontWeight:"400", textAlign:"center" as any, marginTop:12, opacity:0.6 },
+  debugRow:          { paddingVertical:8, alignItems:"center" as any },
+  debugRowTitle:     { color:C.text4, fontSize:10, fontWeight:"600" },
+  debugPanel:        { backgroundColor:C.surface, borderWidth:1, borderColor:C.border, borderRadius:10, padding:10, marginTop:4 },
+  debugLabel:        { color:C.text3, fontSize:10, fontWeight:"800", textTransform:"uppercase" as any, letterSpacing:0.5, marginBottom:4 },
+  debugText:         { color:C.text2, fontSize:10, fontFamily:"Courier", marginBottom:4 },
   deleteAccountCard: { backgroundColor:C.surface, borderWidth:1, borderColor:C.red+"20", borderRadius:14, padding:16 },
   upgradeFullBtn:    { backgroundColor:C.green, borderRadius:14, paddingTop:16, paddingBottom:10, alignItems:"center" },
   upgradeFullBtnText:{ color:C.greenDark, fontSize:15, fontWeight:"900" } });

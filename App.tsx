@@ -661,6 +661,33 @@ export default function App() {
         platform: `${Platform.OS} ${Platform.Version}`,
       }).catch(() => {});
     })();
+    // STARTUP ERROR TRAP REPORT (2026-11-11, OTA crash incident) -
+    // startupErrorTrap.ts (index.ts, required before anything else) stores
+    // whatever it caught in AsyncStorage key "lastStartupError" and
+    // StartupErrorBoundary shows it on screen if present. This is the
+    // THIRD leg: once this line runs, the app has clearly survived past
+    // its own startup window, so report what was caught (if anything) to
+    // the same telemetry every other crash signal here uses, then clear
+    // it - never re-reported on a later launch that didn't repeat it.
+    // Fire-and-forget, same posture as the block above.
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem("lastStartupError");
+        if (!raw) return;
+        await AsyncStorage.removeItem("lastStartupError");
+        const parsed = JSON.parse(raw);
+        const err = new Error(parsed?.message || "startup error (no message captured)");
+        err.name = parsed?.name || "Error";
+        err.stack = parsed?.stack || "";
+        logClientError("", err, {
+          context: "startup_error_trap",
+          isFatal: parsed?.isFatal ?? null,
+          startupUpdateId: parsed?.updateId ?? null,
+          startupIsEmbeddedLaunch: parsed?.isEmbeddedLaunch ?? null,
+          startupTimestamp: parsed?.timestamp ?? null,
+        });
+      } catch {}
+    })();
     // MEASURED BUG: this app had zero custom expo-updates code anywhere,
     // running purely on the SDK default (checkAutomatically: "ON_LOAD") -
     // that mode checks for and DOWNLOADS an update on a cold launch, but
