@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, Image, Dimensions, Linking, TextInput, Alert } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, Image, Dimensions, TextInput, Alert } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 let CameraView: any = null; let useCameraPermissions: any = () => [null, async()=>{}];
 if (require("react-native").Platform.OS !== "web") { try { const c = require("expo-camera"); CameraView = c.CameraView; useCameraPermissions = c.useCameraPermissions; } catch {} }
@@ -304,7 +304,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
             <Text style={s.lockedIcon}>🔒</Text>
             <Text style={s.lockedTitle}>Seller Plan Required</Text>
             <Text style={s.lockedBody}>Unlimited rapid scanning requires a paid plan.</Text>
-            <TouchableOpacity style={[s.greenBtn,{marginTop:12}]} onPress={()=>Linking.openURL(`${API_BASE}/pricing`)}>
+            <TouchableOpacity style={[s.greenBtn,{marginTop:12}]} onPress={()=>onNavigate("upgrade")}>
               <Text style={s.greenBtnText}>Upgrade Now →</Text>
             </TouchableOpacity>
           </View>
