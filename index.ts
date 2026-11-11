@@ -1,5 +1,5 @@
 // DIAGNOSTIC (2026-11-11, OTA crash incident) - MUST be the very first
-// thing evaluated in this file, before even disableFontScaling below.
+// thing evaluated in this file.
 // Plain require(), not `import`: a top-level `import` would still be
 // hoisted correctly here since it's already the first line, but this
 // makes the ordering requirement impossible for a future edit to break by
@@ -10,10 +10,9 @@
 // startupErrorTrap.ts's own header for what this installs and why.
 require('./src/lib/startupErrorTrap');
 
-// MUST be the very first import - see its own header comment for why
-// ordering matters (it patches react-native's Text/TextInput submodules
-// in place before anything else in the app can require them).
-import './src/lib/disableFontScaling';
+// disableFontScaling is no longer imported for its side effect here - see
+// its own header comment (2026-11-11 rewrite). It's now a plain function,
+// called from App.tsx's own mount effect, after first render.
 
 import React from 'react';
 import { registerRootComponent } from 'expo';

@@ -9,6 +9,7 @@ import ScopeBackground from "./src/components/ScopeBackground";
 import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache, getScanById, invalidateScanHistoryCache, SessionRestoreNetworkError, logClientError, logEvent } from "./src/lib/api";
 import ErrorBoundary from "./src/components/ErrorBoundary";
 import { readScanStage, clearScanStage } from "./src/lib/scanStage";
+import { disableFontScaling } from "./src/lib/disableFontScaling";
 import { supabase } from "./src/lib/supabase";
 import { addSaleCheckInTapListener } from "./src/lib/notifications";
 import LogSaleModal from "./src/components/LogSaleModal";
@@ -638,6 +639,13 @@ export default function App() {
   }
 
   async function init() {
+    // FIXED FONT SCALE (2026-11-11, bisect) - moved out of index.ts's
+    // module scope into here (after first render - init() runs from a
+    // mount useEffect, which fires post-paint) deliberately: see
+    // disableFontScaling.ts's own header for why its old module-scope,
+    // deep-require version was the prime suspect in this app's OTA
+    // launch-crash bisect.
+    disableFontScaling();
     // SUSPECTED-CRASH CHECK (2026-11-08, crash-trip audit) - this app has
     // no native crash reporter (no Sentry/Bugsnag/Crashlytics), so a true
     // native crash (OOM/watchdog) is otherwise completely invisible - it
