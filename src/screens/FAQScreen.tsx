@@ -47,8 +47,8 @@ const FAQS = [
         a: "Yes. Cancel anytime from your Profile screen. Your access continues until the end of your billing period. No cancellation fees."
       },
       {
-        q: "Do you offer refunds?",
-        a: "All sales are final. We offer a 7-day money-back guarantee if the app doesn't work as described — contact support@getvaluiq.com within 7 days of your first payment."
+        q: "Can I get a refund?",
+        a: "Purchases are made through your Apple ID, so refunds are handled by Apple. Go to reportaproblem.apple.com, sign in, choose ValuIQ and request a refund. You can cancel a subscription any time in Settings > Apple ID > Subscriptions."
       },
       {
         q: "Is there an annual discount?",

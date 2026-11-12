@@ -174,7 +174,7 @@ export default function UpgradeScreen({ token, plan, userId, onNavigate, onBack,
             see ScannerScreen.tsx/ProfitFlexHero.tsx's maxBuyLocked row. */}
         <Text style={s.maxBuyNote}>Paid plans show your Max buy on every item.</Text>
         <Text style={s.headline}>Upgrade ValuIQ</Text>
-        <Text style={s.sub}>No contracts. Cancel anytime. Not happy? Email team@getvaluiq.com within 7 days.</Text>
+        <Text style={s.sub}>No contracts. Cancel anytime in Settings {'>'} Apple ID {'>'} Subscriptions.</Text>
 
         {/* Monthly / Annual toggle */}
         <View style={s.toggleRow}>
@@ -303,7 +303,7 @@ export default function UpgradeScreen({ token, plan, userId, onNavigate, onBack,
             { q:"What happens to my data if I cancel?", a:"Your scan history and inventory stay in your account. You keep access until the end of your billing period." },
             { q:"Is the profit data accurate?", a:"ValuIQ uses real reseller sales data across platforms. Results are estimates — actual prices vary by condition, timing, and demand." },
             { q:"What does Lifetime include?", a:"Lifetime gives you everything in the Pro tier, one time, with no monthly fees." },
-            { q:"How does the 7-day guarantee work?", a:"If you're not happy in your first 7 days, email team@getvaluiq.com and we'll refund you. No forms, no hassle." },
+            { q:"Can I get a refund?", a:"Purchases are made through your Apple ID, so refunds are handled by Apple. Go to reportaproblem.apple.com, sign in, choose ValuIQ and request a refund. You can cancel a subscription any time in Settings > Apple ID > Subscriptions." },
           ].map((faq, i) => (
             <TouchableOpacity key={i} style={s.faqItem} onPress={() => setOpenFaq(openFaq === i ? null : i)} activeOpacity={0.8}>
               <View style={{flexDirection:"row", justifyContent:"space-between", alignItems:"center"}}>

@@ -25,8 +25,8 @@ const FAQS = [
     a: "You can cancel anytime from your Profile screen → tap 'Cancel Subscription'. Cancellation takes effect at the end of your billing period. You keep access until then. There are no cancellation fees.",
   },
   {
-    q: "Are refunds available?",
-    a: "We offer a 7-day money-back guarantee on your first subscription payment. Contact support@getvaluiq.com within 7 days of your first charge. Subsequent charges are non-refundable. Lifetime plans are non-refundable after 7 days.",
+    q: "Can I get a refund?",
+    a: "Purchases are made through your Apple ID, so refunds are handled by Apple. Go to reportaproblem.apple.com, sign in, choose ValuIQ and request a refund. You can cancel a subscription any time in Settings > Apple ID > Subscriptions.",
   },
   {
     q: "Can I use ValuIQ for liquidation buying?",
