@@ -54,6 +54,10 @@ const FAQS = [
         q: "Is there an annual discount?",
         a: "Yes. Annual, Seller is $139/year (save $89). Annual, Pro is $349/year (save $239 vs monthly). Early-bird annual Pro is $197 for the first 100 users."
       },
+      {
+        q: "What are the plan limits?",
+        a: "Free gets 5 full scans to start, then 10 scans a month. Seller gets 30 scans a month, and Thrift Run counts toward it. Pro and above are unlimited."
+      },
     ]
   },
   {

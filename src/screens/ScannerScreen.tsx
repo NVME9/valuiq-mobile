@@ -993,7 +993,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         <Text style={{ fontSize: 52, textAlign: "center", marginBottom: 16 }}></Text>
         <Text style={[s.h1, { textAlign: "center" }]}>Free scans used up</Text>
         <Text style={[s.body, { textAlign: "center", marginBottom: 24 }]}>
-          Serious resellers scan 50-100 items per run. Upgrade for unlimited.
+          Serious resellers scan 50-100 items per run. Seller gets you 30 scans a month; Pro and up are unlimited.
         </Text>
         <View style={s.dealBox}>
           <Text style={s.dealOld}>$497 regular price</Text>
@@ -2787,7 +2787,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               <View style={{flex:1}}>
                 <Text style={{color:C.green,fontSize:9,fontWeight:"800",letterSpacing:2,marginBottom:4}}>FREE PLAN</Text>
                 <Text style={{color:C.text1,fontSize:13,fontWeight:"700"}}>{scansLeft} scans left this month</Text>
-                <Text style={{color:C.text3,fontSize:11}}>Upgrade for unlimited scans</Text>
+                <Text style={{color:C.text3,fontSize:11}}>Seller: 30/month · Pro: unlimited</Text>
               </View>
               <Text style={{color:C.green,fontSize:18}}>{'>'}</Text>
             </TouchableOpacity>

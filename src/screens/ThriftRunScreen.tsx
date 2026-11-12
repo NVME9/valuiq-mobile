@@ -181,8 +181,20 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
         method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({ userToken:token, images:[`data:image/jpeg;base64,${base64}`], isThriftRun:true }) });
       const d = await r.json();
-      if (d.error==="scan_limit_reached") {
-        setItems(prev=>prev.map(x=>x.id===id?{...x,status:"error",error:"Scan limit reached"}:x));
+      // SCAN_LIMIT_REACHED (fix/plan-copy-thriftrun, 2026-11-11) - comes
+      // back as HTTP 200 with success:false (not an HTTP error status), so
+      // the catch block below never sees it. Now that Thrift Run scans
+      // count toward Seller's 30/month cap, this can fire mid-run for a
+      // real paying user, not just a hypothetical - drop the half-scanned
+      // item instead of leaving a generic "Failed" card, and surface one
+      // clean alert with a single Upgrade action (no web URL, no crash).
+      if (d.success === false && d.error === "scan_limit_reached") {
+        setItems(prev=>prev.filter(x=>x.id!==id));
+        Alert.alert(
+          "Scan limit reached",
+          "You've reached your scan limit for this month",
+          [{ text: "Upgrade", onPress: () => onNavigate("upgrade") }]
+        );
         return;
       }
       if (d.success) {

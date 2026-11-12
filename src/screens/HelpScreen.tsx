@@ -13,7 +13,7 @@ const FAQS = [
   },
   {
     q: "What's the difference between Seller and Pro?",
-    a: "Seller is for casual flippers — 100 scans, Thrift Run, Death Pile Rescuer, and Auto-Relister. Pro is for serious resellers — unlimited everything plus Manifest Beast, Reseller CFO, Tax Export, Arbitrage, Specialty Scanner, and AI Coach. If you source from liquidation lots or flip full-time, Pro pays for itself in the first deal.",
+    a: "Seller is for casual flippers — 30 scans a month (Thrift Run counts toward that), Death Pile Rescuer, and Auto-Relister. Pro is for serious resellers — unlimited everything plus Manifest Beast, Reseller CFO, Tax Export, Arbitrage, Specialty Scanner, and AI Coach. If you source from liquidation lots or flip full-time, Pro pays for itself in the first deal.",
   },
   
   {

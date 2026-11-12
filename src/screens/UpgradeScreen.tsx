@@ -22,7 +22,7 @@ const PLANS = [
   {
     id:"free", tierLabel:"FREE", label:"Free", price:"$0", sub:"Forever free", color:C.text3,
     headline:"See what you've been missing",
-    pitch:"10 free scans, no credit card. Most users find their first profitable flip within 3 scans.",
+    pitch:"5 free full scans to start, then 10 scans a month, no credit card. Most users find their first profitable flip within 3 scans.",
     badge:null,
     features:["10 scans per month","3 Price Battles per month","Community feed","Basic profit calculator"],
     missing:["More scans","Thrift Run","Death Pile"],
