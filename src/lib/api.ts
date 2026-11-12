@@ -342,6 +342,63 @@ export async function rerunScan(token: string, opts: {
   });
   return r.json();
 }
+// SCAN RETRY (2026-11-12, store-aisle weak-signal fix): a typed error for
+// every way a /api/lens request can fail, carrying enough metadata (stage,
+// HTTP status, elapsed ms, requestId) for ScannerScreen.tsx to decide
+// whether to silently auto-retry (network/timeout/5xx only - never a
+// logical api failure like scan_limit_reached) and for the owner-only
+// on-screen diagnostic line to show exactly what happened.
+export class ScanRequestError extends Error {
+  stage: "network" | "http" | "parse" | "api";
+  status: number | null;
+  elapsedMs: number;
+  requestId: string | null;
+  constructor(message: string, opts: { name?: string; stage: "network" | "http" | "parse" | "api"; status?: number | null; elapsedMs: number; requestId?: string | null }) {
+    super(message);
+    this.name = opts.name || "ScanRequestError";
+    this.stage = opts.stage;
+    this.status = opts.status ?? null;
+    this.elapsedMs = opts.elapsedMs;
+    this.requestId = opts.requestId ?? null;
+  }
+}
+// Real scans commonly take 8-20s+ (identify/search - see PROFILE_TTL's own
+// comment below for that same measured range) - well short of this so a
+// genuinely slow-but-working request isn't mistaken for a hang on weak
+// cellular, the exact failure mode this constant exists to catch.
+const SCAN_FETCH_TIMEOUT_MS = 30000;
+// Shared by scanImage/scanBarcodeFast - the two /api/lens callers that feed
+// ScannerScreen.tsx's result._error "Scan Failed" card and its auto-retry.
+// Every other /api/lens-adjacent caller (rerunScan, scanBarcode, refineScan)
+// keeps its own plain fetch - unchanged, out of scope for this fix.
+async function postScanRequest(url: string, body: any): Promise<any> {
+  const t0 = Date.now();
+  let r: Response;
+  try {
+    r = await fetchWithTimeout(url, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, SCAN_FETCH_TIMEOUT_MS);
+  } catch (e: any) {
+    const elapsedMs = Date.now() - t0;
+    if (e?.name === "AbortError") {
+      throw new ScanRequestError("Request timed out.", { name: "TimeoutError", stage: "network", elapsedMs });
+    }
+    throw new ScanRequestError(e?.message || "Network error.", { name: e?.name || "NetworkError", stage: "network", elapsedMs });
+  }
+  const elapsedMs = Date.now() - t0;
+  const requestId = r.headers.get("x-vercel-id") || r.headers.get("x-request-id") || null;
+  let data: any;
+  try {
+    data = await r.json();
+  } catch (e: any) {
+    throw new ScanRequestError("Couldn't read the server's response.", { name: "ParseError", stage: "parse", status: r.status, elapsedMs, requestId });
+  }
+  if (!r.ok) {
+    throw new ScanRequestError(data?.error || `Request failed (${r.status}).`, { name: "HTTPError", stage: "http", status: r.status, elapsedMs, requestId: data?.requestId || requestId });
+  }
+  data.__meta = { status: r.status, elapsedMs, requestId: data?.requestId || requestId };
+  return data;
+}
 export async function scanImage(token: string, photos: string[], description?: string, buyPrice?: number, clientCompressMs?: number): Promise<any> {
   // CLIENT TIMING INSTRUMENTATION (2026-09-11): _t0 marks entry to this
   // function (photos are already captured+compressed by now - see
@@ -378,12 +435,7 @@ export async function scanImage(token: string, photos: string[], description?: s
     if (t.base64) body.thumb = `data:image/jpeg;base64,${t.base64}`;
   } catch {}
   body.clientPrepMs = Date.now() - _t0;
-  const r = await fetch(`${API_BASE}/api/lens`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return r.json();
+  return postScanRequest(`${API_BASE}/api/lens`, body);
 }
 // TWO-STAGE SCAN RENDER (2026-09-11): the background "stage 2" call - see
 // app/api/lens/refine/route.ts's header comment for the full design. Fired
@@ -427,19 +479,15 @@ export async function scanBarcode(token: string, upc: string): Promise<any> {
 // feeding the exact-item eBay tier's GTIN-first search and the canonical
 // product key - see that file's header for "one item, one answer."
 export async function scanBarcodeFast(token: string, upc: string, product: { itemName: string; brand: string; category: string; itemType?: string | null }): Promise<any> {
-  const r = await fetch(`${API_BASE}/api/lens`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      userToken: token,
-      confirmedIdentification: true,
-      confirmedItem: {
-        itemName: product.itemName, brand: product.brand, category: product.category,
-        itemType: product.itemType || null, gtin: upc,
-        condition: "New", conditionAssessment: "new-in-box",
-      },
-    }),
+  return postScanRequest(`${API_BASE}/api/lens`, {
+    userToken: token,
+    confirmedIdentification: true,
+    confirmedItem: {
+      itemName: product.itemName, brand: product.brand, category: product.category,
+      itemType: product.itemType || null, gtin: upc,
+      condition: "New", conditionAssessment: "new-in-box",
+    },
   });
-  return r.json();
 }
 // SPIKE (2026-10-07): the "M listed now" half of sell-through for the
 // eBay-sold-webview debug screen - owner-gated server-side (see
