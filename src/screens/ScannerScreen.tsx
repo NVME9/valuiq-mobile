@@ -15,7 +15,7 @@ import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareCard from "../components/ShareCard";
-import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, logEvent, logClientError, peekProfileData } from "../lib/api";
+import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, logEvent, logClientError, peekProfileData, ScanRequestError } from "../lib/api";
 import ApiDebugPanel from "../components/ApiDebugPanel";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { deriveTagConfirmPending, confirmTagRead, editTagRead } from "../lib/tagConfirmState";
@@ -38,12 +38,36 @@ import RevealScreen from "../components/RevealScreen";
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
 const MAX_PHOTOS = 5;
+// COPY FIX (2026-11-12, item 6b): a typed/entered price with a fractional
+// part ($21.1) rendered with exactly as many decimals as the user happened
+// to type instead of real currency formatting - a whole-dollar amount
+// ($21) is left alone (not forced to "$21.00"), only a genuine fractional
+// amount gets padded to two decimals ($21.10).
+function fmtMoney(n: number): string {
+  return Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
+}
+// COPY FIX (2026-11-12, item 6c): "Recent real sales" showed result.sales[].
+// date verbatim - a raw ISO timestamp (2026-02-10T08:52:48+00:00) off the
+// server row - instead of a short, scannable date. Falls back to the raw
+// string on anything unparseable rather than hiding the row entirely.
+function fmtSaleDate(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return raw;
+  return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
 // Gates the soft in-app notification ask to once EVER per install, not once
 // per mount - local `checkInAsked` state alone reset on every screen
 // remount, so the same user got re-asked on every subsequent BUY scan.
 // Declining is respected permanently; SaleCapturePrompt (the dashboard
 // banner) is the permission-free fallback for anyone who declines/is denied.
 const CHECKIN_ASKED_KEY = "@valuiq_checkin_asked";
+// SCAN RETRY (2026-11-12): owner-only failure log, persisted past this
+// mount (the screen remounts on every tab switch) so the owner's debug
+// panel can show failures from earlier in the session, not just the one
+// currently on screen.
+const SCAN_FAILURE_LOG_KEY = "@valuiq_scan_failures";
+const MAX_SCAN_FAILURE_LOG = 20;
 
 // CONDITION MULTIPLIER (2026-09-10, items 5/9) - MUST MATCH
 // lib/profitOracle.ts's CONDITION_MULTIPLIER exactly, or the condition
@@ -231,6 +255,22 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // on from, so latestVerdictRef/lastPatchedRef below can never be fed a
   // stale (scanId, buyPrice) pair that didn't come from the CURRENT scan.
   const scanAttemptRef = useRef(0);
+  // SCAN RETRY (2026-11-12): the UPC last sent to runBarcodeScan - only
+  // retryScan reads this, to tell a failed barcode attempt apart from a
+  // failed photo attempt (photos state alone can't disambiguate: a barcode
+  // scan never touches it) and to resend the exact same UPC.
+  const lastBarcodeDataRef = useRef<string | null>(null);
+  // Owner-only failure history, loaded from AsyncStorage on mount (see the
+  // load effect below) and appended to by recordScanFailure - rendered in
+  // ApiDebugPanel alongside the live call log.
+  const [scanFailureLog, setScanFailureLog] = useState<any[]>([]);
+  useEffect(() => {
+    if (!isOwner) return;
+    AsyncStorage.getItem(SCAN_FAILURE_LOG_KEY).then(raw => {
+      if (!raw) return;
+      try { setScanFailureLog(JSON.parse(raw)); } catch {}
+    }).catch(() => {});
+  }, [isOwner]);
   // LAST-SENT PHOTOS (2026-11-08, crash-trip memory audit): a snapshot of
   // the full photo set a scan actually uploaded - captured in
   // finishAnalyze right before `photos` state itself gets trimmed down to
@@ -574,6 +614,9 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setBarcodeScanned(false);
     setMode("photo");
     compressMsTotalRef.current = 0;
+    // SCAN RETRY (2026-11-12): "New scan" abandons whatever failed attempt
+    // retryScan might otherwise resend - see that function's own comment.
+    lastBarcodeDataRef.current = null;
     // STALE-STATE FIX: every piece of state that could otherwise survive
     // into the NEXT scan is cleared here, not just the ones that happen to
     // feed this screen's own render. tagConfirmPending/buyPriceSource are
@@ -677,28 +720,64 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     }
   }
 
+  // SCAN RETRY (2026-11-12, store-aisle weak-signal fix): network error,
+  // timeout, or a 5xx are the exact failure shapes a weak-signal aisle
+  // produces, and they're transient - worth one silent retry before ever
+  // bothering the user. A logical api failure (success:false, including
+  // scan_limit_reached - which never even reaches this check, see
+  // finishAnalyze's own early-return) is NOT transient - retrying it would
+  // just burn another scan credit for the same guaranteed answer.
+  function isAutoRetryable(e: any): boolean {
+    if (!(e instanceof ScanRequestError)) return false;
+    if (e.stage === "network") return true;
+    if (e.stage === "http" && e.status != null && e.status >= 500) return true;
+    return false;
+  }
+  function describeFailure(e: any) {
+    if (e instanceof ScanRequestError) {
+      return { stage: e.stage, status: e.status, elapsedMs: e.elapsedMs, name: e.name, message: e.message, requestId: e.requestId };
+    }
+    return { stage: "unknown", status: null, elapsedMs: 0, name: e?.name || "Error", message: e?.message || String(e), requestId: null };
+  }
+  // OWNER DIAGNOSTIC LOG (2026-11-12): persists past this mount (the whole
+  // screen remounts on every tab switch - see App.tsx's SCREENS[screen]
+  // render) so the owner can review failures from earlier in the session,
+  // not just the one on screen right now. Non-owners never call this path
+  // (see the error card below) but it's harmless either way - no PII, just
+  // timing/status metadata.
+  async function recordScanFailure(e: any) {
+    const info = describeFailure(e);
+    const entry = { at: Date.now(), ...info };
+    setScanFailureLog(prev => {
+      const next = [entry, ...prev].slice(0, MAX_SCAN_FAILURE_LOG);
+      AsyncStorage.setItem(SCAN_FAILURE_LOG_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+    return info;
+  }
   // BARCODE FAST PATH (2026-10-08): detect-to-lookup / lookup-to-result
   // timing + raw UPC source/GTIN, surfaced in the owner debug readout once
   // the result lands (see result._barcodeDebug below and ApiDebugPanel).
-  async function handleBarcode({ data }: BarcodeScanningResult) {
-    if (barcodeScanned) return;
-    setBarcodeScanned(true);
-    if (firstScanNudge) onDismissFirstScanNudge && onDismissFirstScanNudge();
+  // isRetry (2026-11-12, scan-retry): true for both the silent auto-retry
+  // and the user's own "Try Again" tap - skips every STALE-STATE clear
+  // below (buyPrice/condition/tagConfirmPending/etc.), none of which should
+  // reset just because the SAME scan is being resent, and reuses the exact
+  // UPC last detected (lastBarcodeDataRef) rather than needing a fresh
+  // camera detection.
+  async function runBarcodeScan(data: string, isRetry: boolean) {
     setStep("loading");
-    // STALE-STATE FIX: a new scan attempt - see scanAttemptRef's own
-    // comment. Everything that could leak from the PREVIOUS scan is
-    // cleared here too, not just on "New Scan" - a barcode scan started
-    // right after a photo scan's result (without ever tapping "New Scan")
-    // is the exact fast-aisle-scanning pattern that produced the real bug.
-    const myAttempt = ++scanAttemptRef.current;
-    setBuyPrice("");
-    setResultCondition("");
-    conditionBaselineRef.current = "";
-    setTagConfirmPending(false);
-    setBuyPriceSource(null);
-    latestVerdictRef.current = null;
-    lastPatchedRef.current = "";
-    lastPatchedConditionRef.current = "";
+    lastBarcodeDataRef.current = data;
+    const myAttempt = isRetry ? scanAttemptRef.current : ++scanAttemptRef.current;
+    if (!isRetry) {
+      setBuyPrice("");
+      setResultCondition("");
+      conditionBaselineRef.current = "";
+      setTagConfirmPending(false);
+      setBuyPriceSource(null);
+      latestVerdictRef.current = null;
+      lastPatchedRef.current = "";
+      lastPatchedConditionRef.current = "";
+    }
     const tDetect = Date.now();
     try {
       const lookup = await lookupUpcFast(token, data);
@@ -731,21 +810,54 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     } catch (e: any) {
       clearScanStage();
       if (myAttempt !== scanAttemptRef.current) return;
+      if (!isRetry && isAutoRetryable(e)) {
+        setTimeout(() => {
+          if (myAttempt !== scanAttemptRef.current) return;
+          runBarcodeScan(data, true);
+        }, 1500);
+        return;
+      }
       setBarcodeScanned(false);
-      setResult({ _error: e.message });
+      const info = await recordScanFailure(e);
+      setResult({ _error: e?.message || "Scan failed.", _errorInfo: info });
       setStep("result");
     }
   }
-  async function analyze(customPhotos?: string[]) {
+  async function handleBarcode({ data }: BarcodeScanningResult) {
+    if (barcodeScanned) return;
+    setBarcodeScanned(true);
+    if (firstScanNudge) onDismissFirstScanNudge && onDismissFirstScanNudge();
+    // STALE-STATE FIX: a new scan attempt - see scanAttemptRef's own
+    // comment. Everything that could leak from the PREVIOUS scan is
+    // cleared here too, not just on "New Scan" - a barcode scan started
+    // right after a photo scan's result (without ever tapping "New Scan")
+    // is the exact fast-aisle-scanning pattern that produced the real bug.
+    await runBarcodeScan(data, false);
+  }
+  // isRetry (2026-11-12, scan-retry): true for both the silent auto-retry
+  // and the user's own "Try Again" tap - skips the PRICE-ON-RESULTS clear
+  // below so a resend never wipes whatever price/condition this attempt
+  // already carried, and reuses `photos`/`description`/`brandInput` state
+  // verbatim (none of those are cleared on a failed attempt - only reset()
+  // clears them) instead of a customPhotos override, so "Try Again" resends
+  // the exact same photo this attempt captured, not a brand-new scan.
+  async function analyze(customPhotos?: string[], isRetry = false) {
     if (firstScanNudge) onDismissFirstScanNudge && onDismissFirstScanNudge();
     setStep("loading");
     // PRICE-ON-RESULTS (item 8): clear BEFORE the request, not after - an
     // Edit & Rerun deliberately keeps `result` around (see onEdit below) but
     // must never let last scan's price/condition leak into this NEW request
     // or sit stale on screen while the new one is in flight.
-    setBuyPrice("");
-    setResultCondition("");
-    conditionBaselineRef.current = "";
+    if (!isRetry) {
+      setBuyPrice("");
+      setResultCondition("");
+      conditionBaselineRef.current = "";
+      // DISAMBIGUATION (2026-11-12, scan-retry): a fresh (non-retry) photo
+      // scan - clear the barcode-retry marker so a LATER failure on THIS
+      // attempt can't have retryScan mistake it for a still-pending
+      // barcode retry left over from an earlier scan this same mount.
+      lastBarcodeDataRef.current = null;
+    }
     // STALE-STATE FIX: see scanAttemptRef's own comment - finishAnalyze
     // below bails if a NEWER analyze()/handleBarcode()/reset() has already
     // superseded this one by the time the network response lands, so a
@@ -753,13 +865,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // scan the user has since moved on to. tagConfirmPending/buyPriceSource/
     // the PATCH refs are cleared here too, same reasoning as reset() - this
     // function is reached on every "Edit & Rerun" re-analyze, which (unlike
-    // reset()) was NOT previously clearing any of these.
-    const myAttempt = ++scanAttemptRef.current;
-    setTagConfirmPending(false);
-    setBuyPriceSource(null);
-    latestVerdictRef.current = null;
-    lastPatchedRef.current = "";
-    lastPatchedConditionRef.current = "";
+    // reset()) was NOT previously clearing any of these. None of this runs
+    // on a retry - see this function's own header comment.
+    const myAttempt = isRetry ? scanAttemptRef.current : ++scanAttemptRef.current;
+    if (!isRetry) {
+      setTagConfirmPending(false);
+      setBuyPriceSource(null);
+      latestVerdictRef.current = null;
+      lastPatchedRef.current = "";
+      lastPatchedConditionRef.current = "";
+    }
     let photosForRefine: string[] = [];
     try {
       const p = customPhotos || photos;
@@ -795,8 +910,37 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       // crash on next launch.
       clearScanStage();
       if (myAttempt !== scanAttemptRef.current) return;
-      setResult({ _error: e.message });
+      // SILENT AUTO-RETRY (2026-11-12): one retry, 1.5s later, ONLY for a
+      // network error/timeout/5xx and ONLY on the first attempt - never a
+      // second time, and never for a logical api failure (wrong answer
+      // every time, not a transient one). Step stays "loading" throughout -
+      // this function already set it above, and retrying calls right back
+      // into this same function, which sets it again (a harmless no-op
+      // render) rather than ever surfacing the error card for a failure the
+      // user never needs to see.
+      if (!isRetry && isAutoRetryable(e)) {
+        setTimeout(() => {
+          if (myAttempt !== scanAttemptRef.current) return;
+          analyze(customPhotos, true);
+        }, 1500);
+        return;
+      }
+      const info = await recordScanFailure(e);
+      setResult({ _error: e?.message || "Analysis failed", _errorInfo: info });
       setStep("result");
+    }
+  }
+  // MANUAL RETRY (2026-11-12): the error card's "Try Again" button - resends
+  // the SAME request the failed attempt made (same photo + whatever
+  // price/condition state already held) instead of reset()'s "New scan"
+  // (camera, empty state). Routes to whichever path actually failed -
+  // lastBarcodeDataRef is only ever set by runBarcodeScan, so its presence
+  // unambiguously means the failure was on the barcode path.
+  function retryScan() {
+    if (lastBarcodeDataRef.current) {
+      runBarcodeScan(lastBarcodeDataRef.current, true);
+    } else {
+      analyze(undefined, true);
     }
   }
   // SHARED RESULT HANDLING (2026-10-08 extraction): the photo path
@@ -816,7 +960,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       onNavigate("upgrade");
       return;
     }
-    if (!d.success) throw new Error(d.error || "Analysis failed");
+    if (!d.success) {
+      // API-LEVEL FAILURE (2026-11-12, scan-retry): a real HTTP 200 with a
+      // logical "no" inside it (bad image, nothing identifiable, etc.) -
+      // stage "api" so isAutoRetryable above never retries it (the same
+      // request would just get the same honest "no" again).
+      const meta = d.__meta || {};
+      throw new ScanRequestError(d.error || "Analysis failed", { name: "ApiError", stage: "api", status: meta.status ?? null, elapsedMs: meta.elapsedMs ?? 0, requestId: meta.requestId ?? null });
+    }
     // A clean result - clear the scan-stage marker (lib/scanStage.ts).
     clearScanStage();
     setResult(d);
@@ -1058,8 +1209,28 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             <Text style={{ fontSize: 36, marginBottom: 16 }}></Text>
             <Text style={s.h2}>Scan Failed</Text>
             <Text style={[s.body, { textAlign: "center" }]}>{result._error}</Text>
-            <TouchableOpacity style={[s.greenBtn, { marginTop: 24 }]} onPress={reset}>
+            {/* OWNER DIAGNOSTIC (2026-11-12, scan-retry item 4): non-owners
+                see only the friendly message above - this line is gated on
+                the SAME isOwner check that gates ApiDebugPanel everywhere
+                else on this screen. result._errorInfo is absent for the
+                saved-view "missing or unreadable" branch above (that return
+                happens before this point) and for any error path that
+                predates this fix. */}
+            {isOwner && result._errorInfo && (
+              <Text style={{ color: C.text4, fontSize: 10.5, fontFamily: "monospace" as any, textAlign: "center", marginTop: 10, paddingHorizontal: 8 }}>
+                {result._errorInfo.stage}{result._errorInfo.status != null ? ` · HTTP ${result._errorInfo.status}` : ""} · {result._errorInfo.elapsedMs}ms · {result._errorInfo.name}: {result._errorInfo.message}{result._errorInfo.requestId ? ` · req ${result._errorInfo.requestId}` : ""}
+              </Text>
+            )}
+            {/* TRY AGAIN / NEW SCAN (2026-11-12, scan-retry items 1-2): Try
+                Again resends the SAME photo + price this failed attempt
+                held (retryScan) - reset() below is the deliberate "start
+                over" escape hatch, now a secondary link instead of the only
+                option, since it's the one that actually loses the photo. */}
+            <TouchableOpacity style={[s.greenBtn, { marginTop: 24 }]} onPress={retryScan}>
               <Text style={s.greenBtnText}>Try Again</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={{ marginTop: 14 }} onPress={reset}>
+              <Text style={{ color: C.text4, fontSize: 14 }}>New scan</Text>
             </TouchableOpacity>
           </View>
         </SafeAreaView>
@@ -1464,7 +1635,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           label: hasItemLevelSellEvidence ? "REAL DATA" : "UNCONFIRMED",
           copy: hasItemLevelSellEvidence
             ? `Sells for about $${sellPriceForProfit} (real data from ${agreeingCountForCopy} resale outcomes) — verdict needs your buy price.`
-            : `Sells for about $${sellPriceForProfit} (not yet confirmed by real sales of this exact item) — verify before buying at $${enteredBp}.`,
+            : `Sells for about $${sellPriceForProfit} (not yet confirmed by real sales of this exact item) — verify before buying at ${fmtMoney(enteredBp)}.`,
           accent: hasItemLevelSellEvidence ? C.green : C.yellow,
           adjustedROI: 0,
           daysUsed: 0,
@@ -1720,8 +1891,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         ? `${maxBuyPrefix}Fees and shipping alone outweigh the typical resale price here - no buy price clears a real flip.`
         : enteredBp > 0
         ? (enteredBp <= maxBuy
-            ? `${maxBuyPrefix}You paid $${enteredBp} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
-            : `${maxBuyPrefix}You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
+            ? `${maxBuyPrefix}You paid ${fmtMoney(enteredBp)} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
+            : `${maxBuyPrefix}You paid ${fmtMoney(enteredBp)} — over the ceiling, margin is thinner than ideal.`)
         : usingServerMaxBuy
         ? `${maxBuyPrefix}Pay $${maxBuy} or less to make this a real flip.`
         : `${maxBuyPrefix}Pay $${maxBuy} or less to make this a real flip (≥${ROI_BUY_MIN}% ROI, ≥$${MAX_BUY_PROFIT_FLOOR} profit after fees).`
@@ -2292,6 +2463,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   no-ops cleanly on undefined). */}
               <ApiDebugPanel
                 isOwner={isOwner}
+                scanFailures={scanFailureLog}
                 priceBasisDebug={result.priceBasisDebug}
                 barcodeDebug={result._barcodeDebug}
                 tagPriceDebug={{
@@ -2380,7 +2552,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                       }}
                     >
                       <Text style={{ color: C.text3, fontSize: 12, flex: 1, flexShrink: 1 }} numberOfLines={1}>
-                        {[sale.date, sale.condition].filter(Boolean).join(" · ") || "—"}
+                        {[fmtSaleDate(sale.date), sale.condition].filter(Boolean).join(" · ") || "—"}
                       </Text>
                       <Text style={{ color: C.text1, fontSize: 13, fontWeight: "700" }}>
                         {sale.price != null ? `$${Math.round(Number(sale.price))}` : "—"}

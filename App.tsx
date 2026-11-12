@@ -1065,6 +1065,15 @@ export default function App() {
               <ErrorBoundary
                 key={`${screen}-${screenCrashResetKey}`}
                 fallbackMessage="Couldn't read that one. Try again."
+                // SAFE-AREA FIX (2026-11-12, scan-retry item 5): this
+                // boundary wraps the WHOLE active tab, replacing every
+                // screen's own top SafeAreaView the instant it falls back -
+                // without this, the fallback card rendered flush against
+                // the physical top of the screen, under the status
+                // bar/clock, since fallbackInSafeArea defaults false (the
+                // right default for every OTHER, narrower ErrorBoundary use
+                // that still sits inside a parent SafeAreaView).
+                fallbackInSafeArea
                 onRetry={() => setScreenCrashResetKey(k => k + 1)}
                 onError={(error, info) => logClientError(token || "", error, { screen, componentStack: info?.componentStack?.slice(0, 1000) })}
               >

@@ -64,7 +64,8 @@ export default function SegmentOutcomesBlock({ segment }: { segment: SegmentOutc
           whatever item-level sold-comp count the hero above shows - so a
           viewer never mistakes this card's N for the hero's N, even when
           the two numbers happen to look similar (e.g. 48 vs 40). */}
-      <Text style={s.eyebrow}>From {segment.resolvedCount} ValuIQ resellers</Text>
+      <Text style={s.eyebrow}>Real reseller data</Text>
+      <Text style={s.count}>From {segment.resolvedCount} ValuIQ resellers</Text>
       <Text style={s.title}>{segment.segmentLabel}</Text>
       {showPaidMedian && <Text style={s.line}>Paid: ${Math.round(segment.medianBuyPrice!)} median</Text>}
       {showSoldMedian && <Text style={s.line}>Sold: ${Math.round(segment.medianSoldPrice!)} median</Text>}
@@ -77,7 +78,8 @@ export default function SegmentOutcomesBlock({ segment }: { segment: SegmentOutc
 
 const s = StyleSheet.create({
   card: { backgroundColor: C.bgDeep, borderWidth: 1, borderColor: C.greenBorder, borderRadius: 14, padding: 14, marginTop: 10 },
-  eyebrow: { color: C.green, fontSize: 10.5, fontWeight: "800", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 6 },
+  eyebrow: { color: C.green, fontSize: 10.5, fontWeight: "800", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 2 },
+  count: { color: C.text3, fontSize: 11, marginBottom: 6 },
   title: { color: C.text1, fontSize: 14, fontWeight: "700", marginBottom: 6 },
   line: { color: C.text2, fontSize: 13, lineHeight: 19 },
   footer: { color: C.text4, fontSize: 12, marginTop: 8, fontWeight: "600" },

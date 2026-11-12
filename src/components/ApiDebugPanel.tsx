@@ -147,7 +147,16 @@ interface TagPriceDebug {
   } | null;
 }
 
-export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug, segmentDebug, parityMismatch, storeReviewDebug, deleteAccountDebug, tagPriceDebug }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null; segmentDebug?: SegmentDebug | null; parityMismatch?: string | null; storeReviewDebug?: StoreReviewDebug | null; deleteAccountDebug?: DeleteAccountDebug | null; tagPriceDebug?: TagPriceDebug | null }) {
+// scanFailures (optional, 2026-11-12, scan-retry item 4): ScannerScreen's
+// own persisted history (AsyncStorage, last 20) of scan requests that threw
+// - network error, timeout, 5xx, or a logical api failure - independent of
+// the live call log below (getCallLog only covers the six dedupedCall-
+// backed Wins/Feed/Profile fetches, never scanImage/scanBarcodeFast).
+export interface ScanFailureEntry {
+  at: number; stage: string; status: number | null; elapsedMs: number; name: string; message: string; requestId: string | null;
+}
+
+export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug, segmentDebug, parityMismatch, storeReviewDebug, deleteAccountDebug, tagPriceDebug, scanFailures }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null; segmentDebug?: SegmentDebug | null; parityMismatch?: string | null; storeReviewDebug?: StoreReviewDebug | null; deleteAccountDebug?: DeleteAccountDebug | null; tagPriceDebug?: TagPriceDebug | null; scanFailures?: ScanFailureEntry[] }) {
   const [expanded, setExpanded] = useState(false);
   if (!isOwner) return null;
   const log = expanded ? getCallLog() : [];
@@ -273,6 +282,16 @@ export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, bar
                   ⚠ /api/profile's 5000-row scan ceiling was hit - all 4 totals above are "at least this many," not exact.
                 </Text>
               )}
+            </View>
+          )}
+          {!!scanFailures?.length && (
+            <View style={{ marginBottom: 8 }}>
+              <Text style={styles.row}>Last {scanFailures.length} scan failures:</Text>
+              {scanFailures.map((f, i) => (
+                <Text key={i} style={[styles.row, styles.err]}>
+                  {new Date(f.at).toLocaleTimeString()} · {f.stage}{f.status != null ? ` · HTTP ${f.status}` : ""} · {f.elapsedMs}ms · {f.name}: {f.message}{f.requestId ? ` · req ${f.requestId}` : ""}
+                </Text>
+              ))}
             </View>
           )}
           {log.length === 0 && <Text style={styles.row}>No calls recorded yet this session.</Text>}
