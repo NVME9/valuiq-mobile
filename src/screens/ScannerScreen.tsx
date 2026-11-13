@@ -16,6 +16,9 @@ import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareCard from "../components/ShareCard";
 import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, logEvent, logClientError, peekProfileData, ScanRequestError } from "../lib/api";
+import { appendFailureLog, readFailureLog } from "../lib/failureLog";
+import { setLastScanResult } from "../lib/lastScanResult";
+import { recordScanTiming, readScanTimingLog, type ScanTimingEntry } from "../lib/scanTimingLog";
 import ApiDebugPanel from "../components/ApiDebugPanel";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { deriveTagConfirmPending, confirmTagRead, editTagRead } from "../lib/tagConfirmState";
@@ -62,12 +65,6 @@ function fmtSaleDate(raw: string | null | undefined): string | null {
 // Declining is respected permanently; SaleCapturePrompt (the dashboard
 // banner) is the permission-free fallback for anyone who declines/is denied.
 const CHECKIN_ASKED_KEY = "@valuiq_checkin_asked";
-// SCAN RETRY (2026-11-12): owner-only failure log, persisted past this
-// mount (the screen remounts on every tab switch) so the owner's debug
-// panel can show failures from earlier in the session, not just the one
-// currently on screen.
-const SCAN_FAILURE_LOG_KEY = "@valuiq_scan_failures";
-const MAX_SCAN_FAILURE_LOG = 20;
 
 // CONDITION MULTIPLIER (2026-09-10, items 5/9) - MUST MATCH
 // lib/profitOracle.ts's CONDITION_MULTIPLIER exactly, or the condition
@@ -177,6 +174,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   }, [permission?.granted]);
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>("camera");
+  // SLOW-SCAN MESSAGE (2026-11-14, item 4): a real scan commonly takes
+  // 8-18s - StagedProgress's own canned steps already imply that, but
+  // nothing said so explicitly, and the slowest real scans (13-18s) are
+  // exactly the ones a silent screen starts looking frozen on. Keyed on
+  // `step` alone (not reset on a retry, which calls setStep("loading")
+  // again with the SAME value - a no-op re-render, not a dependency
+  // change) - the message is about how long the USER has been waiting in
+  // total, which an invisible auto-retry shouldn't reset.
+  const [slowScanMsg, setSlowScanMsg] = useState(false);
+  useEffect(() => {
+    if (step !== "loading") { setSlowScanMsg(false); return; }
+    setSlowScanMsg(false);
+    const t = setTimeout(() => setSlowScanMsg(true), 8000);
+    return () => clearTimeout(t);
+  }, [step]);
   const [mode, setMode] = useState<"photo" | "barcode">("photo");
   const [photos, setPhotos] = useState<string[]>([]);
   const [winShared, setWinShared] = useState(false);
@@ -264,12 +276,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // load effect below) and appended to by recordScanFailure - rendered in
   // ApiDebugPanel alongside the live call log.
   const [scanFailureLog, setScanFailureLog] = useState<any[]>([]);
+  const [scanTimingLog, setScanTimingLog] = useState<ScanTimingEntry[]>([]);
   useEffect(() => {
     if (!isOwner) return;
-    AsyncStorage.getItem(SCAN_FAILURE_LOG_KEY).then(raw => {
-      if (!raw) return;
-      try { setScanFailureLog(JSON.parse(raw)); } catch {}
-    }).catch(() => {});
+    readFailureLog().then(setScanFailureLog);
+    readScanTimingLog().then(setScanTimingLog);
   }, [isOwner]);
   // LAST-SENT PHOTOS (2026-11-08, crash-trip memory audit): a snapshot of
   // the full photo set a scan actually uploaded - captured in
@@ -595,6 +606,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // completely - "Try again" re-renders the identical screen, it doesn't
   // restart the scan.
   const [resultBoundaryKey, setResultBoundaryKey] = useState(0);
+  // RESULT CARD BOUNDARY (2026-11-14, item 7): a crash in just the hero
+  // card (ProfitFlexHero - the piece reading the most raw server fields
+  // directly: price/verdict/max-buy reasoning) now degrades to an inline
+  // "couldn't show this result" card instead of falling back to the WIDER
+  // whole-screen boundary above it (resultBoundaryKey), which would also
+  // take the price field, nav, and everything else below with it for no
+  // reason - same narrowing logic as the existing price-field boundary.
+  const [resultCardBoundaryKey, setResultCardBoundaryKey] = useState(0);
   // SHARE REVEAL (2026-11-11): available on every scan, not just a BUY -
   // see the "Share reveal" button's own comment below for why.
   const [revealOpen, setRevealOpen] = useState(false);
@@ -729,8 +748,19 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // just burn another scan credit for the same guaranteed answer.
   function isAutoRetryable(e: any): boolean {
     if (!(e instanceof ScanRequestError)) return false;
+    // "network" = the connection failed before any response came back at
+    // all (offline, DNS, connection refused) - the server never got far
+    // enough to do anything a retry could double up on, so this is safe.
     if (e.stage === "network") return true;
     if (e.stage === "http" && e.status != null && e.status >= 500) return true;
+    // TIMEOUT EXCLUSION (2026-11-14, MEASURED: every 13-18s "failure" turned
+    // out to be a scan the server finished and saved just fine): stage
+    // "timeout" means the CLIENT gave up waiting, not that the request
+    // failed - the server may have kept running and already saved the scan.
+    // Auto-retrying here would send a second request for work that already
+    // happened, double-counting toward the monthly scan cap. Never retry
+    // this one automatically - the user's own "Try Again" tap is the only
+    // way back in, same as any other failure stage not listed above.
     return false;
   }
   function describeFailure(e: any) {
@@ -747,12 +777,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // timing/status metadata.
   async function recordScanFailure(e: any) {
     const info = describeFailure(e);
-    const entry = { at: Date.now(), ...info };
-    setScanFailureLog(prev => {
-      const next = [entry, ...prev].slice(0, MAX_SCAN_FAILURE_LOG);
-      AsyncStorage.setItem(SCAN_FAILURE_LOG_KEY, JSON.stringify(next)).catch(() => {});
-      return next;
-    });
+    const next = await appendFailureLog({ at: Date.now(), kind: "scan_failure", ...info });
+    setScanFailureLog(next);
+    if (isOwner) {
+      recordScanTiming({ at: Date.now(), elapsedMs: info.elapsedMs || 0, success: false }).then(setScanTimingLog);
+    }
     return info;
   }
   // BARCODE FAST PATH (2026-10-08): detect-to-lookup / lookup-to-result
@@ -971,6 +1000,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // A clean result - clear the scan-stage marker (lib/scanStage.ts).
     clearScanStage();
     setResult(d);
+    // CRASH CAPTURE (2026-11-14, item 5): snapshot for the App.tsx-level
+    // ErrorBoundary to report (keys + field types only, never values) if a
+    // crash reaches it while this result is on screen - see
+    // lib/lastScanResult.ts's own header for why this is a module-level
+    // write, not React state/context.
+    setLastScanResult(d);
+    // SCAN TIMING LOG (2026-11-14, item 8): owner-only "is the server really
+    // this slow, or is the client bailing early" readout - see
+    // lib/scanTimingLog.ts's own header.
+    if (isOwner && d.__meta?.elapsedMs != null) {
+      recordScanTiming({ at: Date.now(), elapsedMs: d.__meta.elapsedMs, success: true }).then(setScanTimingLog);
+    }
     setRefineSeq(0);
     // DROP UPLOADED SECONDARY PHOTOS FROM STATE (2026-11-08, crash-trip
     // memory audit): the upload is done - only photos[0] is ever read
@@ -1133,6 +1174,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             { label: "Crunching the numbers", ms: 3500 },
           ]}
         />
+        {slowScanMsg && (
+          <Text style={{ color: C.text4, fontSize: 12.5, marginTop: 14, textAlign: "center" }}>
+            Still working, pricing this one...
+          </Text>
+        )}
       </View>
     </SafeAreaView>
   );
@@ -2333,6 +2379,15 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   a different verdict. The marginTop wrapper replaces the
                   price label's old top margin - same gap, now sitting
                   between price and this card instead of above the label. */}
+              {/* RESULT CARD BOUNDARY (2026-11-14, item 7) - see
+                  resultCardBoundaryKey's own comment above. */}
+              <ErrorBoundary
+                key={resultCardBoundaryKey}
+                fallbackMessage="Couldn't show this result. Tap to retry."
+                onRetry={() => setResultCardBoundaryKey(k => k + 1)}
+                isOwner={isOwner}
+                currentScreen="scanner-result-card"
+              >
               <View style={{ marginTop: 16 }}>
                 <ProfitFlexHero
                   outcome={heroOutcome}
@@ -2396,6 +2451,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   heroSizeSmall={result.typicalPriceHeroSize === "small"}
                 />
               </View>
+              </ErrorBoundary>
 
               {/* UPGRADE PROMPT BELOW THE PROOF (item 4, 2026-11-10): keyed
                   on locked[] itself (scan 6+ on free plan - see maxBuyLocked
@@ -2464,6 +2520,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               <ApiDebugPanel
                 isOwner={isOwner}
                 scanFailures={scanFailureLog}
+                scanTimings={scanTimingLog}
                 priceBasisDebug={result.priceBasisDebug}
                 barcodeDebug={result._barcodeDebug}
                 tagPriceDebug={{
@@ -2544,6 +2601,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 <View style={[s.infoCard, { marginBottom: 12 }]}>
                   <Text style={s.infoLabel}>Recent real sales</Text>
                   {result.sales.slice(0, 5).map((sale: any, i: number) => (
+                    // CRASH GUARD (2026-11-14, item 6): a null/non-object
+                    // element in result.sales (a malformed row on a partial
+                    // result) would otherwise crash on sale.date below -
+                    // renders nothing for just that row instead.
+                    !sale || typeof sale !== "object" ? null : (
                     <View
                       key={i}
                       style={{
@@ -2558,6 +2620,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                         {sale.price != null ? `$${Math.round(Number(sale.price))}` : "—"}
                       </Text>
                     </View>
+                    )
                   ))}
                 </View>
               ) : null}
@@ -2759,7 +2822,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                       floor; the fee table itself is always labeled as what it
                       is (fees), never as a sell recommendation, whether or not
                       a real claim exists above it. */}
-                  {result.platformBreakdown && result.platformBreakdown.length > 0 && (
+                  {/* CRASH GUARD (2026-11-14, item 6): Array.isArray, not
+                      just a truthy+length check - a non-array truthy value
+                      with its own .length (a string, say) would pass the
+                      old check and then crash on .slice/.map below. */}
+                  {Array.isArray(result.platformBreakdown) && result.platformBreakdown.length > 0 && (
                     <CollapsibleSection title={result.realPlatformClaim ? "WHERE THIS SELLS" : "LOWEST FEES"} expanded={showPlatforms} onToggle={()=>setShowPlatforms(v=>!v)}>
                       {result.realPlatformClaim && (
                         <View style={{backgroundColor:C.surfaceHigh,borderRadius:10,padding:12,marginBottom:12,borderWidth:1,borderColor:C.green+"40"}}>
@@ -2846,7 +2913,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     </CollapsibleSection>
                   )}
 
-                  {(result.hotTip || result.listingTips?.length > 0) && (
+                  {/* CRASH GUARD (2026-11-14, item 6): Array.isArray on
+                      both this outer gate and the inner one below - a
+                      truthy non-array listingTips (a string, say) would
+                      otherwise pass both checks and crash on .map below. */}
+                  {(result.hotTip || (Array.isArray(result.listingTips) && result.listingTips.length > 0)) && (
                     <CollapsibleSection title="Analysis & Tips" expanded={showAnalysis} onToggle={()=>setShowAnalysis(v=>!v)}>
                       {result.hotTip ? (
                         <View style={{marginBottom:12}}>
@@ -2860,7 +2931,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                           <Text style={s.infoText}>{result.reasoning}</Text>
                         </View>
                       ) : null}
-                      {result.listingTips?.length > 0 && (
+                      {Array.isArray(result.listingTips) && result.listingTips.length > 0 && (
                         <View>
                           <Text style={s.infoLabel}>Listing Tips</Text>
                           {result.listingTips.map((tip:string,i:number)=>(

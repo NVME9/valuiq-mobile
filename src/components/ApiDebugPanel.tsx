@@ -147,16 +147,31 @@ interface TagPriceDebug {
   } | null;
 }
 
-// scanFailures (optional, 2026-11-12, scan-retry item 4): ScannerScreen's
-// own persisted history (AsyncStorage, last 20) of scan requests that threw
-// - network error, timeout, 5xx, or a logical api failure - independent of
-// the live call log below (getCallLog only covers the six dedupedCall-
-// backed Wins/Feed/Profile fetches, never scanImage/scanBarcodeFast).
+// scanFailures (optional, 2026-11-12, scan-retry item 4; extended
+// 2026-11-14 to also carry crash entries): ScannerScreen's own persisted
+// history (lib/failureLog.ts, AsyncStorage, last 20) of scan requests that
+// threw - network error, timeout, 5xx, or a logical api failure - AND, as
+// of the ErrorBoundary crash-capture fix, any genuine React render crash
+// anywhere in the app (App.tsx's top-level boundary). Same list, same cap -
+// see lib/failureLog.ts's own header for why. Independent of the live call
+// log below (getCallLog only covers the six dedupedCall-backed Wins/Feed/
+// Profile fetches, never scanImage/scanBarcodeFast or a render crash).
 export interface ScanFailureEntry {
-  at: number; stage: string; status: number | null; elapsedMs: number; name: string; message: string; requestId: string | null;
+  at: number; kind?: "scan_failure" | "crash";
+  stage?: string; status?: number | null; elapsedMs?: number; requestId?: string | null;
+  name: string; message: string;
+  stack?: string; componentStack?: string; screen?: string;
+  resultSummary?: { keys: string[]; types: Record<string, string> } | null;
 }
 
-export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug, segmentDebug, parityMismatch, storeReviewDebug, deleteAccountDebug, tagPriceDebug, scanFailures }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null; segmentDebug?: SegmentDebug | null; parityMismatch?: string | null; storeReviewDebug?: StoreReviewDebug | null; deleteAccountDebug?: DeleteAccountDebug | null; tagPriceDebug?: TagPriceDebug | null; scanFailures?: ScanFailureEntry[] }) {
+// scanTimings (optional, 2026-11-14, item 8): the elapsed ms of the last 10
+// scans (success or failure) - see lib/scanTimingLog.ts. Separate from
+// scanFailures above (that's failures only, with the full error detail) -
+// this is purely "how long did the last several scans actually take,"
+// success included, to check a timeout setting against real-world timing.
+export interface ScanTimingEntry { at: number; elapsedMs: number; success: boolean }
+
+export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, barcodeDebug, segmentDebug, parityMismatch, storeReviewDebug, deleteAccountDebug, tagPriceDebug, scanFailures, scanTimings }: { isOwner: boolean; winsStats?: WinsStats; priceBasisDebug?: PriceBasisDebug | null; barcodeDebug?: BarcodeDebug | null; segmentDebug?: SegmentDebug | null; parityMismatch?: string | null; storeReviewDebug?: StoreReviewDebug | null; deleteAccountDebug?: DeleteAccountDebug | null; tagPriceDebug?: TagPriceDebug | null; scanFailures?: ScanFailureEntry[]; scanTimings?: ScanTimingEntry[] }) {
   const [expanded, setExpanded] = useState(false);
   if (!isOwner) return null;
   const log = expanded ? getCallLog() : [];
@@ -232,7 +247,7 @@ export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, bar
               <Text style={styles.row}>
                 Comparable range: {priceBasisDebug.comparableRangeScope ?? "?"} scope, {priceBasisDebug.comparableRangeBasisN ?? "?"} rows [{priceBasisDebug.comparableRangeConfidence ?? "?"} confidence] — {priceBasisDebug.whyNotComparableRange ? priceBasisDebug.whyNotComparableRange : "qualified"}
               </Text>
-              {!!priceBasisDebug.comparableRangeIdentityTokens?.length && (
+              {Array.isArray(priceBasisDebug.comparableRangeIdentityTokens) && priceBasisDebug.comparableRangeIdentityTokens.length > 0 && (
                 <Text style={styles.row}>Identity tokens matched: {priceBasisDebug.comparableRangeIdentityTokens.join(", ")}</Text>
               )}
             </View>
@@ -284,12 +299,24 @@ export default function ApiDebugPanel({ isOwner, winsStats, priceBasisDebug, bar
               )}
             </View>
           )}
+          {!!scanTimings?.length && (
+            <View style={{ marginBottom: 8 }}>
+              <Text style={styles.row}>Last {scanTimings.length} scans, elapsed ms:</Text>
+              {scanTimings.map((t, i) => (
+                <Text key={i} style={[styles.row, !t.success ? styles.err : null]}>
+                  {new Date(t.at).toLocaleTimeString()} · {t.elapsedMs}ms · {t.success ? "ok" : "failed"}
+                </Text>
+              ))}
+            </View>
+          )}
           {!!scanFailures?.length && (
             <View style={{ marginBottom: 8 }}>
-              <Text style={styles.row}>Last {scanFailures.length} scan failures:</Text>
+              <Text style={styles.row}>Last {scanFailures.length} failures/crashes:</Text>
               {scanFailures.map((f, i) => (
                 <Text key={i} style={[styles.row, styles.err]}>
-                  {new Date(f.at).toLocaleTimeString()} · {f.stage}{f.status != null ? ` · HTTP ${f.status}` : ""} · {f.elapsedMs}ms · {f.name}: {f.message}{f.requestId ? ` · req ${f.requestId}` : ""}
+                  {f.kind === "crash"
+                    ? `${new Date(f.at).toLocaleTimeString()} · CRASH · ${f.screen || "?"} · ${f.name}: ${f.message}`
+                    : `${new Date(f.at).toLocaleTimeString()} · ${f.stage}${f.status != null ? ` · HTTP ${f.status}` : ""} · ${f.elapsedMs}ms · ${f.name}: ${f.message}${f.requestId ? ` · req ${f.requestId}` : ""}`}
                 </Text>
               ))}
             </View>

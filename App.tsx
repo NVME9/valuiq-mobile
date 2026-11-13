@@ -1074,6 +1074,8 @@ export default function App() {
                 // right default for every OTHER, narrower ErrorBoundary use
                 // that still sits inside a parent SafeAreaView).
                 fallbackInSafeArea
+                isOwner={isOwner}
+                currentScreen={screen}
                 onRetry={() => setScreenCrashResetKey(k => k + 1)}
                 onError={(error, info) => logClientError(token || "", error, { screen, componentStack: info?.componentStack?.slice(0, 1000) })}
               >

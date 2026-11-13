@@ -342,18 +342,25 @@ export async function rerunScan(token: string, opts: {
   });
   return r.json();
 }
-// SCAN RETRY (2026-11-12, store-aisle weak-signal fix): a typed error for
-// every way a /api/lens request can fail, carrying enough metadata (stage,
-// HTTP status, elapsed ms, requestId) for ScannerScreen.tsx to decide
-// whether to silently auto-retry (network/timeout/5xx only - never a
-// logical api failure like scan_limit_reached) and for the owner-only
-// on-screen diagnostic line to show exactly what happened.
+// SCAN RETRY (2026-11-12, store-aisle weak-signal fix; TIMEOUT/CRASH FIX
+// 2026-11-14): a typed error for every way a /api/lens request can fail,
+// carrying enough metadata (stage, HTTP status, elapsed ms, requestId) for
+// ScannerScreen.tsx to decide whether to silently auto-retry and for the
+// owner-only on-screen diagnostic line to show exactly what happened.
+// "timeout" is now its OWN stage, split out from "network" - a timeout
+// means the client gave up waiting, not that the request failed before any
+// response; the server may well have finished (and saved the scan) right
+// after the client stopped listening, so retrying it would double-count
+// toward the monthly scan cap. "network" is now reserved for a connection
+// that failed before any response at all (offline, DNS, connection
+// refused) - genuinely safe to retry, since the server never got far enough
+// to do anything the retry could double up on.
 export class ScanRequestError extends Error {
-  stage: "network" | "http" | "parse" | "api";
+  stage: "network" | "timeout" | "http" | "parse" | "api";
   status: number | null;
   elapsedMs: number;
   requestId: string | null;
-  constructor(message: string, opts: { name?: string; stage: "network" | "http" | "parse" | "api"; status?: number | null; elapsedMs: number; requestId?: string | null }) {
+  constructor(message: string, opts: { name?: string; stage: "network" | "timeout" | "http" | "parse" | "api"; status?: number | null; elapsedMs: number; requestId?: string | null }) {
     super(message);
     this.name = opts.name || "ScanRequestError";
     this.stage = opts.stage;
@@ -362,15 +369,18 @@ export class ScanRequestError extends Error {
     this.requestId = opts.requestId ?? null;
   }
 }
-// Real scans commonly take 8-20s+ (identify/search - see PROFILE_TTL's own
-// comment below for that same measured range) - well short of this so a
-// genuinely slow-but-working request isn't mistaken for a hang on weak
-// cellular, the exact failure mode this constant exists to catch.
-const SCAN_FETCH_TIMEOUT_MS = 30000;
-// Shared by scanImage/scanBarcodeFast - the two /api/lens callers that feed
-// ScannerScreen.tsx's result._error "Scan Failed" card and its auto-retry.
-// Every other /api/lens-adjacent caller (rerunScan, scanBarcode, refineScan)
-// keeps its own plain fetch - unchanged, out of scope for this fix.
+// TIMEOUT FIX (2026-11-14, MEASURED: real scans taking 13-18s - well under
+// the OLD 30s client timeout - were showing failure cards anyway, while the
+// server itself finished and saved every one of them successfully; route
+// maxDuration is 60s server-side). 55s leaves real headroom under that
+// server limit while still being long enough that a genuinely slow-but-
+// working request (cold start + Vision + Claude + pricing, all
+// sequential) isn't mistaken for a hang.
+const SCAN_FETCH_TIMEOUT_MS = 55000;
+// Shared by scanImage/scanBarcodeFast/scanThriftRunItem - every /api/lens
+// caller that feeds a result the user is actually waiting on. Every other
+// /api/lens-adjacent caller (rerunScan, scanBarcode, refineScan) keeps its
+// own plain fetch - unchanged, out of scope for this fix.
 async function postScanRequest(url: string, body: any): Promise<any> {
   const t0 = Date.now();
   let r: Response;
@@ -381,7 +391,7 @@ async function postScanRequest(url: string, body: any): Promise<any> {
   } catch (e: any) {
     const elapsedMs = Date.now() - t0;
     if (e?.name === "AbortError") {
-      throw new ScanRequestError("Request timed out.", { name: "TimeoutError", stage: "network", elapsedMs });
+      throw new ScanRequestError("Request timed out.", { name: "TimeoutError", stage: "timeout", elapsedMs });
     }
     throw new ScanRequestError(e?.message || "Network error.", { name: e?.name || "NetworkError", stage: "network", elapsedMs });
   }
@@ -487,6 +497,19 @@ export async function scanBarcodeFast(token: string, upc: string, product: { ite
       itemType: product.itemType || null, gtin: upc,
       condition: "New", conditionAssessment: "new-in-box",
     },
+  });
+}
+// SCAN TIMEOUT FIX (2026-11-14): ThriftRunScreen.tsx used to fire its own
+// bare fetch() straight at /api/lens - no AbortController, no timeout at
+// all (would hang indefinitely on a dropped connection), and no structured
+// error for the auto-retry/owner-diagnostic machinery scanImage/
+// scanBarcodeFast already had. Same request shape that bare fetch sent
+// (isThriftRun:true, a single already-compressed photo), now through the
+// same postScanRequest() every other scan call uses - same 55s timeout,
+// same ScanRequestError shape.
+export async function scanThriftRunItem(token: string, base64: string): Promise<any> {
+  return postScanRequest(`${API_BASE}/api/lens`, {
+    userToken: token, images: [`data:image/jpeg;base64,${base64}`], isThriftRun: true,
   });
 }
 // SPIKE (2026-10-07): the "M listed now" half of sell-through for the
