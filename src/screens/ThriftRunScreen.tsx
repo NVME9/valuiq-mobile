@@ -8,7 +8,7 @@ import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareButton from "../components/ShareButton";
-import { API_BASE, rerunScan } from "../lib/api";
+import { API_BASE, rerunScan, scanThriftRunItem } from "../lib/api";
 import { classifyOutcome, OutcomeTierInfo } from "../lib/outcomeTier";
 
 const { width } = Dimensions.get("window");
@@ -177,10 +177,11 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
 
   async function analyzeItem(id: string, base64: string) {
     try {
-      const r = await fetch(`${API_BASE}/api/lens`, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ userToken:token, images:[`data:image/jpeg;base64,${base64}`], isThriftRun:true }) });
-      const d = await r.json();
+      // TIMEOUT FIX (2026-11-14): was a bare fetch with no AbortController -
+      // no timeout at all, and no structured error - see scanThriftRunItem's
+      // own comment (lib/api.ts) for why this now goes through the same
+      // 55s-timeout path scanImage/scanBarcodeFast use.
+      const d = await scanThriftRunItem(token, base64);
       // SCAN_LIMIT_REACHED (fix/plan-copy-thriftrun, 2026-11-11) - comes
       // back as HTTP 200 with success:false (not an HTTP error status), so
       // the catch block below never sees it. Now that Thrift Run scans

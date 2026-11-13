@@ -10,6 +10,8 @@ import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import { appendFailureLog } from "../lib/failureLog";
+import { getLastScanResultSummary } from "../lib/lastScanResult";
 
 interface Props {
   children: React.ReactNode;
@@ -33,6 +35,20 @@ interface Props {
   // Fire-and-forget crash reporting - never let a THROWING reporter take
   // down the fallback render itself, so this call is wrapped below.
   onError?: (error: Error, info: React.ErrorInfo) => void;
+  // CRASH CAPTURE (2026-11-14, item 5): opt-in - only the App.tsx top-level
+  // boundary passes these. Gated on isOwner because the failure log lives
+  // in THIS DEVICE's own AsyncStorage, never synced anywhere - logging a
+  // random user's crash to their own local storage that the owner (Nate)
+  // will never see has no value, so there is nothing to capture unless the
+  // person hitting the crash IS the owner reviewing it on their own device.
+  // Every other ErrorBoundary use (the narrower price-field/result-card
+  // wraps) simply never passes isOwner, so they get none of this - same
+  // behavior as before this fix.
+  isOwner?: boolean;
+  // Whichever screen was active when the crash happened (App.tsx's own
+  // `screen` state) - meaningless/omitted for a narrower boundary that
+  // already knows its own context some other way.
+  currentScreen?: string;
 }
 interface State { hasError: boolean }
 
@@ -53,6 +69,23 @@ export default class ErrorBoundary extends React.Component<Props, State> {
     // only a developer plugged into Metro would ever see.
     this.lastError = error;
     try { this.props.onError?.(error, info); } catch {}
+    if (this.props.isOwner) {
+      try {
+        appendFailureLog({
+          at: Date.now(),
+          kind: "crash",
+          name: error?.name || "Error",
+          message: error?.message || String(error),
+          // First 1500 chars only - a minified bundle's stack can run
+          // several KB, and this is going into AsyncStorage (capped at 20
+          // entries total) for a quick on-device read, not a full report.
+          stack: (error?.stack || "").slice(0, 1500),
+          componentStack: info?.componentStack || "",
+          screen: this.props.currentScreen,
+          resultSummary: getLastScanResultSummary(),
+        }).catch(() => {});
+      } catch {}
+    }
   }
   lastError: Error | null = null;
   render() {
@@ -60,6 +93,11 @@ export default class ErrorBoundary extends React.Component<Props, State> {
       const body = (
         <View style={st.wrap}>
           <Text style={st.text}>{this.props.fallbackMessage || "Something went wrong showing this section."}</Text>
+          {/* OWNER DIAGNOSTIC (2026-11-14, item 5): same isOwner gate as the
+              capture above - non-owners see only the friendly message. */}
+          {this.props.isOwner && this.lastError && (
+            <Text style={st.ownerLine}>{this.lastError.name}: {this.lastError.message}</Text>
+          )}
           {this.props.onRetry && (
             <TouchableOpacity style={st.retryBtn} onPress={this.props.onRetry}>
               <Text style={st.retryText}>Try again</Text>
@@ -81,6 +119,7 @@ const st = StyleSheet.create({
   safeFallback: { flex: 1, backgroundColor: C.bg, justifyContent: "center" },
   wrap: { padding: 14, backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.border, marginVertical: 8, marginHorizontal: 16 },
   text: { color: C.text3, fontSize: 13, textAlign: "center" as const },
+  ownerLine: { color: C.text4, fontSize: 10.5, fontFamily: "monospace" as any, textAlign: "center" as const, marginTop: 8 },
   retryBtn: { marginTop: 10, alignSelf: "center", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, backgroundColor: C.green },
   retryText: { color: "#fff", fontSize: 14, fontWeight: "700" as const },
 });
