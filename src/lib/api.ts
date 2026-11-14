@@ -411,7 +411,81 @@ async function postScanRequest(url: string, body: any): Promise<any> {
   data.__meta = { status: r.status, elapsedMs, requestId: data?.requestId || requestId };
   return data;
 }
-export async function scanImage(token: string, photos: string[], description?: string, buyPrice?: number, clientCompressMs?: number): Promise<any> {
+// REAL UPLOAD TIMING (2026-11-14, honest-scan-progress items 1/3): plain
+// fetch (postScanRequest above) gives one elapsedMs covering upload AND
+// server processing lumped together - there's no way to tell "the network
+// is slow" apart from "the server is slow" from that alone, which is
+// exactly the ambiguity that let the loading screen's "Uploading your
+// photos" step stay a pure timer (StagedProgress.tsx) instead of ending on
+// a real signal. XMLHttpRequest's upload.onprogress is the one RN-exposed
+// event for "the request body has actually left the device" - loaded>=
+// total on THAT event (or, if it never fires reliably on a given network
+// stack, xhr.onload itself as a fallback) marks the real end of the
+// upload; everything after it up to onload is server time. onUploadDone
+// fires at most once, the instant that's known, so the caller can flip its
+// progress UI off a real event instead of a guess.
+function postScanRequestXHR(url: string, body: any, onUploadDone?: () => void): Promise<any> {
+  const payload = JSON.stringify(body);
+  const bytes = payload.length;
+  return new Promise((resolve, reject) => {
+    const t0 = Date.now();
+    let uploadDoneAt: number | null = null;
+    let settled = false;
+    const markUploadDone = () => {
+      if (uploadDoneAt != null) return;
+      uploadDoneAt = Date.now();
+      try { onUploadDone && onUploadDone(); } catch {}
+    };
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.timeout = SCAN_FETCH_TIMEOUT_MS;
+    xhr.upload.onprogress = (e: any) => {
+      if (e && e.total > 0 && e.loaded >= e.total) markUploadDone();
+    };
+    xhr.onload = () => {
+      if (settled) return;
+      settled = true;
+      markUploadDone();
+      const elapsedMs = Date.now() - t0;
+      const uploadMs = Math.min(elapsedMs, Math.max(0, (uploadDoneAt as number) - t0));
+      const serverMs = Math.max(0, elapsedMs - uploadMs);
+      const requestId = xhr.getResponseHeader("x-vercel-id") || xhr.getResponseHeader("x-request-id") || null;
+      let data: any;
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        reject(new ScanRequestError("Couldn't read the server's response.", { name: "ParseError", stage: "parse", status: xhr.status, elapsedMs, requestId }));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new ScanRequestError(data?.error || `Request failed (${xhr.status}).`, { name: "HTTPError", stage: "http", status: xhr.status, elapsedMs, requestId: data?.requestId || requestId }));
+        return;
+      }
+      data.__meta = { status: xhr.status, elapsedMs, requestId: data?.requestId || requestId, uploadMs, serverMs, bytes };
+      resolve(data);
+    };
+    xhr.ontimeout = () => {
+      if (settled) return;
+      settled = true;
+      reject(new ScanRequestError("Request timed out.", { name: "TimeoutError", stage: "timeout", elapsedMs: Date.now() - t0 }));
+    };
+    xhr.onerror = () => {
+      if (settled) return;
+      settled = true;
+      reject(new ScanRequestError("Network error.", { name: "NetworkError", stage: "network", elapsedMs: Date.now() - t0 }));
+    };
+    try {
+      xhr.send(payload);
+    } catch (e: any) {
+      if (!settled) {
+        settled = true;
+        reject(new ScanRequestError(e?.message || "Network error.", { name: "NetworkError", stage: "network", elapsedMs: Date.now() - t0 }));
+      }
+    }
+  });
+}
+export async function scanImage(token: string, photos: string[], description?: string, buyPrice?: number, clientCompressMs?: number, onUploadDone?: () => void): Promise<any> {
   // CLIENT TIMING INSTRUMENTATION (2026-09-11): _t0 marks entry to this
   // function (photos are already captured+compressed by now - see
   // ScannerScreen.tsx's compressMsTotalRef for that cost); clientPrepMs
@@ -447,7 +521,9 @@ export async function scanImage(token: string, photos: string[], description?: s
     if (t.base64) body.thumb = `data:image/jpeg;base64,${t.base64}`;
   } catch {}
   body.clientPrepMs = Date.now() - _t0;
-  return postScanRequest(`${API_BASE}/api/lens`, body);
+  const data = await postScanRequestXHR(`${API_BASE}/api/lens`, body, onUploadDone);
+  if (data.__meta) data.__meta.prepareMs = body.clientPrepMs;
+  return data;
 }
 // TWO-STAGE SCAN RENDER (2026-09-11): the background "stage 2" call - see
 // app/api/lens/refine/route.ts's header comment for the full design. Fired
@@ -1293,6 +1369,7 @@ export type ClientErrorKind =
   | "render_crash"        // an ErrorBoundary caught a React render error
   | "global_error"        // ErrorUtils.setGlobalHandler caught an otherwise-uncaught JS error
   | "scan_failure"        // a scan (photo, barcode, or Thrift Run) failed - network/timeout/http/parse/api
+  | "scan_timing"         // honest-scan-progress: prepare/compress/upload/server ms split for every scan, success or failure
   | "startup_error";      // reported via startupErrorTrap.ts's stored record
 
 interface ClientErrorDetails {

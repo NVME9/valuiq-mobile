@@ -1,12 +1,27 @@
-// StagedProgress.tsx — forward-only scan progress, calibrated to REAL
-// measured backend stage durations (see deal-ai-pro app/api/lens/route.ts's
-// _debug.timing - identify ~1.6-2s, pricing ~2-2.5s post-Haiku-swap).
-// Unlike a rotating-message list, this NEVER loops back and NEVER claims a
-// step is done before it plausibly could be: it advances through fixed
-// checkpoints on a timer, then HOLDS on the last step (spinner, no new
-// text) for however long the real request actually takes. The screen that
-// owns the fetch unmounts this the instant the response lands - true
-// completion always comes from the real network call, never from the timer.
+// StagedProgress.tsx — forward-only scan progress. When the caller passes
+// `uploadDone`, the FIRST step ("Uploading your photos" in ScannerScreen's
+// case) ends on that REAL signal (driven by XMLHttpRequest's
+// upload.onprogress in lib/api.ts's scanImage) instead of a fixed timer - a
+// fast-WiFi scan used to sit on that step for the WHOLE wait because (a)
+// the timer gave it a flat 5000ms regardless of how fast the upload
+// actually was, and (b) the step list was a brand-new array literal on
+// every caller render, which reset this component's internal timer effect
+// back to step 0 on every one of those renders (see ScannerScreen.tsx's own
+// LOADING_STEPS constant - now a stable, module-level reference so that
+// identity churn can't happen again). Every step AFTER the first still
+// advances on a timer (there is no other client-observable signal for
+// "identify" / "price" - one HTTP round trip covers both server-side) -
+// calibrated to real measured backend stage durations, same as before.
+//
+// `uploadDone` is OPTIONAL: a caller with no real first-step signal
+// (SpecialtyScreen's appraise flow, which never uploads anything mid-flow)
+// omits it entirely and gets the ORIGINAL fully-timer-driven behavior for
+// every step, first included - unchanged from before this fix.
+//
+// This still NEVER loops back and NEVER claims a step is done before it
+// plausibly could be: the screen that owns the fetch unmounts this the
+// instant the response lands - true completion always comes from the real
+// network call, never from a timer.
 import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
 import { C } from "../lib/theme";
@@ -14,30 +29,73 @@ import { C } from "../lib/theme";
 export interface ProgressStep {
   label: string;
   // Estimated ms this step takes, used only to pace the checkmark advance -
-  // never to declare the whole thing finished.
+  // never to declare the whole thing finished. Ignored for step 0 whenever
+  // `uploadDone` is provided (see this file's header).
   ms: number;
 }
 
 interface Props {
   steps: ProgressStep[];
   active: boolean;
+  // Real signal that the FIRST step is actually done - see this file's
+  // header. Until this flips true, step 0 stays the active spinner no
+  // matter how long that takes; the moment it flips, step 1 begins and the
+  // rest of the steps start their timers from THIS instant, not from
+  // mount. Omit entirely for the original fully-timer-driven behavior.
+  uploadDone?: boolean;
 }
 
-export default function StagedProgress({ steps, active }: Props) {
+export default function StagedProgress({ steps, active, uploadDone }: Props) {
   const [stepIndex, setStepIndex] = useState(0);
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const advancedRef = useRef(false);
+  const gated = uploadDone !== undefined;
 
+  // (Re)start: fires only when `active`/`gated` change, not on every
+  // parent render - a brand-new `steps` array identity each render can no
+  // longer reset this.
   useEffect(() => {
     if (!active) return;
     setStepIndex(0);
+    advancedRef.current = false;
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    if (!gated) {
+      // No real first-step signal - chain every step transition from
+      // mount, exactly like the original always-timer-driven version.
+      let cumulative = 0;
+      const timers: ReturnType<typeof setTimeout>[] = [];
+      for (let i = 0; i < steps.length - 1; i++) {
+        cumulative += steps[i].ms;
+        const nextIndex = i + 1;
+        timers.push(setTimeout(() => setStepIndex(nextIndex), cumulative));
+      }
+      timersRef.current = timers;
+    }
+    return () => {
+      timersRef.current.forEach(clearTimeout);
+      timersRef.current = [];
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, gated]);
+
+  // The real "step 0 done" signal (gated mode only) - advances past it
+  // exactly once, then chains the remaining steps on their own timers from
+  // this moment.
+  useEffect(() => {
+    if (!gated || !active || !uploadDone || advancedRef.current) return;
+    advancedRef.current = true;
+    setStepIndex(1);
     let cumulative = 0;
     const timers: ReturnType<typeof setTimeout>[] = [];
-    for (let i = 0; i < steps.length - 1; i++) {
+    for (let i = 1; i < steps.length - 1; i++) {
       cumulative += steps[i].ms;
       const nextIndex = i + 1;
       timers.push(setTimeout(() => setStepIndex(nextIndex), cumulative));
     }
-    return () => timers.forEach(clearTimeout);
-  }, [active, steps]);
+    timersRef.current.push(...timers);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, uploadDone, gated]);
 
   if (!active) return null;
 
