@@ -15,7 +15,7 @@ import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareCard from "../components/ShareCard";
-import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, logEvent, logClientError, peekProfileData, ScanRequestError } from "../lib/api";
+import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, logEvent, logClientError, reportClientError, peekProfileData, ScanRequestError } from "../lib/api";
 import { appendFailureLog, readFailureLog } from "../lib/failureLog";
 import { setLastScanResult } from "../lib/lastScanResult";
 import { recordScanTiming, readScanTimingLog, type ScanTimingEntry } from "../lib/scanTimingLog";
@@ -621,6 +621,19 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   function reset() {
     setStep("camera");
     setResult(null);
+    // MEMORY FIX (2026-11-14, edit-photo->rescan crash investigation):
+    // reset() never closed the Share Reveal modal if it was still open -
+    // RevealScreen (plus its off-screen ViewShot export card) and, inside
+    // it, RevealPhotoEditor (which eager-bakes a full decoded image into
+    // state on every rotate/flip/straighten) can together be holding
+    // several extra decoded images in native memory. Leaving that whole
+    // tree mounted while a brand-new scan immediately starts capturing and
+    // compressing MORE photos stacks peak memory right at the "Uploading
+    // your photos" stage - the exact stage a suspected OOM crash was seen
+    // at after a scan -> Edit Photo -> Done -> New Scan sequence. Closing
+    // it here guarantees that whole subtree (and its decoded images)
+    // unmounts before the next scan's own captures begin.
+    setRevealOpen(false);
     scanStageTimersRef.current.forEach(clearTimeout);
     scanStageTimersRef.current = [];
     clearScanStage();
@@ -782,6 +795,15 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     if (isOwner) {
       recordScanTiming({ at: Date.now(), elapsedMs: info.elapsedMs || 0, success: false }).then(setScanTimingLog);
     }
+    // CRASH REPORTING (2026-11-14, item 1): every scan failure that reaches
+    // here - timeout, network, non-200, or a logical api failure (success
+    // false) - already excludes scan_limit_reached (finishAnalyze returns
+    // early for that case, before ever throwing into this catch path).
+    reportClientError("scan_failure", {
+      token, screen: "scanner",
+      stage: info.stage, status: info.status, elapsedMs: info.elapsedMs, requestId: info.requestId,
+      message: info.message, name: info.name,
+    });
     return info;
   }
   // BARCODE FAST PATH (2026-10-08): detect-to-lookup / lookup-to-result
@@ -2137,11 +2159,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         fallbackInSafeArea
         fallbackMessage="Something went wrong showing this scan. Your result is still saved."
         onRetry={() => setResultBoundaryKey(k => k + 1)}
-        onError={(error, info) => logClientError(token, error, {
-          stage: "result-render",
-          componentStack: info.componentStack,
-          scanId: (result?.id ?? result?.scanId ?? result?.scan_id) ?? null,
-        })}
+        onError={(error, info) => {
+          logClientError(token, error, {
+            stage: "result-render",
+            componentStack: info.componentStack,
+            scanId: (result?.id ?? result?.scanId ?? result?.scan_id) ?? null,
+          });
+          reportClientError("render_crash", {
+            token, screen: "scanner-result", stage: "result-render",
+            message: error?.message, stack: error?.stack, componentStack: info.componentStack,
+            scanId: (result?.id ?? result?.scanId ?? result?.scan_id) ?? null,
+          });
+        }}
       >
       <SafeAreaView style={s.safe} edges={["top","left","right"]}>
         <StatusBar barStyle="light-content"/>
@@ -2387,6 +2416,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 onRetry={() => setResultCardBoundaryKey(k => k + 1)}
                 isOwner={isOwner}
                 currentScreen="scanner-result-card"
+                onError={(error, info) => reportClientError("render_crash", {
+                  token, screen: "scanner-result-card",
+                  message: error?.message, stack: error?.stack, componentStack: info.componentStack,
+                  scanId: (result?.id ?? result?.scanId ?? result?.scan_id) ?? null,
+                })}
               >
               <View style={{ marginTop: 16 }}>
                 <ProfitFlexHero

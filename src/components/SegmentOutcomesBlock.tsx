@@ -65,7 +65,7 @@ export default function SegmentOutcomesBlock({ segment }: { segment: SegmentOutc
           viewer never mistakes this card's N for the hero's N, even when
           the two numbers happen to look similar (e.g. 48 vs 40). */}
       <Text style={s.eyebrow}>Real reseller data</Text>
-      <Text style={s.count}>From {segment.resolvedCount} ValuIQ resellers</Text>
+      <Text style={s.count}>Based on {segment.resolvedCount} real flips</Text>
       <Text style={s.title}>{segment.segmentLabel}</Text>
       {showPaidMedian && <Text style={s.line}>Paid: ${Math.round(segment.medianBuyPrice!)} median</Text>}
       {showSoldMedian && <Text style={s.line}>Sold: ${Math.round(segment.medianSoldPrice!)} median</Text>}

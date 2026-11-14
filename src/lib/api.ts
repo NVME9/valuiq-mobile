@@ -1,9 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as WebBrowser from "expo-web-browser";
 import { supabase } from "./supabase";
 import * as ImageManipulator from "expo-image-manipulator";
 import { CONDITION_TO_DB } from "./condition";
+import { GIT_COMMIT } from "./buildInfo.generated";
 
 export const SUPABASE_URL = "https://tylrcmczbvcvxkbuwnhf.supabase.co";
 export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR5bHJjbWN6YnZjdnhrYnV3bmhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4OTMxMDgsImV4cCI6MjA5MDQ2OTEwOH0.RkllmmOBfdfhzC9s_3PyKrhFre9QpvzFVC-aY2xhsN4";
@@ -1265,4 +1267,144 @@ export function logClientError(token: string, error: Error, context: Record<stri
     stack: error?.stack ? String(error.stack).slice(0, 2000) : undefined,
     ...context,
   }).catch(() => {});
+}
+
+// REPORT CLIENT ERROR (2026-11-14, crash-reporting item 1) — a richer,
+// dedicated crash-telemetry pipeline alongside logClientError/logEvent
+// above (/api/events): that path is a generic analytics event with a short
+// message+stack; this one is purpose-built for actually diagnosing a crash
+// the owner currently "cannot see the cause" of (random "Couldn't read that
+// one" cards) - it carries the full context a report needs (build/update
+// identity, platform, screen, timing, requestId) and, critically, survives
+// being OFFLINE: a scan failure or crash is exactly the moment a device is
+// most likely to have weak/no signal (a store aisle, per this app's own
+// scan-retry comments), and a report that only works when the network is
+// already fine would miss the cases that matter most.
+//
+// Contract: NEVER throws, NEVER awaited by its callers (every call site
+// below fires this and moves on), and never blocks the UI - every internal
+// step is try/catched independently so a failure in one (AsyncStorage, the
+// fetch itself, even require("expo-updates")) can't stop the others.
+const CLIENT_ERROR_ENDPOINT = "/api/client-error";
+const CLIENT_ERROR_QUEUE_KEY = "@valuiq_client_error_queue";
+const CLIENT_ERROR_QUEUE_MAX = 30;
+
+export type ClientErrorKind =
+  | "render_crash"        // an ErrorBoundary caught a React render error
+  | "global_error"        // ErrorUtils.setGlobalHandler caught an otherwise-uncaught JS error
+  | "scan_failure"        // a scan (photo, barcode, or Thrift Run) failed - network/timeout/http/parse/api
+  | "startup_error";      // reported via startupErrorTrap.ts's stored record
+
+interface ClientErrorDetails {
+  // Pulled out below, used for the Authorization header only - never
+  // included in the serialized report body itself.
+  token?: string;
+  screen?: string;
+  message?: string;
+  stack?: string;
+  componentStack?: string;
+  requestId?: string | null;
+  elapsedMs?: number;
+  [key: string]: any;
+}
+
+function buildClientErrorPayload(kind: string, details: ClientErrorDetails) {
+  const { token, message, stack, componentStack, ...rest } = details;
+  let updateId: string | null = null;
+  let channel: string | null = null;
+  let runtimeVersion: string | null = null;
+  try {
+    // Deferred require, not a top-level import - mirrors startupErrorTrap.ts's
+    // own reasoning: expo-updates must never be the thing that makes error
+    // REPORTING itself throw.
+    const Updates = require("expo-updates");
+    updateId = Updates && typeof Updates.updateId === "string" ? Updates.updateId : null;
+    channel = Updates && typeof Updates.channel === "string" ? Updates.channel : null;
+    runtimeVersion = Updates && typeof Updates.runtimeVersion === "string" ? Updates.runtimeVersion : null;
+  } catch {}
+  return {
+    kind,
+    at: Date.now(),
+    appVersion: GIT_COMMIT,
+    updateId,
+    channel,
+    runtimeVersion,
+    platform: `${Platform.OS} ${Platform.Version}`,
+    message: message != null ? String(message).slice(0, 1500) : null,
+    stack: stack != null ? String(stack).slice(0, 1500) : null,
+    componentStack: componentStack != null ? String(componentStack).slice(0, 1500) : null,
+    ...rest,
+  };
+}
+
+async function postClientErrorPayload(token: string | undefined, payload: any): Promise<boolean> {
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const r = await fetchWithTimeout(`${API_BASE}${CLIENT_ERROR_ENDPOINT}`, {
+      method: "POST", headers, body: JSON.stringify(payload),
+    }, DATA_FETCH_TIMEOUT_MS);
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function queueClientError(token: string | undefined, payload: any): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(CLIENT_ERROR_QUEUE_KEY);
+    const existing: Array<{ token?: string; payload: any }> = raw ? JSON.parse(raw) : [];
+    const next = [...existing, { token, payload }].slice(-CLIENT_ERROR_QUEUE_MAX);
+    await AsyncStorage.setItem(CLIENT_ERROR_QUEUE_KEY, JSON.stringify(next));
+  } catch {
+    // Nothing left to fall back to - this report is lost, same as any
+    // other best-effort logger here on a hard AsyncStorage failure.
+  }
+}
+
+// Fire-and-forget, as documented above - callers never await this.
+export function reportClientError(kind: ClientErrorKind | string, details: ClientErrorDetails = {}): void {
+  (async () => {
+    const { token } = details;
+    let payload: any;
+    try {
+      payload = buildClientErrorPayload(kind, details);
+    } catch {
+      // Building the payload itself failed (a wildly malformed `details`) -
+      // still worth a minimal report rather than losing the signal outright.
+      payload = { kind, at: Date.now(), appVersion: GIT_COMMIT, message: "reportClientError: failed to build payload" };
+    }
+    const sent = await postClientErrorPayload(token, payload);
+    if (!sent) await queueClientError(token, payload);
+  })().catch(() => {});
+}
+
+// FLUSH ON NEXT LAUNCH (2026-11-14, crash-reporting item 1) - called from
+// App.tsx's init(), same fire-and-forget posture as the other cold-start
+// diagnostic checks there (crash-suspected, startup-error-trap). Sends
+// whatever queued offline (a crash/scan-failure report that couldn't reach
+// the server at the time) and clears each entry only once it actually sends
+// - a report that fails to flush this launch simply stays queued for the
+// next one, rather than being silently dropped.
+export async function flushQueuedClientErrors(): Promise<void> {
+  let queued: Array<{ token?: string; payload: any }> = [];
+  try {
+    const raw = await AsyncStorage.getItem(CLIENT_ERROR_QUEUE_KEY);
+    queued = raw ? JSON.parse(raw) : [];
+  } catch {
+    return;
+  }
+  if (!queued.length) return;
+  const stillQueued: Array<{ token?: string; payload: any }> = [];
+  for (const item of queued) {
+    const sent = await postClientErrorPayload(item?.token, item?.payload);
+    if (!sent) stillQueued.push(item);
+  }
+  try {
+    if (stillQueued.length) {
+      await AsyncStorage.setItem(CLIENT_ERROR_QUEUE_KEY, JSON.stringify(stillQueued));
+    } else {
+      await AsyncStorage.removeItem(CLIENT_ERROR_QUEUE_KEY);
+    }
+  } catch {}
 }

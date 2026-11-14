@@ -99,6 +99,23 @@ const GLOW_H = 200;
 // clean whole-dollar ("$6") only when the value genuinely IS $6.00 - no
 // ".00" clutter on the common case, no silently-dropped fee cents on the
 // uncommon one.
+// FIELD-SHAPE GUARD (2026-11-14, crash-reporting item 3 - found by
+// resultComponents.crash.test.tsx): every optional field below this point
+// is typed `string | null | undefined` and comes straight from the server
+// response (maxBuyBasisLine/riskAtLowEndLine/maxBuyReasoning/maxBuyBasis/
+// noVerdictPrompt/skipDetail/footNote/categoryLine/confidenceLabel/dataTag),
+// but was rendered with a bare truthy check (`{x ? <Text>{x}</Text> : null}`)
+// - that only screens out null/undefined/"", never a WRONG type. An object
+// in any one of those fields crashed the whole result card with "Objects
+// are not valid as a React child" (React has no built-in coercion for
+// that). This coerces anything that isn't already a usable string down to
+// null (never a string, so no risk of ever showing "[object Object]"
+// either) - a surprising field type now just hides that one line instead
+// of taking the whole card down.
+function safeStr(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
 function money(n: number): string {
   const abs = Math.abs(n);
   const hasCents = Math.round(abs * 100) % 100 !== 0;
@@ -111,9 +128,27 @@ function money(n: number): string {
 
 export default function ProfitFlexHero({
   outcome, itemName, categoryLine, photoBase64, onEdit, isSkip,
-  heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, maxBuyBasis, maxBuyBasisLine, riskAtLowEndLine, maxBuyLocked = false, onUpgradePress, dataTag, dataTagColor, confidenceLabel, confidenceColor, secondaryStats = [], footNote,
+  heroProfit = 0, profitLabel = "profit", maxBuy, maxBuyReasoning, maxBuyBasis, maxBuyBasisLine, riskAtLowEndLine, maxBuyLocked = false, onUpgradePress, dataTag, dataTagColor, confidenceLabel, confidenceColor, secondaryStats, footNote,
   skipDetail, noVerdictPrompt, flashSeq = 0, heroSizeSmall = false,
 }: ProfitFlexHeroProps) {
+  // SECONDARY STATS GUARD (crash-reporting item 3): `secondaryStats = []`
+  // as a destructuring default only kicks in for `undefined` - a caller
+  // (or a malformed server field passed straight through) sending an
+  // explicit `null`, or a non-array, skipped the default entirely and
+  // crashed on `.length`/`.map` below.
+  const stats = Array.isArray(secondaryStats) ? secondaryStats : [];
+  // STRING-OR-NULL FIELD GUARD (crash-reporting item 3) - see safeStr's own
+  // header comment above.
+  const safeCategoryLine = safeStr(categoryLine);
+  const safeConfidenceLabel = safeStr(confidenceLabel);
+  const safeDataTag = safeStr(dataTag);
+  const safeMaxBuyReasoning = safeStr(maxBuyReasoning);
+  const safeMaxBuyBasis = safeStr(maxBuyBasis);
+  const safeMaxBuyBasisLine = safeStr(maxBuyBasisLine);
+  const safeRiskAtLowEndLine = safeStr(riskAtLowEndLine);
+  const safeNoVerdictPrompt = safeStr(noVerdictPrompt);
+  const safeSkipDetail = safeStr(skipDetail);
+  const safeFootNote = safeStr(footNote);
   // MEASURED BUG: a long AI-generated item name ("American Flag with Fish
   // Trucker Hat (likely...") had no way to be seen in full - numberOfLines
   // capped it with no expand affordance anywhere on the result screen.
@@ -177,7 +212,7 @@ export default function ProfitFlexHero({
         <Image source={{ uri: `data:image/jpeg;base64,${photoBase64}` }} style={st.photo} resizeMode="cover" />
       ) : null}
 
-      {!noVerdictPrompt && (
+      {!safeNoVerdictPrompt && (
         <FlashHighlight flashSeq={flashSeq}>
           <View style={st.top}>
             {isHot ? (
@@ -193,7 +228,7 @@ export default function ProfitFlexHero({
                 tag too little width before its own numberOfLines={1} ellipsized
                 it. flexWrap lets the tag drop to its own full-width line
                 instead of fighting the badge for room on one line. */}
-            {dataTag ? <Text style={[st.tag, { color: dataTagColor }]}>{dataTag}</Text> : null}
+            {safeDataTag ? <Text style={[st.tag, { color: dataTagColor }]}>{safeDataTag}</Text> : null}
           </View>
         </FlashHighlight>
       )}
@@ -202,10 +237,10 @@ export default function ProfitFlexHero({
         <Text style={st.itemName} numberOfLines={titleExpanded ? undefined : 2}>{itemName}</Text>
         <Text style={st.itemNameToggle}>{titleExpanded ? "▲ Show less" : "▼ Tap to see full name"}</Text>
       </TouchableOpacity>
-      {categoryLine ? <Text style={st.itemMeta}>{categoryLine}</Text> : null}
-      {confidenceLabel ? <Text style={[st.confidenceBadge, { color: confidenceColor || C.text4 }]}>{confidenceLabel}</Text> : null}
+      {safeCategoryLine ? <Text style={st.itemMeta}>{safeCategoryLine}</Text> : null}
+      {safeConfidenceLabel ? <Text style={[st.confidenceBadge, { color: confidenceColor || C.text4 }]}>{safeConfidenceLabel}</Text> : null}
 
-      {noVerdictPrompt ? (
+      {safeNoVerdictPrompt ? (
         <>
           {/* NO VERDICT YET (item 4): no buy price exists - the big number
               is purely the typical-sale estimate (never a profit figure,
@@ -218,12 +253,12 @@ export default function ProfitFlexHero({
             </FlashHighlight>
           )}
           {!maxBuyLocked && <Text style={st.heroLabel}>{profitLabel}</Text>}
-          <Text style={[st.noVerdictPrompt]}>{noVerdictPrompt}</Text>
+          <Text style={[st.noVerdictPrompt]}>{safeNoVerdictPrompt}</Text>
         </>
       ) : isSkip ? (
         <>
           <Text style={[st.skipReason, { color: outcome.accent }]}>{outcome.copy}</Text>
-          {skipDetail ? <Text style={st.skipDetail}>{skipDetail}</Text> : null}
+          {safeSkipDetail ? <Text style={st.skipDetail}>{safeSkipDetail}</Text> : null}
         </>
       ) : (
         <>
@@ -240,9 +275,9 @@ export default function ProfitFlexHero({
           {!maxBuyLocked && <Text style={st.heroLabel}>{profitLabel}</Text>}
           <Text style={[st.copy, { color: outcome.accent }]}>{outcome.copy}</Text>
 
-          {secondaryStats.length > 0 && (
+          {stats.length > 0 && (
             <View style={st.statsRow}>
-              {secondaryStats.map((stat) => (
+              {stats.map((stat) => (
                 <View key={stat.label} style={st.stat}>
                   <Text style={st.statVal} numberOfLines={1} adjustsFontSizeToFit>{stat.value}</Text>
                   <Text style={st.statLbl}>{stat.label}</Text>
@@ -274,7 +309,7 @@ export default function ProfitFlexHero({
                 is the opposite. null stays reserved for "no price data at
                 all" (ai_only) - this is specifically maxBuy===0. */}
             <Text style={st.maxBuyHeadline}>{maxBuy === 0 ? "Not worth it at these prices" : `Max buy: ${money(maxBuy)}`}</Text>
-            {maxBuyReasoning ? <Text style={st.maxBuyReasoning}>{maxBuyReasoning}</Text> : null}
+            {safeMaxBuyReasoning ? <Text style={st.maxBuyReasoning}>{safeMaxBuyReasoning}</Text> : null}
             {/* "Based on <planningBasis> ($planningPrice)" (2026-10-25
                 server contract) - the conservative figure max-buy/profit
                 math is actually built on, shown once, right under the
@@ -285,13 +320,13 @@ export default function ProfitFlexHero({
                 the SAME typical-sale number in two back-to-back sentences.
                 Server line wins when present; the client one is only a
                 fallback for a response that predates it. */}
-            {maxBuyBasisLine ? <Text style={st.maxBuyBasis}>{maxBuyBasisLine}</Text> : (maxBuyBasis ? <Text style={st.maxBuyBasis}>{maxBuyBasis}</Text> : null)}
-            {riskAtLowEndLine ? <Text style={st.maxBuyBasis}>{riskAtLowEndLine}</Text> : null}
+            {safeMaxBuyBasisLine ? <Text style={st.maxBuyBasis}>{safeMaxBuyBasisLine}</Text> : (safeMaxBuyBasis ? <Text style={st.maxBuyBasis}>{safeMaxBuyBasis}</Text> : null)}
+            {safeRiskAtLowEndLine ? <Text style={st.maxBuyBasis}>{safeRiskAtLowEndLine}</Text> : null}
           </View>
         </FlashHighlight>
       )}
 
-      {footNote ? <Text style={st.foot}>{footNote}</Text> : null}
+      {safeFootNote ? <Text style={st.foot}>{safeFootNote}</Text> : null}
     </View>
   );
 }
