@@ -6,9 +6,10 @@ import {
 import { C } from "./src/lib/theme";
 import LogoBadge from "./src/components/LogoBadge";
 import ScopeBackground from "./src/components/ScopeBackground";
-import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache, getScanById, invalidateScanHistoryCache, SessionRestoreNetworkError, logClientError, logEvent } from "./src/lib/api";
+import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache, getScanById, invalidateScanHistoryCache, SessionRestoreNetworkError, logClientError, logEvent, reportClientError, flushQueuedClientErrors } from "./src/lib/api";
 import ErrorBoundary from "./src/components/ErrorBoundary";
 import { readScanStage, clearScanStage } from "./src/lib/scanStage";
+import { installGlobalErrorReporter } from "./src/lib/globalErrorReporter";
 import { disableFontScaling } from "./src/lib/disableFontScaling";
 import { supabase } from "./src/lib/supabase";
 import { addSaleCheckInTapListener } from "./src/lib/notifications";
@@ -273,6 +274,15 @@ const ss = StyleSheet.create({
 
 export default function App() {
   const [session, setSession]       = useState<Session|null>(null);
+  // LIVE TOKEN REF (2026-11-14, crash-reporting item 1): installGlobalError
+  // Reporter's callback is registered once, inside init()'s one-time mount
+  // effect - a plain closure over `token` there would freeze on whatever
+  // `token` was at THAT render (session is still null at mount, so always
+  // ""), never seeing a later sign-in. This ref is kept current by the
+  // effect right below and read fresh every time a global error actually
+  // fires, however much later that is.
+  const sessionRef = useRef<Session | null>(null);
+  useEffect(() => { sessionRef.current = session; }, [session]);
   const [plan, setPlan]             = useState("free");
   const [planLoaded, setPlanLoaded] = useState(false);
   const [scansLeft, setScansLeft]   = useState<number|null>(null);
@@ -678,6 +688,27 @@ export default function App() {
     // the same telemetry every other crash signal here uses, then clear
     // it - never re-reported on a later launch that didn't repeat it.
     // Fire-and-forget, same posture as the block above.
+    // FLUSH QUEUED CLIENT ERRORS (2026-11-14, crash-reporting item 1) - see
+    // api.ts's flushQueuedClientErrors header: sends any crash/scan-failure
+    // report that couldn't reach the server last time (most likely because
+    // the device was offline at that exact moment) now that this launch has
+    // a fresh chance at a connection. Fire-and-forget, same posture as every
+    // other cold-start diagnostic check in this function.
+    flushQueuedClientErrors().catch(() => {});
+    // GLOBAL ERROR REPORTER (2026-11-14, crash-reporting item 1) - see
+    // globalErrorReporter.ts's own header for install timing. Covers any
+    // uncaught JS error that never reaches a React ErrorBoundary at all
+    // (a rejected promise some code forgot to catch, a timer callback
+    // throwing, etc.) - the ErrorBoundary onError props above only ever see
+    // errors thrown DURING a React render.
+    installGlobalErrorReporter((error, isFatal) => {
+      reportClientError("global_error", {
+        token: sessionRef.current?.access_token || "",
+        isFatal: !!isFatal,
+        message: error?.message != null ? String(error.message) : String(error),
+        stack: error?.stack || "",
+      });
+    });
     (async () => {
       try {
         const raw = await AsyncStorage.getItem("lastStartupError");
@@ -1077,7 +1108,12 @@ export default function App() {
                 isOwner={isOwner}
                 currentScreen={screen}
                 onRetry={() => setScreenCrashResetKey(k => k + 1)}
-                onError={(error, info) => logClientError(token || "", error, { screen, componentStack: info?.componentStack?.slice(0, 1000) })}
+                onError={(error, info) => {
+                  logClientError(token || "", error, { screen, componentStack: info?.componentStack?.slice(0, 1000) });
+                  reportClientError("render_crash", {
+                    token, screen, message: error?.message, stack: error?.stack, componentStack: info?.componentStack,
+                  });
+                }}
               >
                 {SCREENS[screen]}
               </ErrorBoundary>

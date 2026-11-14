@@ -96,7 +96,7 @@ export default function HotNowScreen({ token, onNavigate, onBack }: Props) {
               <Text style={s.sectionTitle}>What resellers are finding</Text>
               <View style={s.liveDot}><Text style={s.liveDotText}>● LIVE</Text></View>
             </View>
-            <Text style={s.sectionSub}>Real BUY flags from ValuIQ resellers this week</Text>
+            <Text style={s.sectionSub}>Real BUY flags from real flips this week</Text>
             {real.map((c, i) => (
               <View key={"real" + i} style={s.realCard}>
                 <View style={s.realRow}>

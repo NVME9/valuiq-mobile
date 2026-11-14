@@ -165,7 +165,7 @@ export default function DemandRadarScreen({ token, plan, onNavigate, onBack }: P
 
         {dataMode !== "crowd-led" && rising.length > 0 && (
           <Text style={s.footnote}>
-            Demand Radar gets sharper every week as more ValuIQ resellers scan. You're seeing it early.
+            Demand Radar gets sharper every week as more real flips get logged. You're seeing it early.
           </Text>
         )}
       </ScrollView>

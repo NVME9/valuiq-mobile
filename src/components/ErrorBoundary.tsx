@@ -50,15 +50,25 @@ interface Props {
   // already knows its own context some other way.
   currentScreen?: string;
 }
-interface State { hasError: boolean }
+interface State { hasError: boolean; lastError: Error | null }
 
 export default class ErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, lastError: null };
   }
-  static getDerivedStateFromError(): State {
-    return { hasError: true };
+  // OWNER LINE FIX (2026-11-14, crash-reporting item 2): this used to set
+  // `this.lastError` as a plain instance field inside componentDidCatch,
+  // which runs in the COMMIT phase - AFTER React already called render()
+  // off the state update from getDerivedStateFromError (the RENDER phase).
+  // That first (and, since mutating a plain field triggers no re-render,
+  // ONLY) render of the fallback always ran with lastError still null, so
+  // the owner-only line below never appeared - not a gating bug (isOwner
+  // was fine), a lifecycle-ordering one. Capturing the error here instead,
+  // as part of the SAME state update that flips hasError true, means the
+  // one render that actually paints the fallback already has it.
+  static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, lastError: error };
   }
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     // ON-SCREEN, NOT CONSOLE (per this session's own rule: owner-only
@@ -67,7 +77,6 @@ export default class ErrorBoundary extends React.Component<Props, State> {
     // uncaught error, unrelated to this component), but the actual
     // user-facing signal is the fallback text below, not a console line
     // only a developer plugged into Metro would ever see.
-    this.lastError = error;
     try { this.props.onError?.(error, info); } catch {}
     if (this.props.isOwner) {
       try {
@@ -87,7 +96,6 @@ export default class ErrorBoundary extends React.Component<Props, State> {
       } catch {}
     }
   }
-  lastError: Error | null = null;
   render() {
     if (this.state.hasError) {
       const body = (
@@ -95,8 +103,8 @@ export default class ErrorBoundary extends React.Component<Props, State> {
           <Text style={st.text}>{this.props.fallbackMessage || "Something went wrong showing this section."}</Text>
           {/* OWNER DIAGNOSTIC (2026-11-14, item 5): same isOwner gate as the
               capture above - non-owners see only the friendly message. */}
-          {this.props.isOwner && this.lastError && (
-            <Text style={st.ownerLine}>{this.lastError.name}: {this.lastError.message}</Text>
+          {this.props.isOwner && this.state.lastError && (
+            <Text style={st.ownerLine}>{this.state.lastError.name}: {this.state.lastError.message}</Text>
           )}
           {this.props.onRetry && (
             <TouchableOpacity style={st.retryBtn} onPress={this.props.onRetry}>

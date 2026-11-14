@@ -8,7 +8,7 @@ import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareButton from "../components/ShareButton";
-import { API_BASE, rerunScan, scanThriftRunItem } from "../lib/api";
+import { API_BASE, rerunScan, scanThriftRunItem, reportClientError, ScanRequestError } from "../lib/api";
 import { classifyOutcome, OutcomeTierInfo } from "../lib/outcomeTier";
 
 const { width } = Dimensions.get("window");
@@ -206,9 +206,24 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
           brand:d.brand, category:d.category, condition:d.condition }:x));
       } else {
         setItems(prev=>prev.map(x=>x.id===id?{...x,status:"error",error:d.error||"Failed"}:x));
+        // CRASH REPORTING (2026-11-14, item 1): a real HTTP 200 with a
+        // logical "no" inside it - scan_limit_reached is excluded above
+        // (returns before reaching this branch).
+        reportClientError("scan_failure", { token, screen: "thrift-run", stage: "api", message: d.error || "Failed" });
       }
     } catch(e:any) {
       setItems(prev=>prev.map(x=>x.id===id?{...x,status:"error",error:e.message}:x));
+      // CRASH REPORTING (2026-11-14, item 1): timeout/network/http/parse -
+      // scanThriftRunItem throws the same ScanRequestError shape scanImage/
+      // scanBarcodeFast do (see lib/api.ts's own comment on that unification).
+      reportClientError("scan_failure", {
+        token, screen: "thrift-run",
+        stage: e instanceof ScanRequestError ? e.stage : "unknown",
+        status: e instanceof ScanRequestError ? e.status : null,
+        elapsedMs: e instanceof ScanRequestError ? e.elapsedMs : undefined,
+        requestId: e instanceof ScanRequestError ? e.requestId : null,
+        message: e?.message, name: e?.name,
+      });
     }
   }
 
