@@ -40,7 +40,26 @@ import RevealScreen from "../components/RevealScreen";
 
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
-const MAX_PHOTOS = 5;
+// MAX 3 PHOTOS (2026-11-14, honest-scan-progress item 2): was 5 - fewer,
+// smaller photos is a direct, honest way to cut upload payload instead of
+// just compressing harder. 3 still covers "main shot + close-up of the
+// brand/price tag," the actual reason extra photos exist (see
+// scanImage's own comment in lib/api.ts).
+const MAX_PHOTOS = 3;
+// STABLE STEPS REFERENCE (2026-11-14, honest-scan-progress item 3): a
+// module-level constant, never a fresh array literal inside the component's
+// render - StagedProgress's own internal effect used to reset to step 0 on
+// EVERY parent re-render because the old inline `steps={[...]}` prop was a
+// new array identity every time, which is exactly what made "Uploading
+// your photos" look stuck for the whole wait on a fast connection (the 8s
+// slowScanMsg flip alone was enough to retrigger it). See
+// StagedProgress.tsx's own header for the rest of this fix.
+const LOADING_STEPS = [
+  { label: "Uploading your photos", ms: 0 },
+  { label: "Identifying brand & item", ms: 3000 },
+  { label: "Pulling real sold listings", ms: 2500 },
+  { label: "Crunching the numbers", ms: 3500 },
+];
 // COPY FIX (2026-11-12, item 6b): a typed/entered price with a fractional
 // part ($21.1) rendered with exactly as many decimals as the user happened
 // to type instead of real currency formatting - a whole-dollar amount
@@ -182,13 +201,23 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // again with the SAME value - a no-op re-render, not a dependency
   // change) - the message is about how long the USER has been waiting in
   // total, which an invisible auto-retry shouldn't reset.
+  // 15s THRESHOLD (2026-11-14, honest-scan-progress item 3): was 8000ms -
+  // the spec for the honest progress rework calls for this message only
+  // once total time actually passes 15s, not before. Still keyed on `step`
+  // alone (not reset by a retry) - see this state's original comment.
   const [slowScanMsg, setSlowScanMsg] = useState(false);
   useEffect(() => {
     if (step !== "loading") { setSlowScanMsg(false); return; }
     setSlowScanMsg(false);
-    const t = setTimeout(() => setSlowScanMsg(true), 8000);
+    const t = setTimeout(() => setSlowScanMsg(true), 15000);
     return () => clearTimeout(t);
   }, [step]);
+  // UPLOAD-DONE SIGNAL (2026-11-14, honest-scan-progress item 3): flips
+  // true the instant scanImage's XHR reports the request body has actually
+  // left the device (see lib/api.ts's postScanRequestXHR) - this, not a
+  // timer, is what ends StagedProgress's "Uploading your photos" step.
+  // Reset at the start of every analyze()/runBarcodeScan() attempt.
+  const [uploadDone, setUploadDone] = useState(false);
   const [mode, setMode] = useState<"photo" | "barcode">("photo");
   const [photos, setPhotos] = useState<string[]>([]);
   const [winShared, setWinShared] = useState(false);
@@ -591,6 +620,22 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // scanImage) so it shows up in [lens timing] logs alongside photosSent/
   // imagePayloadBytes instead of living only on-device.
   const compressMsTotalRef = useRef(0);
+  // SCAN TIMING SPLIT (2026-11-14, honest-scan-progress item 1/4): the raw
+  // instants needed to report prepareMs/compressMs/uploadMs/serverMs/
+  // totalMs/bytes/photoCount for every scan (success or failure) through
+  // reportClientError's "scan_timing" kind - see finishAnalyze/analyze's
+  // catch block for where these get read and reset.
+  const captureStartAtRef = useRef<number | null>(null);
+  const compressDoneAtRef = useRef<number | null>(null);
+  const uploadDoneAtRef = useRef<number | null>(null);
+  // ORIGINAL (UNCOMPRESSED) PRIMARY PHOTO (2026-11-14, honest-scan-progress
+  // item 2): the upload payload now compresses harder (1280px/0.6, 300KB
+  // target - see lib/image.ts) than what looks good blown up on the result
+  // hero/share/win cards. Holds the one full-res capture (photos[0] only -
+  // the only photo any of those three ever display) entirely separately
+  // from `photos` state, which still only ever carries the upload-bound
+  // compressed copies. Cleared in reset(); never sent to the server.
+  const originalPrimaryPhotoRef = useRef<string | null>(null);
   const [showAnalysis,   setShowAnalysis]   = useState(false);
   const [showShare,      setShowShare]      = useState(false);
   const [showPlatforms,  setShowPlatforms]  = useState(false);
@@ -646,6 +691,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setBarcodeScanned(false);
     setMode("photo");
     compressMsTotalRef.current = 0;
+    captureStartAtRef.current = null;
+    compressDoneAtRef.current = null;
+    uploadDoneAtRef.current = null;
+    originalPrimaryPhotoRef.current = null;
+    setUploadDone(false);
     // SCAN RETRY (2026-11-12): "New scan" abandons whatever failed attempt
     // retryScan might otherwise resend - see that function's own comment.
     lastBarcodeDataRef.current = null;
@@ -683,6 +733,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // SAME "Scan Failed / Try Again" screen every other stage's own
     // try/catch already shows, instead of silently doing nothing.
     try {
+    // CAPTURE-TO-REQUEST TIMING (2026-11-14, honest-scan-progress item 1):
+    // the first tap of a scan marks the clock's start - a later retake/
+    // extra-photo tap never moves it, so the measured span covers the
+    // whole capture sequence, not just the last photo.
+    if (captureStartAtRef.current == null) captureStartAtRef.current = Date.now();
     const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
     if (photo?.base64) {
       // Only the FIRST photo overall gets full-res "primary" treatment -
@@ -691,9 +746,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       // compressed harder to cut upload payload without losing the
       // legibility fix on whichever shot matters most.
       const isPrimary = photos.length === 0;
+      // KEEP THE ORIGINAL (2026-11-14, honest-scan-progress item 2): the
+      // upload copy below is now compressed harder than looks good blown
+      // up on the result/share/win cards - see originalPrimaryPhotoRef's
+      // own comment.
+      if (isPrimary) originalPrimaryPhotoRef.current = photo.base64;
+      // Compression starts immediately, right here, on just this one
+      // photo - never deferred to analyze()/review time.
       const _ct0 = Date.now();
       const small = await compressPhoto(photo.base64, photo.width, photo.height, isPrimary ? "primary" : "secondary");
       compressMsTotalRef.current += Date.now() - _ct0;
+      compressDoneAtRef.current = Date.now();
       setPhotos(p => {
         const next = [...p, small].slice(0, MAX_PHOTOS);
         if (next.length >= MAX_PHOTOS) { setStep("review"); }
@@ -718,29 +781,31 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       allowsMultipleSelection: true, selectionLimit: remaining,
     });
     if (res.canceled || !res.assets?.length) return;
+    if (captureStartAtRef.current == null) captureStartAtRef.current = Date.now();
     markScanStage("capture");
     const picked = res.assets.slice(0, remaining);
     // startIndex: where these land in the FINAL photos array - only the
     // one that ends up at overall index 0 is "primary".
-    // SEQUENTIAL, NOT PARALLEL (2026-11-08, crash-trip memory audit,
-    // reverted from a 2026-10 change that made this a Promise.all batch):
-    // expo-image-manipulator decodes each full-res source image into
-    // native memory to resize it - running that for every picked photo AT
-    // ONCE multiplies peak memory by however many the user selected,
-    // right as the app is also about to hold all of them in JS state for
-    // upload. One at a time bounds peak memory to a single photo's decode,
-    // regardless of selectionLimit.
     const startIndex = photos.length;
+    if (startIndex === 0 && picked[0]?.base64) originalPrimaryPhotoRef.current = picked[0].base64;
+    // PARALLEL, STARTING IMMEDIATELY (2026-11-14, honest-scan-progress
+    // item 2 - REVERSES the 2026-11-08 crash-trip memory audit's
+    // sequential-only decision, which was tuned against the OLD
+    // MAX_PHOTOS=5/0.7-quality settings): MAX_PHOTOS is now 3 and every
+    // photo targets a tighter 300KB/0.6-quality budget (lib/image.ts), so
+    // compressing all of them AT ONCE bounds peak memory to at most 3
+    // concurrent decodes - less than the old worst case (5 sequential, but
+    // each one bigger) - while actually cutting wall-clock prep time
+    // instead of paying for each photo's decode one after another.
     const _ct0 = Date.now();
-    const compressed: string[] = [];
-    for (let i = 0; i < picked.length; i++) {
-      const a = picked[i];
-      if (!a.base64) continue;
-      const c = await compressPhoto(a.base64, a.width, a.height, startIndex + i === 0 ? "primary" : "secondary");
-      compressed.push(c);
-    }
-    // Wall-clock time of the whole sequential batch.
+    const compressedOrNull = await Promise.all(
+      picked.map((a, i) => a.base64
+        ? compressPhoto(a.base64, a.width, a.height, startIndex + i === 0 ? "primary" : "secondary")
+        : Promise.resolve(null))
+    );
     compressMsTotalRef.current += Date.now() - _ct0;
+    compressDoneAtRef.current = Date.now();
+    const compressed = compressedOrNull.filter((c): c is string => !!c);
     if (compressed.length) {
       setPhotos(p => [...p, ...compressed].slice(0, MAX_PHOTOS));
       setStep("review");
@@ -806,6 +871,39 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     });
     return info;
   }
+  // SCAN TIMING REPORT (2026-11-14, honest-scan-progress item 4): the real
+  // prepare/compress/upload/server split for THIS scan, success or
+  // failure - reported through the same reportClientError pipeline as
+  // scan_failure above (same offline-safe queue/flush), kind "scan_timing".
+  // `meta` (scanImage's d.__meta) carries the PRECISE prepareMs/uploadMs/
+  // serverMs/bytes on a clean response - preferred whenever present. On a
+  // failure there's no response to read those from, so this falls back to
+  // the best-effort split this screen can still derive from its own refs:
+  // uploadDoneAtRef (set the instant the XHR's own upload.onprogress - or,
+  // failing that, onload - fired, if it fired before the failure) splits
+  // compress-end -> upload-done -> now into upload/server; prepare can't be
+  // isolated from upload without a response, so it's reported null rather
+  // than guessed. Never called for the barcode fast path - there is no
+  // photo upload there, so this split has nothing meaningful to measure.
+  function reportScanTiming(photoCount: number, meta?: { prepareMs?: number; uploadMs?: number; serverMs?: number; bytes?: number }) {
+    const now = Date.now();
+    const captureAt = captureStartAtRef.current ?? now;
+    const compressDoneAt = compressDoneAtRef.current ?? captureAt;
+    const compressMs = Math.max(0, compressDoneAt - captureAt);
+    const uploadDoneAt = uploadDoneAtRef.current;
+    const fallbackUploadMs = uploadDoneAt != null ? Math.max(0, uploadDoneAt - compressDoneAt) : null;
+    const fallbackServerMs = uploadDoneAt != null ? Math.max(0, now - uploadDoneAt) : null;
+    reportClientError("scan_timing", {
+      token, screen: "scanner",
+      prepareMs: meta?.prepareMs ?? null,
+      compressMs,
+      uploadMs: meta?.uploadMs ?? fallbackUploadMs,
+      serverMs: meta?.serverMs ?? fallbackServerMs,
+      totalMs: Math.max(0, now - captureAt),
+      bytes: meta?.bytes ?? null,
+      photoCount,
+    });
+  }
   // BARCODE FAST PATH (2026-10-08): detect-to-lookup / lookup-to-result
   // timing + raw UPC source/GTIN, surfaced in the owner debug readout once
   // the result lands (see result._barcodeDebug below and ApiDebugPanel).
@@ -817,6 +915,15 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // camera detection.
   async function runBarcodeScan(data: string, isRetry: boolean) {
     setStep("loading");
+    // NO PHOTO UPLOAD ON THIS PATH (2026-11-14, honest-scan-progress item
+    // 3): the barcode fast path never uploads a photo - lookupUpcFast/
+    // scanBarcodeFast are small JSON lookups, nothing for StagedProgress's
+    // real `uploadDone` signal to wait on. Flips it true immediately so
+    // this shared loading screen moves straight into the timer-paced
+    // identify/price steps instead of sitting stuck on step 0 forever
+    // (see StagedProgress.tsx - it no longer advances past step 0 on a
+    // timer alone).
+    setUploadDone(true);
     lastBarcodeDataRef.current = data;
     const myAttempt = isRetry ? scanAttemptRef.current : ++scanAttemptRef.current;
     if (!isRetry) {
@@ -895,6 +1002,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   async function analyze(customPhotos?: string[], isRetry = false) {
     if (firstScanNudge) onDismissFirstScanNudge && onDismissFirstScanNudge();
     setStep("loading");
+    // UPLOAD-DONE RESET (2026-11-14, honest-scan-progress item 3): every
+    // call here (fresh scan, retry, or Edit & Rerun) is about to open a NEW
+    // upload - the real signal must go back to "not done yet" so
+    // StagedProgress's step 0 shows the spinner again until this attempt's
+    // own XHR actually finishes sending.
+    uploadDoneAtRef.current = null;
+    setUploadDone(false);
+    // CAPTURE-TO-REQUEST TIMING FALLBACK: normally already set by
+    // takePhoto/pickLibrary at the moment of capture - null here only for
+    // an Edit & Rerun re-analyze (no fresh capture happened), where "now"
+    // is the most honest start point available.
+    if (captureStartAtRef.current == null) captureStartAtRef.current = Date.now();
     // PRICE-ON-RESULTS (item 8): clear BEFORE the request, not after - an
     // Edit & Rerun deliberately keeps `result` around (see onEdit below) but
     // must never let last scan's price/condition leak into this NEW request
@@ -949,10 +1068,29 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       // No price is ever collected pre-scan any more - the scan itself is
       // what reads the price tag (retailPriceRead). See the results step
       // below for where a price is now entered/edited.
-      const d = await scanImage(token, p, (brandInput ? "Brand: " + brandInput + ". " : "") + description, undefined, compressMsTotalRef.current);
+      const d = await scanImage(
+        token, p, (brandInput ? "Brand: " + brandInput + ". " : "") + description, undefined, compressMsTotalRef.current,
+        () => {
+          // REAL UPLOAD-DONE SIGNAL: fired by scanImage's XHR the instant
+          // the request body has actually left the device - see
+          // lib/api.ts's postScanRequestXHR. Guarded on attempt so a late
+          // callback from an attempt the user has already moved on from
+          // can never flip the progress UI for whatever scan is CURRENTLY
+          // on screen.
+          if (myAttempt !== scanAttemptRef.current) return;
+          uploadDoneAtRef.current = Date.now();
+          setUploadDone(true);
+        }
+      );
       scanStageTimersRef.current.forEach(clearTimeout);
       scanStageTimersRef.current = [];
       await finishAnalyze(d, photosForRefine, false, myAttempt);
+      // SCAN TIMING REPORT (item 4) - skipped for scan_limit_reached
+      // (finishAnalyze returns early for that, before any real scan ran)
+      // and for a response a newer attempt has already superseded.
+      if (myAttempt === scanAttemptRef.current && d.error !== "scan_limit_reached") {
+        reportScanTiming(photosForRefine.length, d.__meta);
+      }
     } catch (e: any) {
       scanStageTimersRef.current.forEach(clearTimeout);
       scanStageTimersRef.current = [];
@@ -977,6 +1115,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         return;
       }
       const info = await recordScanFailure(e);
+      reportScanTiming(photosForRefine.length);
       setResult({ _error: e?.message || "Analysis failed", _errorInfo: info });
       setStep("result");
     }
@@ -1189,16 +1328,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         </View>
         <StagedProgress
           active
-          steps={[
-            { label: "Uploading your photos", ms: 5000 },
-            { label: "Identifying brand & item", ms: 3000 },
-            { label: "Pulling real sold listings", ms: 2500 },
-            { label: "Crunching the numbers", ms: 3500 },
-          ]}
+          uploadDone={uploadDone}
+          steps={LOADING_STEPS}
         />
         {slowScanMsg && (
           <Text style={{ color: C.text4, fontSize: 12.5, marginTop: 14, textAlign: "center" }}>
-            Still working, pricing this one...
+            Taking longer than usual, still working
           </Text>
         )}
       </View>
@@ -1244,6 +1379,15 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
   // - RESULT -
   if (step === "result") {
+    // KEEP THE ORIGINAL FOR SHARE/WIN CARDS (2026-11-14, honest-scan-
+    // progress item 2): photos[0] is the UPLOAD copy (compressed hard for
+    // payload size - see lib/image.ts). originalPrimaryPhotoRef holds the
+    // one full-res capture, set at takePhoto/pickLibrary time, cleared
+    // only by reset() - falls back to photos[0] for the one path that
+    // never has an original to begin with (HISTORY RESULTS REUSE's
+    // navData.viewScan mount, which loads a saved photo straight into
+    // `photos`, never through a fresh camera capture).
+    const displayPhotoBase64 = originalPrimaryPhotoRef.current || photos[0];
     if (result?._error) {
       // HISTORY RESULTS REUSE (BUG 2 - "missing or can't be shown" saved
       // result): a distinct message + action from the generic scan-failure
@@ -1580,6 +1724,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const maxBuy = (maxBuyLocked || withholdConfidentNumbers)
       ? null
       : (serverMaxBuy != null ? serverMaxBuy : localMaxBuyFallback);
+    // ANSWER-FIRST FALLBACK (2026-11-14, honest-scan-progress item 5): the
+    // top-of-screen answer card must always have a buy ceiling to show,
+    // even in the withholdConfidentNumbers case where `maxBuy` itself is
+    // deliberately nulled out below the fold (thin/ai-only/sanity-capped
+    // data - see that flag's own comment). localMaxBuyFallback is already
+    // the SAME fee-math computation (roiCeilingBuy/profitFloorBuy against
+    // planningPrice), just never gated on confidence the way `maxBuy` is -
+    // reusing it here, rather than inventing a second one, is "compute it
+    // from the typical sell price and the existing fee math." Still
+    // respects a real plan lock (maxBuyLocked) - that's a paywall, not a
+    // confidence withhold, and must stay null/locked here too.
+    const answerMaxBuy = maxBuyLocked ? null : (maxBuy != null ? maxBuy : localMaxBuyFallback);
     const profitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
 
     // ROI MUST be computed against the SAME cost basis as heroProfit - the
@@ -2177,7 +2333,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         {/* Off-screen branded card, captured (not displayed) when sharing as an image */}
         <View style={{ position: "absolute", top: 0, left: -9999 }} pointerEvents="none">
           <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1, result: "tmpfile" }}>
-            <ShareCard result={result} oracle={oracle} photoBase64={photos[0]} />
+            <ShareCard result={result} oracle={oracle} photoBase64={displayPhotoBase64} />
           </ViewShot>
         </View>
         {/* Same log-sale flow History uses (form -> honest Flex Reveal, one
@@ -2195,7 +2351,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           token={token}
           scanId={(result.id ?? result.scanId ?? result.scan_id) != null ? String(result.id ?? result.scanId ?? result.scan_id) : null}
           itemName={result.itemName || result.item_name || "Unknown Item"}
-          photoBase64={photos[0] || null}
+          photoBase64={displayPhotoBase64 || null}
           enteredPrice={enteredBp > 0 ? enteredBp : null}
           typicalPrice={sellPriceForProfit > 0 ? sellPriceForProfit : null}
           priceLow={hasServerRange ? serverPriceLow : null}
@@ -2271,35 +2427,62 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           {/* - PROFIT (always, except the dedicated CHECK ITEM card above) - */}
           {!isCheckItem && (
             <>
-              {/* NEEDS BETTER IDENTIFICATION (2026-11-10, proof-screen): the
-                  proof above (item/photo/range/verdict) stays fully visible
-                  - this is guidance, not a replacement, unlike CHECK ITEM's
-                  dedicated card. Both buttons open the SAME identity-confirm
-                  screen (see scanConfirmPayload's own comment) - one labeled
-                  for "I have more to show it," the other for "the name's
-                  wrong," so the user picks the right mental action even
-                  though both land in the same place. */}
+              {/* ANSWER-FIRST (2026-11-14, honest-scan-progress item 5): one
+                  plain answer card, above everything else on this screen -
+                  the real verdict when there is one (a priced, confirmed
+                  scan), else the actionable ceiling + typical sell price
+                  every scan already has even before a price is entered.
+                  `answerMaxBuy` (above) falls back to the same fee-math
+                  ceiling the detailed hero card below uses whenever
+                  confidence-withholding would otherwise leave it null, so
+                  this card is never a dead end either. */}
+              <View style={s.answerCard}>
+                {maxBuyLocked ? (
+                  <>
+                    <Text style={s.answerHeadline}>🔒 Locked</Text>
+                    <Text style={s.answerSub}>Your plan locks the buy/pass verdict for this item.</Text>
+                  </>
+                ) : (enteredBp > 0 && finalHeadline != null) ? (
+                  <>
+                    <Text style={[s.answerHeadline, { color: outcome.accent }]}>{outcome.emoji} {outcome.label}</Text>
+                    <Text style={s.answerSub}>
+                      {`Pay ${fmtMoney(enteredBp)} → profit ~${fmtMoney(heroProfit)} (${heroRoi}% ROI)`}
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={s.answerHeadline}>
+                      {answerMaxBuy != null ? `Buy at ${fmtMoney(answerMaxBuy)} or less` : "Not enough data to price this yet"}
+                    </Text>
+                    {sellPriceForProfit > 0 && (
+                      <Text style={s.answerSub}>
+                        {hasServerRange
+                          ? `Typical sell ${fmtMoney(sellPriceForProfit)}, range ${fmtMoney(serverPriceLow!)} to ${fmtMoney(serverPriceHigh!)}`
+                          : `Typical sell ${fmtMoney(sellPriceForProfit)}`}
+                      </Text>
+                    )}
+                  </>
+                )}
+              </View>
+
+              {/* NEEDS BETTER IDENTIFICATION (2026-11-10, proof-screen;
+                  COLLAPSED 2026-11-14, honest-scan-progress item 5): the
+                  proof above (item/photo/answer card) stays fully visible -
+                  this is guidance, not a replacement, unlike CHECK ITEM's
+                  dedicated card (which IS the very-low-confidence case and
+                  stays its own full card, above). A moderate-confidence
+                  concern no longer needs a whole card of its own - one slim,
+                  tappable row into the SAME identity-confirm screen
+                  (scanConfirmPayload) covers both "add a better photo" and
+                  "the name's wrong" without crowding out the answer. */}
               {needsBetterIdentification && (
-                <View style={[s.noDataCard, { marginBottom: 14 }]}>
-                  <Text style={{color:C.text1,fontSize:14,fontWeight:"700",textAlign:"center",marginBottom:6}}>Help us nail this ID</Text>
-                  {result.brandTagPrompt ? (
-                    <Text style={{color:C.text3,fontSize:13,textAlign:"center",lineHeight:19,marginBottom:12}}>{result.brandTagPrompt}</Text>
-                  ) : null}
-                  <View style={{flexDirection:"row",gap:10}}>
-                    <TouchableOpacity
-                      style={[s.navBtn,{flex:1,paddingVertical:12,paddingHorizontal:8,alignItems:"center"}]}
-                      onPress={() => onNavigate("scan-confirm", { scan: scanConfirmPayload })}
-                    >
-                      <Text style={s.navBtnText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.85}>Scan the label or barcode</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[s.navBtn,{flex:1,paddingVertical:12,paddingHorizontal:8,alignItems:"center"}]}
-                      onPress={() => onNavigate("scan-confirm", { scan: scanConfirmPayload })}
-                    >
-                      <Text style={s.navBtnText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.85}>Edit name and re-check</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                <TouchableOpacity
+                  style={s.idSlimRow}
+                  onPress={() => onNavigate("scan-confirm", { scan: scanConfirmPayload })}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.idSlimRowText}>Not the right item? Edit name or scan the label</Text>
+                </TouchableOpacity>
               )}
 
               {/* REORDER (2026-09-16): price now renders FIRST - the
@@ -2376,8 +2559,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                       kept saying "Tag: $14.99" while the input showed $22.
                       Reads the live `buyPrice` field state instead, so this
                       line always matches what's actually in the box below it. */}
+                  {/* COMPACT TAG PRICE ROW (2026-11-14, honest-scan-progress
+                      item 5): starts genuinely empty (`buyPrice` state is
+                      "" until typed/confirmed - never a real "$0.00" value,
+                      only the gray "0.00" placeholder below). */}
                   <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
-                    {enteredBp > 0 ? `Tag: $${buyPrice} (tap to change)` : "Enter price for your verdict"}
+                    {enteredBp > 0 ? `Tag: $${buyPrice} (tap to change)` : "Tag price"}
                   </Text>
                   <View style={s.priceFieldWrap}>
                     <Text style={s.priceFieldDollar}>$</Text>
@@ -2391,10 +2578,15 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                       keyboardType="decimal-pad"
                     />
                   </View>
-                  <Text style={s.priceFieldHint} numberOfLines={2}>
+                  {/* WRAP FULLY (2026-11-14, honest-scan-progress item 6):
+                      this used to cap at numberOfLines={2}, which clipped
+                      the longer "no price tag detected" copy mid-sentence
+                      with a trailing "…" - no cap at all now, so whatever
+                      hint renders here always reads in full. */}
+                  <Text style={s.priceFieldHint}>
                     {Number(result.retailPriceRead) > 0
                       ? "Read off a price tag in your photo — edit if it's wrong."
-                      : "No price tag detected — enter what you paid to see your real profit and verdict."}
+                      : "Enter the tag price to get Buy or Pass"}
                   </Text>
                 </>
               )}
@@ -2427,7 +2619,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   outcome={heroOutcome}
                   itemName={result.itemName || result.item_name || "Unknown Item"}
                   categoryLine={categoryLine}
-                  photoBase64={photos[0]}
+                  photoBase64={displayPhotoBase64}
                   onEdit={()=>{
                     // Deliberately NOT clearing result here - the review screen
                     // never reads it, and keeping it around is what lets that
@@ -3472,6 +3664,17 @@ const s = StyleSheet.create({
   askYesTxt: { color: C.greenDark, fontSize: 14, fontWeight: "900" },
 veloSub: { fontSize: 12, color: C.text3, marginTop: 3 },
   profitSub:      { color: C.text2, fontSize: 13, textAlign: "center" },
+  // ANSWER-FIRST CARD (2026-11-14, honest-scan-progress item 5): the one
+  // plain answer at the very top of the result screen - see this file's
+  // own comment where it renders.
+  answerCard:     { backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.border, borderRadius: 16, padding: 16, marginBottom: 12, alignItems: "center" },
+  answerHeadline: { color: C.text1, fontSize: 20, fontWeight: "900", textAlign: "center" },
+  answerSub:      { color: C.text3, fontSize: 13, fontWeight: "600", textAlign: "center", marginTop: 6, lineHeight: 18 },
+  // COLLAPSED ID ROW (2026-11-14, honest-scan-progress item 5): replaces
+  // the old full "Help us nail this ID" card for a moderate (not very low)
+  // identification-confidence concern.
+  idSlimRow:      { paddingVertical: 10, paddingHorizontal: 4, marginBottom: 10 },
+  idSlimRowText:  { color: C.text3, fontSize: 12.5, fontWeight: "600", textAlign: "center", textDecorationLine: "underline" },
   noDataCard:     { backgroundColor: "rgba(0,0,0,0.3)", borderWidth: 1, borderColor: C.border, borderRadius: 20, padding: 20, marginBottom: 10 },
   numbersCard:    { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 14, flexDirection: "row", marginBottom: 10, overflow: "hidden" },
   numberItem:     { flex: 1, padding: 14, alignItems: "center", borderRightWidth: 1, borderRightColor: C.border },
