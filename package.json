@@ -9,7 +9,7 @@
     "web": "expo start --web",
     "check:native-modules": "npx tsx scripts/check-native-modules.ts",
     "test": "jest",
-    "publish:ota": "npm run check:native-modules && npx tsx scripts/generate-build-info.ts && eas update --branch production --non-interactive"
+    "publish:ota": "npm run check:native-modules && npx tsx scripts/generate-build-info.ts && eas update --branch production --non-interactive --message \"OTA update\""
   },
   "jest": {
     "preset": "jest-expo",
