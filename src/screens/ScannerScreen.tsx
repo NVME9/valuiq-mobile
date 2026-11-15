@@ -31,7 +31,8 @@ import { matchSpecialtyCategory } from "./SpecialtyScreen";
 import ProfitFlexHero from "../components/ProfitFlexHero";
 import FlashHighlight from "../components/FlashHighlight";
 import SegmentOutcomesBlock from "../components/SegmentOutcomesBlock";
-import { classifyOutcome, ROI_BUY_MIN, MAX_BUY_PROFIT_FLOOR, classifyHeroVerdictLocal, decisionFromVerdict, type HeroVerdict } from "../lib/outcomeTier";
+import { classifyOutcome, ROI_BUY_MIN, MAX_BUY_PROFIT_FLOOR, classifyHeroVerdictLocal, decisionFromVerdict, metaForHeroVerdict, type HeroVerdict } from "../lib/outcomeTier";
+import { selectRecentSales } from "../lib/recentSales";
 import LogSaleModal from "../components/LogSaleModal";
 import { toPendingScan } from "../lib/saleCapture";
 import { CONDITION_OPTIONS, CONDITION_TO_DB } from "../lib/condition";
@@ -1948,20 +1949,34 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         reviewHeadlineRef.current.headline = headline;
       }
       if (headline != null) {
-        const evidenceLine = result.agreementBadge || (segOut
+        // BASIS SENTENCE SHOWN ONCE (2026-11-15, result-fix item 8): this
+        // used to default to result.agreementBadge (e.g. "Based on listed
+        // prices, no sold data yet") - the exact sentence footNote below
+        // already shows once, small and muted. Using it here too made it
+        // render a SECOND time, as this card's large colored headline
+        // (outcome.copy) - and a THIRD time inside the Max Buy body via
+        // maxBuyPrefix (removed - see that const's own comment). Falls back
+        // to the segment summary only now, which is genuinely new
+        // information distinct from the basis sentence.
+        const evidenceLine = segOut
           ? [
               segOut.medianSoldPrice != null ? `${segOut.label} resell ~$${Math.round(segOut.medianSoldPrice)}` : null,
               segOut.sellThroughRate != null ? `${Math.round(segOut.sellThroughRate)}% sell` : null,
               segOut.resolvedCount > 0 ? `${segOut.resolvedCount} resale outcomes` : null,
             ].filter(Boolean).join(" · ") || null
-          : null);
-        const META: Record<string, { emoji: string; accent: string; tier: "hot" | "solid" | "thin" | "skip" }> = {
-          "PASS": { emoji: "🚫", accent: C.red, tier: "skip" },
-          "THIN": { emoji: "🤏", accent: C.yellow, tier: "thin" },
-          "SOLID": { emoji: "✅", accent: C.green, tier: "solid" },
-          "WORTH A LOOK": { emoji: "🔥", accent: C.green, tier: "hot" },
-        };
-        const meta = META[headline];
+          : null;
+        // CRASH FIX (2026-11-15, MEASURED: ~4/9 on-device scans ending on
+        // the ErrorBoundary "Cannot read property 'tier' of undefined"):
+        // classifyHeroVerdictLocal can return "CHECK ITEM" (comparable_range
+        // tier at category scope - see its own header comment) - this used
+        // to be a LOCAL table here that only ever had the other 4
+        // HeroVerdict values, so headline!=null above let "CHECK ITEM"
+        // straight through to a lookup that came back undefined, and the
+        // very next `.tier` read threw. Moved to lib/outcomeTier.ts's
+        // shared metaForHeroVerdict (one table, covers all 5 values, plus
+        // a same-bucket fallback for anything future) so this and
+        // HistoryScreen.tsx's identical table can't drift apart again.
+        const meta = metaForHeroVerdict(headline)!;
         outcome = {
           tier: meta.tier,
           emoji: meta.emoji,
@@ -2091,14 +2106,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // SAY IT ONCE (2026-10-06, MEASURED: real UA polo scan - "Based on 11
     // real reseller outcomes" appeared THREE times: hero copy ("real data
     // from 11 resale outcomes"), here, and the green box title below).
-    // outcome.copy ALREADY states the count whenever tier==="estimate" (the
-    // no-verdict-yet state - see hasItemLevelSellEvidence's two branches
-    // above) - suppressed here in exactly that case so the count-bearing
-    // sentence shows once, in the hero. Once a real verdict (BUY/SKIP/
-    // JUDGMENT) is reached, hero no longer restates it, so this prefix is
-    // new information again and stays.
-    const maxBuyPrefix = (result.agreementBadge && !(hasItemLevelSellEvidence && outcome.tier === "estimate"))
-      ? `${result.agreementBadge}. ` : "";
+    // REMOVED maxBuyPrefix (2026-11-15, result-fix items 5/8): this used to
+    // prepend `${result.agreementBadge}. ` to every line below - the SAME
+    // basis sentence footNote now shows once, in small muted text (see its
+    // own comment). Besides the triple-render, a server agreementBadge that
+    // already ended in "." plus this prefix's own trailing "." produced a
+    // literal doubled period ("...no sold data yet.. "), MEASURED on
+    // screen as e.g. "~$16..". Dropping the prefix fixes both at once - the
+    // lines below are honest and complete without it.
     // The claim must match the number: maxBuy (recomputed above off the
     // CURRENT condition-adjusted resale, not a frozen scan-time value) is
     // the price where this clears the verdict's own BUY floor - so it's
@@ -2110,16 +2125,19 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // buy is "under the ceiling" when it genuinely isn't (the ceiling IS
     // zero). One honest line for this case, same reasoning regardless of
     // what (if anything) was entered.
+    // AT THE SHELF (2026-11-15, result-fix item 6): "You paid" implies a
+    // purchase already happened - this screen is shown before that, while
+    // the user is still deciding whether to buy at the tag price.
     const maxBuyReasoning = (maxBuyLocked || maxBuy == null) ? "" : (
       maxBuy === 0
-        ? `${maxBuyPrefix}Fees and shipping alone outweigh the typical resale price here - no buy price clears a real flip.`
+        ? `Fees and shipping alone outweigh the typical resale price here - no buy price clears a real flip.`
         : enteredBp > 0
         ? (enteredBp <= maxBuy
-            ? `${maxBuyPrefix}You paid ${fmtMoney(enteredBp)} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
-            : `${maxBuyPrefix}You paid ${fmtMoney(enteredBp)} — over the ceiling, margin is thinner than ideal.`)
+            ? `At ${fmtMoney(enteredBp)} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
+            : `At ${fmtMoney(enteredBp)} — over the ceiling, margin is thinner than ideal.`)
         : usingServerMaxBuy
-        ? `${maxBuyPrefix}Pay $${maxBuy} or less to make this a real flip.`
-        : `${maxBuyPrefix}Pay $${maxBuy} or less to make this a real flip (≥${ROI_BUY_MIN}% ROI, ≥$${MAX_BUY_PROFIT_FLOOR} profit after fees).`
+        ? `Pay $${maxBuy} or less to make this a real flip.`
+        : `Pay $${maxBuy} or less to make this a real flip (≥${ROI_BUY_MIN}% ROI, ≥$${MAX_BUY_PROFIT_FLOOR} profit after fees).`
     );
     // "Based on <planningBasis> ($planningPrice)" (item 2) - shown under
     // Max buy whenever the server sent a real basis for it. Absent (older
@@ -2186,7 +2204,15 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // multi-paragraph "not yet confirmed by real sales... verify before
     // buying" / "AI-estimated resale range... not yet confirmed" copy is
     // gone from outcome.copy and the range banner below).
-    const footNote = result.confirmedByMoat ? undefined : "Not yet confirmed — verify before buying.";
+    // BASIS SENTENCE, SHOWN ONCE (2026-11-15, result-fix item 8):
+    // result.agreementBadge (e.g. "Based on listed prices, no sold data
+    // yet") is the one real basis sentence for unconfirmed data - this is
+    // now the ONLY place it renders (ProfitFlexHero's footNote is small,
+    // muted text - st.foot). It used to ALSO render as this card's large
+    // colored headline (evidenceLine, above) and again inside the Max Buy
+    // body (maxBuyPrefix, removed) - three copies of one sentence. Falls
+    // back to the old generic caveat only when the server sent no badge.
+    const footNote = result.confirmedByMoat ? undefined : (result.agreementBadge || "Not yet confirmed — verify before buying.");
     // sell price reads sellPriceForProfit (condition-adjusted), NOT
     // result.sellPrice directly - it sits right next to ROI in this same
     // row, and ROI is already computed off the adjusted number (see
@@ -2208,7 +2234,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // server contract) replaces that sentence outright - this is now the
     // ONLY thing skipDetail ever shows, and only as one small grey caveat,
     // never the narrative text itself.
-    const skipDetail = isSkip && result.narrativeUnavailable ? "Full analysis unavailable for this item." : null;
+    // RESULT-FIX item 7 (2026-11-15): skipDetail only ever renders inside
+    // ProfitFlexHero's isSkip branch, which ALSO shows outcome.copy (the
+    // real verdict/skip reason) directly above it - and the Max Buy box
+    // (maxBuy below) ships alongside it regardless of isSkip. "Full
+    // analysis unavailable for this item" directly contradicted whichever
+    // of those was already on screen - the verdict or the buy ceiling IS
+    // the analysis. Added the outcome.label/maxBuy guard so this caveat
+    // only shows in a genuine dead-end (no verdict, no ceiling), never
+    // alongside one.
+    const skipDetail = isSkip && result.narrativeUnavailable && !outcome.label && maxBuy == null
+      ? "Full analysis unavailable for this item."
+      : null;
     // CHECK ITEM (item 3, 2026-10-25 server contract): the server withheld
     // a real verdict entirely because identity is title-only/low-confidence
     // - netProfit/roi are null server-side in this state regardless of any
@@ -2225,12 +2262,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const serverPriceLow = Number(result.priceLow) || null;
     const serverPriceHigh = Number(result.priceHigh) || null;
     const hasServerRange = serverPriceLow != null && serverPriceHigh != null && serverPriceLow > 0 && serverPriceHigh > 0;
+    // RESULT-FIX item 4 (2026-11-15): low===high is not a range, it's one
+    // number rendered twice ("Typical range: $16-$16") - every render site
+    // below checks this and falls back to the plain "Typical sell $X" copy
+    // whenever the server's own low/high collapsed to the same value.
+    const rangeIsSinglePoint = hasServerRange && serverPriceLow === serverPriceHigh;
     // NO PRICE ENTERED (item 4): "tag unread or rejected" - enteredBp<=0
     // covers both (deriveTagConfirmPending/editTagRead both leave buyPrice
     // blank - see tagConfirmState.ts). Never shown for CHECK ITEM, which
     // has its own dedicated, even simpler card below.
     const noPriceEntered = !isCheckItem && enteredBp <= 0;
     const noVerdictPrompt = noPriceEntered ? "Type the tag price to get Buy or Pass." : null;
+    // RECENT REAL SALES (result-fix item 11) - see selectRecentSales's own
+    // header comment (lib/recentSales.ts) for the newest-first/24-month/
+    // fallback-title rules.
+    const recentSalesView = selectRecentSales(result.sales);
 
     // NEEDS BETTER IDENTIFICATION (2026-11-10, proof-screen): distinct from
     // CHECK ITEM above - the server still priced SOMETHING (this screen's
@@ -2412,7 +2458,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               </Text>
               {hasServerRange ? (
                 <Text style={{color:C.text2,fontSize:13,fontWeight:"700",textAlign:"center",marginBottom:16}}>
-                  {`Typical range: $${serverPriceLow}-$${serverPriceHigh}`}
+                  {rangeIsSinglePoint ? `Typical sell $${serverPriceLow}` : `Typical range: $${serverPriceLow}-$${serverPriceHigh}`}
                 </Text>
               ) : null}
               <TouchableOpacity
@@ -2456,7 +2502,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                     </Text>
                     {sellPriceForProfit > 0 && (
                       <Text style={s.answerSub}>
-                        {hasServerRange
+                        {hasServerRange && !rangeIsSinglePoint
                           ? `Typical sell ${fmtMoney(sellPriceForProfit)}, range ${fmtMoney(serverPriceLow!)} to ${fmtMoney(serverPriceHigh!)}`
                           : `Typical sell ${fmtMoney(sellPriceForProfit)}`}
                       </Text>
@@ -2566,28 +2612,34 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
                     {enteredBp > 0 ? `Tag: $${buyPrice} (tap to change)` : "Tag price"}
                   </Text>
+                  {/* NEVER "$0.00" (2026-11-15, result-fix item 11): the
+                      static "$" used to sit in front of the placeholder
+                      unconditionally, so an empty field visually read as
+                      "$0.00" - a real amount nobody entered. Hidden while
+                      empty; the placeholder itself is now the plain
+                      "Tag price" prompt, no digits implied. */}
                   <View style={s.priceFieldWrap}>
-                    <Text style={s.priceFieldDollar}>$</Text>
+                    {buyPrice.length > 0 && <Text style={s.priceFieldDollar}>$</Text>}
                     <TextInput
                       ref={priceInputRef}
                       style={s.priceFieldInput}
                       value={buyPrice}
                       onChangeText={(t) => { setBuyPrice(t); setBuyPriceSource("user"); }}
-                      placeholder="0.00"
+                      placeholder="Tag price"
                       placeholderTextColor={C.text4}
                       keyboardType="decimal-pad"
                     />
                   </View>
-                  {/* WRAP FULLY (2026-11-14, honest-scan-progress item 6):
-                      this used to cap at numberOfLines={2}, which clipped
-                      the longer "no price tag detected" copy mid-sentence
-                      with a trailing "…" - no cap at all now, so whatever
-                      hint renders here always reads in full. */}
-                  <Text style={s.priceFieldHint}>
-                    {Number(result.retailPriceRead) > 0
-                      ? "Read off a price tag in your photo — edit if it's wrong."
-                      : "Enter the tag price to get Buy or Pass"}
-                  </Text>
+                  {/* RESULT-FIX item 9 (2026-11-15): exactly two states -
+                      no tag price set yet, or one that WAS read off the
+                      photo (buyPriceSource "tag", set by confirmTagRead).
+                      A price the user typed themselves (buyPriceSource
+                      "user") already shows in the field - no hint needed. */}
+                  {enteredBp <= 0 ? (
+                    <Text style={s.priceFieldHint}>Enter the tag price to get Buy or Pass</Text>
+                  ) : buyPriceSource === "tag" ? (
+                    <Text style={s.priceFieldHint}>Read from your photo, tap to change</Text>
+                  ) : null}
                 </>
               )}
               </ErrorBoundary>
@@ -2812,26 +2864,27 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                         lives once, in ProfitFlexHero's footNote above - not
                         repeated here. */}
                     <Text style={[s.rangeBannerSub, { flex: 1 }]}>
-                      {`$${serverPriceLow}-$${serverPriceHigh}${sellPriceForProfit > 0 ? ` · typical $${sellPriceForProfit}` : ""}`}
+                      {rangeIsSinglePoint
+                        ? `Typical sell $${serverPriceLow}`
+                        : `$${serverPriceLow}-$${serverPriceHigh}${sellPriceForProfit > 0 ? ` · typical $${sellPriceForProfit}` : ""}`}
                     </Text>
                   </FlashHighlight>
                 </View>
               ) : null}
 
-              {/* RECENT REAL SALES (item 2, 2026-11-10): the actual sold
-                  comps backing the range/verdict above - date, price, and
-                  condition for each, verbatim off result.sales. Absent or
-                  empty renders nothing (never a "no sales yet" caveat - see
-                  this screen's own always-answer rule). */}
-              {Array.isArray(result.sales) && result.sales.length > 0 ? (
+              {/* RECENT REAL SALES (item 2, 2026-11-10; RESULT-FIX item 11,
+                  2026-11-15): the actual sold comps backing the range/
+                  verdict above - date, price, and condition for each,
+                  verbatim off result.sales, through selectRecentSales
+                  (lib/recentSales.ts - newest first, last 24 months only,
+                  falling back to the 3 newest + "Real sales" title when
+                  fewer than 3 survive that window). Absent or empty
+                  renders nothing (never a "no sales yet" caveat - see this
+                  screen's own always-answer rule). */}
+              {recentSalesView.sales.length > 0 ? (
                 <View style={[s.infoCard, { marginBottom: 12 }]}>
-                  <Text style={s.infoLabel}>Recent real sales</Text>
-                  {result.sales.slice(0, 5).map((sale: any, i: number) => (
-                    // CRASH GUARD (2026-11-14, item 6): a null/non-object
-                    // element in result.sales (a malformed row on a partial
-                    // result) would otherwise crash on sale.date below -
-                    // renders nothing for just that row instead.
-                    !sale || typeof sale !== "object" ? null : (
+                  <Text style={s.infoLabel}>{recentSalesView.title}</Text>
+                  {recentSalesView.sales.map((sale, i: number) => (
                     <View
                       key={i}
                       style={{
@@ -2846,7 +2899,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                         {sale.price != null ? `$${Math.round(Number(sale.price))}` : "—"}
                       </Text>
                     </View>
-                    )
                   ))}
                 </View>
               ) : null}

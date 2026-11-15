@@ -237,6 +237,30 @@ export function classifyHeroVerdictLocal(opts: {
   return "SOLID";
 }
 
+// SHARED HERO-VERDICT -> TIER METADATA (2026-11-15, crash fix, MEASURED:
+// ~4/9 on-device scans ending on the ErrorBoundary "Cannot read property
+// 'tier' of undefined", right after "Crunching the numbers"): this table
+// used to be duplicated inline as a local `META`/`VERDICT_META` object in
+// both ScannerScreen.tsx and HistoryScreen.tsx. ScannerScreen's copy was
+// missing the "CHECK ITEM" key - the one classifyHeroVerdictLocal returns
+// for a comparable_range match at category scope (see its own function
+// comment above) - so `META[headline]` came back undefined there and the
+// very next line's `.tier` read threw. One shared table now, covering
+// every real HeroVerdict value, plus a same-bucket (THIN) fallback so an
+// unrecognized value degrades instead of crashing.
+export const HERO_VERDICT_META: Record<Exclude<HeroVerdict, null>, { tier: OutcomeTier; emoji: string; accent: string }> = {
+  "PASS": { tier: "skip", emoji: "🚫", accent: C.red },
+  "THIN": { tier: "thin", emoji: "🤏", accent: C.yellow },
+  "SOLID": { tier: "solid", emoji: "✅", accent: C.green },
+  "WORTH A LOOK": { tier: "hot", emoji: "🔥", accent: C.green },
+  "CHECK ITEM": { tier: "thin", emoji: "👀", accent: C.yellow },
+};
+
+export function metaForHeroVerdict(headline: HeroVerdict): { tier: OutcomeTier; emoji: string; accent: string } | null {
+  if (headline == null) return null;
+  return HERO_VERDICT_META[headline] ?? HERO_VERDICT_META["THIN"];
+}
+
 export function decisionFromVerdict(verdict: HeroVerdict): "BUY" | "WATCH" | "PASS" | "UNKNOWN" {
   if (verdict == null) return "UNKNOWN";
   if (verdict === "PASS") return "PASS";

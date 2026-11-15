@@ -477,19 +477,29 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
     // above it, was a duplicate in exactly that case.
     const dataPhraseShownInBanner = !suppressed && result.confirmedByMoat && !!result.priceData;
     const dataPhrase = dataPhraseShownInBanner ? "Real sold data" : (result.agreementBadge || "Not enough matching sales yet");
+    // DOUBLED PERIOD GUARD (2026-11-15, result-fix item 5, MEASURED:
+    // "~$16.." on screen): dataPhrase can be result.agreementBadge
+    // verbatim, a server string that may already end in its own ".". The
+    // template literals below used to append ". " unconditionally, so a
+    // badge already ending in "." produced two periods back to back once
+    // rendered. Stripped here, once, instead of at every call site below.
+    const dataPhraseClean = dataPhrase.replace(/\.+$/, "");
     // The claim must match the number: maxBuy is now the price where this
     // clears a genuine ~$10 profit floor (lib/profitMath.ts's computeMaxBuy)
     // - same fix as ScannerScreen.tsx.
     // maxBuy===0 (2026-10-19) - see ScannerScreen.tsx's identical comment:
     // fees+shipping alone already exceed the conservative sell price.
+    // AT THE SHELF (2026-11-15, result-fix item 6): "You paid" implies a
+    // purchase already happened - this screen is shown before that, while
+    // the user is still deciding whether to buy at the tag price.
     const maxBuyReasoning = maxBuy == null ? "" : (
       maxBuy === 0
-        ? `${dataPhrase}. Fees and shipping alone outweigh the typical resale price here - no buy price clears a real flip.`
+        ? `${dataPhraseClean}. Fees and shipping alone outweigh the typical resale price here - no buy price clears a real flip.`
         : enteredBp > 0
         ? (enteredBp <= maxBuy
-            ? `${dataPhrase}. You paid $${enteredBp} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
-            : `${dataPhrase}. You paid $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
-        : `${dataPhrase}. Pay $${maxBuy} or less to make this a real flip (≥$10 profit after fees).`
+            ? `${dataPhraseClean}. At $${enteredBp} — ${enteredBp <= maxBuy * 0.5 ? "strong buy, well under" : "under"} the ceiling.`
+            : `${dataPhraseClean}. At $${enteredBp} — over the ceiling, margin is thinner than ideal.`)
+        : `${dataPhraseClean}. Pay $${maxBuy} or less to make this a real flip (≥$10 profit after fees).`
     );
     // ONE BADGE PER RESULT (2026-10-06) - same fix as ScannerScreen.tsx's
     // identical bug: the "skip"-tier branch above (suppressed, AND the
