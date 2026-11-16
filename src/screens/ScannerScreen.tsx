@@ -18,7 +18,7 @@ import ShareCard from "../components/ShareCard";
 import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, rerunScan, invalidateScanHistoryCache, logEvent, logClientError, reportClientError, peekProfileData, ScanRequestError } from "../lib/api";
 import { appendFailureLog, readFailureLog } from "../lib/failureLog";
 import { setLastScanResult } from "../lib/lastScanResult";
-import { recordScanTiming, readScanTimingLog, type ScanTimingEntry } from "../lib/scanTimingLog";
+import { recordScanTiming, readScanTimingLog, SLOW_SCAN_THRESHOLD_MS, type ScanTimingEntry } from "../lib/scanTimingLog";
 import ApiDebugPanel from "../components/ApiDebugPanel";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { deriveTagConfirmPending, confirmTagRead, editTagRead } from "../lib/tagConfirmState";
@@ -31,7 +31,9 @@ import { matchSpecialtyCategory } from "./SpecialtyScreen";
 import ProfitFlexHero from "../components/ProfitFlexHero";
 import FlashHighlight from "../components/FlashHighlight";
 import SegmentOutcomesBlock from "../components/SegmentOutcomesBlock";
-import { classifyOutcome, ROI_BUY_MIN, MAX_BUY_PROFIT_FLOOR, classifyHeroVerdictLocal, decisionFromVerdict, metaForHeroVerdict, type HeroVerdict } from "../lib/outcomeTier";
+import { classifyOutcome, ROI_BUY_MIN, MAX_BUY_PROFIT_FLOOR, classifyHeroVerdictLocal, decisionFromVerdict, metaForHeroVerdict, resolveHeroVerdict, type HeroVerdict } from "../lib/outcomeTier";
+import { formatMoney } from "../lib/money";
+import { resolveProfitConfidence, buildAnswerBannerText } from "../lib/profitBanner";
 import { selectRecentSales } from "../lib/recentSales";
 import LogSaleModal from "../components/LogSaleModal";
 import { toPendingScan } from "../lib/saleCapture";
@@ -68,9 +70,11 @@ const LOADING_STEPS = [
 // to type instead of real currency formatting - a whole-dollar amount
 // ($21) is left alone (not forced to "$21.00"), only a genuine fractional
 // amount gets padded to two decimals ($21.10).
-function fmtMoney(n: number): string {
-  return Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
-}
+// MONEY FORMATTING (2026-11-16): delegates to lib/money.ts's shared
+// formatMoney now - this used to build the string directly off the signed
+// value (`$${n}`), which rendered a real loss as "$-26.70" instead of
+// "-$26.70". See that file's header comment for the fix.
+const fmtMoney = formatMoney;
 // COPY FIX (2026-11-12, item 6c): "Recent real sales" showed result.sales[].
 // date verbatim - a raw ISO timestamp (2026-02-10T08:52:48+00:00) off the
 // server row - instead of a short, scannable date. Falls back to the raw
@@ -204,15 +208,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // again with the SAME value - a no-op re-render, not a dependency
   // change) - the message is about how long the USER has been waiting in
   // total, which an invisible auto-retry shouldn't reset.
-  // 15s THRESHOLD (2026-11-14, honest-scan-progress item 3): was 8000ms -
-  // the spec for the honest progress rework calls for this message only
-  // once total time actually passes 15s, not before. Still keyed on `step`
-  // alone (not reset by a retry) - see this state's original comment.
+  // SLOW_SCAN_THRESHOLD_MS (see its own const comment above): this only
+  // shows for a scan that is truly slower than usual. Still keyed on
+  // `step` alone (not reset by a retry) - see this state's original comment.
   const [slowScanMsg, setSlowScanMsg] = useState(false);
   useEffect(() => {
     if (step !== "loading") { setSlowScanMsg(false); return; }
     setSlowScanMsg(false);
-    const t = setTimeout(() => setSlowScanMsg(true), 15000);
+    const t = setTimeout(() => setSlowScanMsg(true), SLOW_SCAN_THRESHOLD_MS);
     return () => clearTimeout(t);
   }, [step]);
   // UPLOAD-DONE SIGNAL (2026-11-14, honest-scan-progress item 3): flips
@@ -1949,11 +1952,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // RESULT-SCREEN HERO VERDICT (2026-10-09, EXACT PORT of deal-ai-pro's
     // lib/priceBasis.ts classifyHeroVerdict() - that function is the single
     // source of truth; if it changes, this block must change to match).
-    // Recomputed LOCALLY (not read off result.heroVerdict, which the server
-    // computed at whatever buyPrice existed AT SCAN TIME - see this
-    // screen's own PRICE-ON-RESULTS comment, almost always $0 since price
-    // lives on this screen, not the scan request) so editing the buy price
-    // here updates the verdict instantly with no network round trip.
+    // SOURCE OF TRUTH FLIPPED (2026-11-16): used to be recomputed LOCALLY
+    // unconditionally, never read off result.heroVerdict at all. Now reads
+    // result.heroVerdict.headline first (see the serverHeadline const below)
+    // and only falls back to this local port for scans saved before the
+    // server carried that field - a local/server disagreement can no longer
+    // silently override the server's real answer (see that const's own
+    // comment for the measured bug this closes). The remaining risk this
+    // local port still carries - no live recompute as the user edits the
+    // buy price once a server headline exists - is accepted: the server
+    // headline is definitionally correct for the price it was computed at,
+    // and nothing here can safely know whether an edited price still agrees
+    // with it without a round trip.
     //
     // RULE 0 REMOVED (2026-10-09, MEASURED): this used to check
     // result.noFlipMargin (and a basisPrice>=buyPrice break-even check)
@@ -1990,10 +2000,19 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       // oracle-wide metric the server's own verdict call never actually
       // reads.
       const heroSellThroughPct: number | null = result.sellThroughPct ?? null;
-      // EXTRACTED (2026-10-12) to lib/outcomeTier.ts's classifyHeroVerdictLocal
-      // - same exact logic, now shared with the PATCH-on-settle effect below
-      // so that effect can't independently drift from what's on screen.
-      const headline: HeroVerdict = classifyHeroVerdictLocal({
+      // SERVER IS SOURCE OF TRUTH (2026-11-16, NECA TMNT bug): MEASURED a
+      // real scan showing a local SOLID badge while the server's own stored
+      // heroVerdict said THIN - this used to ALWAYS recompute locally here
+      // and never once consulted result.heroVerdict, so any drift between
+      // this port and the server's real classifyHeroVerdict (deal-ai-pro's
+      // lib/priceBasis.ts) silently overrode the server's real answer with
+      // a wrong local one. result.heroVerdict.headline now wins whenever
+      // the server sent it; classifyHeroVerdictLocal (EXTRACTED 2026-10-12
+      // to lib/outcomeTier.ts, shared with the PATCH-on-settle effect below)
+      // is a FALLBACK ONLY, for old stored scans saved before the server
+      // carried this field at all.
+      const serverHeadline: HeroVerdict = (result.heroVerdict?.headline ?? null) as HeroVerdict;
+      const headline: HeroVerdict = resolveHeroVerdict(serverHeadline, () => classifyHeroVerdictLocal({
         tier, buyPrice: enteredBp, netProfit: heroProfit, roi: heroRoi, sellThroughPct: heroSellThroughPct,
         comparableRangeConfidence: result.comparableRangeConfidence ?? null,
         comparableRangeScope: result.comparableRangeScope ?? null,
@@ -2002,7 +2021,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         // comment), reused here so the headline badge and the withheld
         // dollar figures can never disagree.
         segmentBrandAgnostic, priceVsReferenceSanityCapped,
-      });
+      }));
       finalHeadline = headline;
       // STORE REVIEW: real-data tier only (ai_only already headline:null
       // above) and never PASS/THIN - exactly the two labels the ask is
@@ -2286,6 +2305,21 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       { label: "ROI", value: maxBuyLocked ? "🔒" : (withholdConfidentNumbers ? "—" : (heroRoi ? heroRoi + "%" : "—")) },
       { label: "to sell", value: oracleDaysTxt },
     ];
+    // PROFIT CONFIDENCE (2026-11-16, MEASURED: the answer-card banner below
+    // printed a precise "...( Z% ROI)" on estimate-only results while this
+    // very card's own ROI stat right above said "—" for the identical scan).
+    // result.profitConfidence ("estimate" | "sold-backed") is the server's
+    // new, explicit signal for which framing the banner owes the user.
+    // Missing on scans saved before this field existed: falls back to
+    // whether THIS card would actually show a real ROI percentage - the
+    // exact same maxBuyLocked/withholdConfidentNumbers/heroRoi gate the ROI
+    // stat above already uses - so an old scan's banner and its own ROI
+    // stat can never disagree about whether the number behind it is real.
+    const cardShowsRoi = !maxBuyLocked && !withholdConfidentNumbers && !!heroRoi;
+    const profitConfidence = resolveProfitConfidence(result.profitConfidence, cardShowsRoi);
+    const answerSubText = (enteredBp > 0 && finalHeadline != null)
+      ? buildAnswerBannerText({ profitConfidence, enteredBp, heroProfit, heroRoi })
+      : null;
     // TEXT (item 5): never the server's own reasoning text here any more -
     // outcome.copy (the skipReason line right above this in ProfitFlexHero)
     // already states the verdict's own reason; result.reasoning used to be
@@ -2617,7 +2651,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   <>
                     <Text style={[s.answerHeadline, { color: outcome.accent }]}>{outcome.emoji} {outcome.label}</Text>
                     <Text style={s.answerSub}>
-                      {`Pay ${fmtMoney(enteredBp)} → profit ~${fmtMoney(heroProfit)} (${heroRoi}% ROI)`}
+                      {answerSubText}
                     </Text>
                   </>
                 ) : (

@@ -6,9 +6,7 @@
 // Inputs are all values ScannerScreen already computes upstream (same
 // maxBuy/sellPriceForProfit/hasServerRange the non-CHECK-ITEM answer card
 // uses), never recomputed here.
-function fmtMoney(n: number): string {
-  return Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
-}
+import { formatMoney as fmtMoney } from "./money";
 
 export interface CheckItemCardInput {
   hasServerRange: boolean;
