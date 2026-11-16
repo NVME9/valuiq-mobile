@@ -65,10 +65,16 @@ export default function SegmentOutcomesBlock({ segment }: { segment: SegmentOutc
           viewer never mistakes this card's N for the hero's N, even when
           the two numbers happen to look similar (e.g. 48 vs 40). */}
       <Text style={s.eyebrow}>Real reseller data</Text>
+      {/* CATEGORY CAVEAT (2026-11-15, result-fix item 10): this card's
+          numbers are a category/segment aggregate, never this exact item -
+          same fact the segmentLabel/footer already imply, but a viewer
+          skimming just the headline number could still read it as an
+          item-specific price. Always shown, not conditional on any field. */}
+      <Text style={s.caveat}>Category average, not this exact item</Text>
       <Text style={s.count}>Based on {segment.resolvedCount} real flips</Text>
       <Text style={s.title}>{segment.segmentLabel}</Text>
       {showPaidMedian && <Text style={s.line}>Paid: ${Math.round(segment.medianBuyPrice!)} median</Text>}
-      {showSoldMedian && <Text style={s.line}>Sold: ${Math.round(segment.medianSoldPrice!)} median</Text>}
+      {showSoldMedian && <Text style={s.line}>Category sold median ${Math.round(segment.medianSoldPrice!)}</Text>}
       {segment.sellThroughPct != null && <Text style={s.line}>Sold through: {Math.round(segment.sellThroughPct)}%</Text>}
       {segment.medianDaysToSell != null && <Text style={s.line}>Days to sell: {Math.round(segment.medianDaysToSell)}</Text>}
       <Text style={s.footer}>{footer}</Text>
@@ -79,6 +85,7 @@ export default function SegmentOutcomesBlock({ segment }: { segment: SegmentOutc
 const s = StyleSheet.create({
   card: { backgroundColor: C.bgDeep, borderWidth: 1, borderColor: C.greenBorder, borderRadius: 14, padding: 14, marginTop: 10 },
   eyebrow: { color: C.green, fontSize: 10.5, fontWeight: "800", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 2 },
+  caveat: { color: C.text4, fontSize: 11, fontWeight: "600", marginBottom: 6 },
   count: { color: C.text3, fontSize: 11, marginBottom: 6 },
   title: { color: C.text1, fontSize: 14, fontWeight: "700", marginBottom: 6 },
   line: { color: C.text2, fontSize: 13, lineHeight: 19 },

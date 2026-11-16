@@ -50,12 +50,34 @@ interface Props {
   // already knows its own context some other way.
   currentScreen?: string;
 }
-interface State { hasError: boolean; lastError: Error | null }
+interface State { hasError: boolean; lastError: Error | null; lastComponentStack?: string | null }
+
+// COMPONENT STACK, OWNER-ONLY (2026-11-15, item 3): the plain
+// "TypeError: Cannot read property 'tier' of undefined" owner line gave no
+// hint WHERE in the tree a crash happened - every crash on this screen
+// looked identical. React's componentStack is a newline-separated list
+// like "\n    in ProfitFlexHero (at ScannerScreen.tsx:2730)\n    in View
+// ..." - innermost component first. Pulls just the component name off
+// each of the first few lines so the owner sees "ProfitFlexHero <
+// ScrollView < View < ScannerScreen" at a glance instead of a multi-line
+// dump with file/line noise.
+function componentNamesFromStack(componentStack: string | null, maxLines = 4): string[] {
+  if (!componentStack) return [];
+  return componentStack
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean)
+    .slice(0, maxLines)
+    .map(line => {
+      const m = line.match(/^in\s+(\S+)/);
+      return m ? m[1] : line;
+    });
+}
 
 export default class ErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, lastError: null };
+    this.state = { hasError: false, lastError: null, lastComponentStack: null };
   }
   // OWNER LINE FIX (2026-11-14, crash-reporting item 2): this used to set
   // `this.lastError` as a plain instance field inside componentDidCatch,
@@ -79,6 +101,13 @@ export default class ErrorBoundary extends React.Component<Props, State> {
     // only a developer plugged into Metro would ever see.
     try { this.props.onError?.(error, info); } catch {}
     if (this.props.isOwner) {
+      // SAME LIFECYCLE-ORDERING FIX AS lastError (see this class's own
+      // comment above getDerivedStateFromError): componentStack only
+      // arrives here, in the COMMIT-phase componentDidCatch, one render
+      // after getDerivedStateFromError already painted the fallback - so
+      // it has to go through its own setState to reach the screen, same as
+      // the error name/message would if captured this late instead.
+      try { this.setState({ lastComponentStack: info?.componentStack || null }); } catch {}
       try {
         appendFailureLog({
           at: Date.now(),
@@ -105,6 +134,14 @@ export default class ErrorBoundary extends React.Component<Props, State> {
               capture above - non-owners see only the friendly message. */}
           {this.props.isOwner && this.state.lastError && (
             <Text style={st.ownerLine}>{this.state.lastError.name}: {this.state.lastError.message}</Text>
+          )}
+          {/* OWNER-ONLY COMPONENT STACK (item 3): first 4 component names,
+              innermost first - identifies WHICH crash this is on screen,
+              without digging through the failure log. */}
+          {this.props.isOwner && this.state.lastComponentStack && (
+            <Text style={st.ownerLine}>
+              {componentNamesFromStack(this.state.lastComponentStack).join(" < ")}
+            </Text>
           )}
           {this.props.onRetry && (
             <TouchableOpacity style={st.retryBtn} onPress={this.props.onRetry}>
