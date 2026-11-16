@@ -14,6 +14,11 @@ export interface CheckItemCardInput {
   hasServerRange: boolean;
   serverPriceLow: number | null;
   serverPriceHigh: number | null;
+  // RESULT-FIX item 4 (2026-11-15, fix/tier-crash): low===high is not a
+  // range, it's one number rendered twice ("Typical range: $16-$16") -
+  // collapses to the plain "Typical sell $X" copy, same rule every other
+  // range render site in ScannerScreen.tsx applies.
+  rangeIsSinglePoint: boolean;
   maxBuy: number | null;
   sellPriceForProfit: number;
 }
@@ -31,12 +36,12 @@ export interface CheckItemCardView {
 
 export function deriveCheckItemCard(input: CheckItemCardInput): CheckItemCardView {
   const rangeText = input.hasServerRange
-    ? `Typical range: $${input.serverPriceLow}-$${input.serverPriceHigh}`
+    ? (input.rangeIsSinglePoint ? `Typical sell $${input.serverPriceLow}` : `Typical range: $${input.serverPriceLow}-$${input.serverPriceHigh}`)
     : null;
   const showMaxBuyCard = input.maxBuy != null;
   const maxBuyHeadline = showMaxBuyCard ? `Buy at ${fmtMoney(input.maxBuy as number)} or less` : null;
   const maxBuySub = (showMaxBuyCard && input.sellPriceForProfit > 0)
-    ? (input.hasServerRange
+    ? (input.hasServerRange && !input.rangeIsSinglePoint
         ? `Typical sell ${fmtMoney(input.sellPriceForProfit)}, range ${fmtMoney(input.serverPriceLow as number)} to ${fmtMoney(input.serverPriceHigh as number)}`
         : `Typical sell ${fmtMoney(input.sellPriceForProfit)}`)
     : null;

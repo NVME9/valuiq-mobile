@@ -84,6 +84,13 @@ const VERDICT_META: Record<string, { tier: OutcomeTierInfo["tier"]; emoji: strin
   "THIN": { tier: "thin", emoji: "🤏", label: "THIN", accentKey: "yellow" },
   "SOLID": { tier: "solid", emoji: "✅", label: "SOLID", accentKey: "green" },
   "WORTH A LOOK": { tier: "hot", emoji: "🔥", label: "WORTH A LOOK", accentKey: "green" },
+  // CHECK ITEM (2026-11-15): classifyHeroVerdictLocal/classifyHeroVerdict
+  // can now persist this headline too (comparable_range at category scope)
+  // - missing here just meant a scan with that stored headline silently
+  // fell through to the legacy recompute below instead of showing the real
+  // saved verdict. Kept in sync with ScannerScreen.tsx's META per this
+  // table's own header comment.
+  "CHECK ITEM": { tier: "thin", emoji: "👀", label: "CHECK ITEM", accentKey: "yellow" },
 };
 
 // ONE VERDICT ENGINE (BEASTMODE FIX 1, 2026-09-13; superseded by the stored
