@@ -15,7 +15,7 @@ import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareCard from "../components/ShareCard";
-import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, logEvent, logClientError, reportClientError, peekProfileData, ScanRequestError } from "../lib/api";
+import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, rerunScan, invalidateScanHistoryCache, logEvent, logClientError, reportClientError, peekProfileData, ScanRequestError } from "../lib/api";
 import { appendFailureLog, readFailureLog } from "../lib/failureLog";
 import { setLastScanResult } from "../lib/lastScanResult";
 import { recordScanTiming, readScanTimingLog, type ScanTimingEntry } from "../lib/scanTimingLog";
@@ -35,6 +35,8 @@ import { classifyOutcome, ROI_BUY_MIN, MAX_BUY_PROFIT_FLOOR, classifyHeroVerdict
 import LogSaleModal from "../components/LogSaleModal";
 import { toPendingScan } from "../lib/saleCapture";
 import { CONDITION_OPTIONS, CONDITION_TO_DB } from "../lib/condition";
+import { buildCheckItemRerunPayload } from "../lib/checkItemConfirm";
+import { deriveCheckItemCard } from "../lib/checkItemCard";
 import { evaluateReview, requestReviewIfEligible, REVIEW_PROMPT_DELAY_MS, ReviewDebugState } from "../lib/storeReview";
 import RevealScreen from "../components/RevealScreen";
 
@@ -247,6 +249,13 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // edits (see the results-step render below).
   const [resultCondition, setResultCondition] = useState("");
   const [result, setResult] = useState<any>(null);
+  // CHECK ITEM NAME (2026-11-15, share-cta-and-check-item): same lifecycle
+  // as buyPrice/resultCondition above - cleared per analyze() call, seeded
+  // from the new result's own guessed name, editable right on the "Check
+  // This Item" card (see the isCheckItem branch below) so confirming or
+  // correcting the identity never requires leaving this screen first.
+  const [checkItemName, setCheckItemName] = useState("");
+  const [checkItemRerunning, setCheckItemRerunning] = useState(false);
   // TAG CONFIRM GATE (2026-10-06): true while THIS result's tag read needs
   // an explicit Confirm/Edit tap before it drives anything - set whenever a
   // new result comes in with retailPriceNeedsConfirmation (see the
@@ -408,6 +417,54 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       setSharingImage(false);
     }
   }
+
+  // CHECK ITEM CONFIRM (2026-11-15, share-cta-and-check-item): the "Check
+  // This Item" card's own re-run - calls rerunScan() directly (the exact
+  // same function/endpoint contract ScanConfirmScreen's History-edit
+  // re-run uses, confirmedIdentification/isReanalyze baked in - see
+  // lib/checkItemConfirm.ts's header comment) rather than routing through
+  // ScanConfirmScreen's "nothing changed" shortcut, which would otherwise
+  // skip the re-run entirely on a confirmed-as-is guess (the most common
+  // tap of "Yes, that's it") and leave this scan stuck on CHECK ITEM.
+  // Persists the corrected row via updateScan, same as that screen does -
+  // this result.id is already a real saved scan row (the original scan
+  // that produced this CHECK ITEM verdict), not a fresh one `d` creates.
+  async function confirmCheckItem(nameOverride?: string) {
+    const payload = buildCheckItemRerunPayload({
+      result, editedName: nameOverride ?? checkItemName, resultCondition, enteredBp: Number(buyPrice) || 0,
+    });
+    if (!payload.itemName) { Alert.alert("Name required", "Enter an item name to re-run."); return; }
+    setCheckItemRerunning(true);
+    try {
+      const data = await rerunScan(token, payload);
+      if (data && (data.success || data.sellPrice != null)) {
+        const scanId = result?.id ?? result?.scanId ?? result?.scan_id;
+        if (scanId != null) {
+          const isLocked = Array.isArray(data.locked) && data.locked.length > 0;
+          const updates: any = {
+            item_name: payload.itemName,
+            sell_price: data.sellPrice ?? result?.sellPrice,
+            buy_target: isLocked ? null : (data.buyTarget ?? result?.buyTarget),
+            net_profit: isLocked ? null : (data.netProfit ?? result?.netProfit),
+            decision: data.decision ?? result?.decision,
+            best_platform: data.bestPlatform ?? result?.bestPlatform,
+            roi: isLocked ? null : (data.roi ?? result?.roi),
+            specialty_data: JSON.stringify(data),
+          };
+          try { await updateScan(token, String(scanId), updates); } catch {}
+          invalidateScanHistoryCache(token);
+        }
+        setResult(data);
+        setLastScanResult(data);
+        setCheckItemName(data.itemName || data.item_name || payload.itemName);
+      } else {
+        Alert.alert("Re-run failed", "Could not re-analyze. Try again.");
+      }
+    } catch {
+      Alert.alert("Re-run failed", "Something went wrong. Try again.");
+    }
+    setCheckItemRerunning(false);
+  }
   // HISTORY RESULTS REUSE (BUG 1 + BUG 2): opens straight onto the results
   // step for navData.viewScan instead of the normal camera-first mount -
   // see lib/viewSavedScan.ts and this screen's navData Props comment. Mount-
@@ -437,6 +494,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setBuyPriceSource(built.buyPriceSource);
     setResultCondition(built.resultCondition);
     conditionBaselineRef.current = built.resultCondition;
+    setCheckItemName(built.result?.itemName || built.result?.item_name || "");
     // PHOTO (item 7) - see lib/viewSavedScan.ts's SavedScanView.photoBase64
     // comment. `photos` is otherwise only ever populated by this screen's
     // own camera-capture flow, which a saved-view mount never runs.
@@ -688,6 +746,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     setBuyPrice("");
     setResultCondition("");
     conditionBaselineRef.current = "";
+    setCheckItemName("");
     setBarcodeScanned(false);
     setMode("photo");
     compressMsTotalRef.current = 0;
@@ -930,6 +989,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       setBuyPrice("");
       setResultCondition("");
       conditionBaselineRef.current = "";
+      setCheckItemName("");
       setTagConfirmPending(false);
       setBuyPriceSource(null);
       latestVerdictRef.current = null;
@@ -1022,6 +1082,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       setBuyPrice("");
       setResultCondition("");
       conditionBaselineRef.current = "";
+      setCheckItemName("");
       // DISAMBIGUATION (2026-11-12, scan-retry): a fresh (non-retry) photo
       // scan - clear the barcode-retry marker so a LATER failure on THIS
       // attempt can't have retryScan mistake it for a still-pending
@@ -1253,6 +1314,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // server's own field directly is what makes reopen match fresh exactly.
     setResultCondition(d.conditionAssessment || "");
     conditionBaselineRef.current = d.conditionAssessment || "";
+    setCheckItemName(d.itemName || d.item_name || "");
     // SALE-CAPTURE MOAT: on a BUY, either schedule (if already allowed) or
     // surface the soft in-app ask. Never fire Apple's cold prompt directly.
     try {
@@ -2225,6 +2287,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const serverPriceLow = Number(result.priceLow) || null;
     const serverPriceHigh = Number(result.priceHigh) || null;
     const hasServerRange = serverPriceLow != null && serverPriceHigh != null && serverPriceLow > 0 && serverPriceHigh > 0;
+    // SHARE CTA GATING (2026-11-15, share-cta-and-check-item): the sticky
+    // "Share this find" bar (rendered below, outside the scroll) mirrors
+    // exactly what the answer card right above it is about to show - a
+    // real verdict, a locked-plan state, or a max-buy/typical-sell number.
+    // Never on CHECK ITEM (nothing to share yet - see the dedicated card
+    // below), and never on the genuine "Not enough data to price this yet"
+    // dead end, which has neither a verdict nor a number either.
+    const hasVerdictOrNumber = !isCheckItem && (maxBuyLocked || (enteredBp > 0 && finalHeadline != null) || answerMaxBuy != null || sellPriceForProfit > 0);
+    // CHECK ITEM CARD VIEW (2026-11-15): pure derivation, lib/checkItemCard.ts
+    // - keeps "never a profit number on a low-confidence identity" unit
+    // tested independent of this render.
+    const checkItemCardView = deriveCheckItemCard({ hasServerRange, serverPriceLow, serverPriceHigh, maxBuy, sellPriceForProfit });
     // NO PRICE ENTERED (item 4): "tag unread or rejected" - enteredBp<=0
     // covers both (deriveTagConfirmPending/editTagRead both leave buyPrice
     // blank - see tagConfirmState.ts). Never shown for CHECK ITEM, which
@@ -2385,7 +2459,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           </TouchableOpacity>
         </View>
 
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,paddingBottom:60}} showsVerticalScrollIndicator={false}>
+        {/* paddingBottom covers the sticky Share CTA bar below this
+            ScrollView (s.shareCtaBar) - without it, the last card in the
+            scroll sits partly behind that bar instead of above it. */}
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,paddingBottom:hasVerdictOrNumber?130:60}} showsVerticalScrollIndicator={false}>
 
           {/* ALWAYS-ANSWER PROOF SCREEN (2026-11-10): there is no "not
               enough data / can't price" dead end any more - a thin/no-data
@@ -2398,29 +2475,75 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
               remains the one deliberate exception (identity itself, not
               pricing data, is what's missing there). */}
 
-          {/* - CHECK ITEM (item 3, 2026-10-25 server contract) - identity is
-              title-only/low-confidence; the server withheld netProfit/roi
-              entirely (heroVerdict.headline === "CHECK ITEM", decision
-              WATCH). No BUY/PASS, no profit figures - range only (server
-              priceLow/priceHigh), the one honest sentence, and a button
-              straight into the identity-confirm re-run screen. */}
+          {/* - CHECK ITEM (item 3, 2026-10-25 server contract; REDESIGNED
+              2026-11-15, share-cta-and-check-item) - identity is title-only/
+              low-confidence; the server withheld netProfit/roi entirely
+              (heroVerdict.headline === "CHECK ITEM", decision WATCH). Shows
+              the actual scan photo and an EDITABLE name field (prefilled
+              with the guess) instead of the old photo-less, name-less card -
+              "Yes, that's it"/"Edit name" both re-run through
+              confirmCheckItem/rerunScan (never a second scan off the plan
+              cap - see that function's own comment). Range + max-buy answer
+              card render when the server actually has them; a profit
+              number NEVER appears here (checkItemCardView.profitCopy is the
+              one fixed line that always stands in for it instead). */}
           {isCheckItem && (
             <View style={s.noDataCard}>
               <Text style={{color:C.text1,fontSize:15,fontWeight:"700",textAlign:"center",marginBottom:8}}>Check This Item</Text>
-              <Text style={{color:C.text3,fontSize:13,textAlign:"center",lineHeight:20,marginBottom: hasServerRange ? 10 : 16}}>
-                Not sure it's this exact item. Confirm the name, then re-run.
+              <Text style={{color:C.text3,fontSize:13,textAlign:"center",lineHeight:20,marginBottom:14}}>
+                Not sure it's this exact item. Confirm or edit the name below, then re-run.
               </Text>
-              {hasServerRange ? (
-                <Text style={{color:C.text2,fontSize:13,fontWeight:"700",textAlign:"center",marginBottom:16}}>
-                  {`Typical range: $${serverPriceLow}-$${serverPriceHigh}`}
+              {displayPhotoBase64 ? (
+                <Image
+                  source={{ uri: `data:image/jpeg;base64,${displayPhotoBase64}` }}
+                  style={s.checkItemPhoto}
+                  resizeMode="cover"
+                />
+              ) : null}
+              <TextInput
+                style={s.checkItemNameInput}
+                value={checkItemName}
+                onChangeText={setCheckItemName}
+                placeholder="Item name"
+                placeholderTextColor={C.text4}
+                editable={!checkItemRerunning}
+              />
+              {checkItemCardView.rangeText ? (
+                <Text style={{color:C.text2,fontSize:13,fontWeight:"700",textAlign:"center",marginTop:12}}>
+                  {checkItemCardView.rangeText}
                 </Text>
               ) : null}
-              <TouchableOpacity
-                style={[s.navBtn,{alignSelf:"center",paddingHorizontal:24,paddingTop:16,paddingBottom:10}]}
-                onPress={() => onNavigate("scan-confirm", { scan: scanConfirmPayload })}
-              >
-                <Text style={s.navBtnText}>Is this what you're looking for?</Text>
-              </TouchableOpacity>
+              {checkItemCardView.showMaxBuyCard && (
+                <View style={[s.answerCard,{marginTop:14}]}>
+                  <Text style={s.answerHeadline}>{checkItemCardView.maxBuyHeadline}</Text>
+                  {checkItemCardView.maxBuySub ? <Text style={s.answerSub}>{checkItemCardView.maxBuySub}</Text> : null}
+                </View>
+              )}
+              {/* Never "Pay $X -> profit ~$Y (ROI)" - identity isn't
+                  confirmed yet, so there is no real profit number to show. */}
+              <Text style={{color:C.text4,fontSize:12,fontWeight:"600",textAlign:"center",marginTop:14,marginBottom:4}}>
+                {checkItemCardView.profitCopy}
+              </Text>
+              <View style={{flexDirection:"row",gap:10,marginTop:10}}>
+                <TouchableOpacity
+                  style={[s.checkItemConfirmBtn, checkItemRerunning && {opacity:0.6}]}
+                  disabled={checkItemRerunning}
+                  activeOpacity={0.85}
+                  onPress={() => confirmCheckItem()}
+                >
+                  {checkItemRerunning
+                    ? <ActivityIndicator color={C.greenDark} size="small" />
+                    : <Text style={s.checkItemConfirmBtnText}>Yes, that's it</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={s.checkItemEditBtn}
+                  disabled={checkItemRerunning}
+                  activeOpacity={0.85}
+                  onPress={() => onNavigate("scan-confirm", { scan: { ...scanConfirmPayload, item_name: checkItemName.trim() || scanConfirmPayload.item_name } })}
+                >
+                  <Text style={s.checkItemEditBtnText}>Edit name</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
 
@@ -2990,43 +3113,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                 </View>
               )}
 
-              {/* Share result as image - unconditional on verdict (2026-09-13):
-                  ShareCard already renders a correct branded card for every
-                  decision (BUY/WATCH/PASS all get their own verdict badge -
-                  see ShareCard.tsx's verdictColor/verdictLabel), so a PASS
-                  scan has just as real a card to share as a BUY - "skip this
-                  one" is still a shareable moment, not just a win. Used to
-                  live inside the buy-oriented {!isSkip} block below and got
-                  hidden entirely on a skip verdict along with everything
-                  else in that block, which was a layout decision (no
-                  platform breakdown / community-share on a non-buy), not a
-                  reason this specific button needed hiding too. */}
-              <TouchableOpacity
-                style={{backgroundColor:C.green,borderRadius:14,paddingVertical:15,paddingHorizontal:12,marginBottom:12,alignItems:"center",justifyContent:"center",flexDirection:"row",gap:8,minHeight:52,opacity:sharingImage?0.6:1}}
-                disabled={sharingImage}
-                activeOpacity={0.85}
-                onPress={shareResultImage}
-              >
-                {sharingImage ? (
-                  <ActivityIndicator color={C.greenDark} size="small" />
-                ) : (
-                  <>
-                    <Text style={{fontSize:16}}>{"📷"}</Text>
-                    {/* "Share result as image" -> "Share as image" - shorter
-                        copy first (fits on its own on an SE-width screen);
-                        numberOfLines+adjustsFontSizeToFit+flexShrink is a
-                        backstop, not the primary fix, so it never clips. */}
-                    <Text
-                      style={{color:C.greenDark,fontSize:15,fontWeight:"900",flexShrink:1}}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.85}
-                    >
-                      Share as image
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              {/* SHARE CTA (2026-11-15, share-cta-and-check-item): the
+                  buried "Share as image" button that used to live here is
+                  gone - shareResultImage/ShareCard/the off-screen ViewShot
+                  capture above are all still intact (untouched - out of
+                  scope for this change), just no longer reachable from a
+                  button in the scroll. The one share entry point now is the
+                  sticky "Share this find" bar below the ScrollView, which
+                  opens Share Reveal instead (setRevealOpen) - see that
+                  bar's own comment for why one button beats two competing
+                  share actions buried in the scroll. */}
 
               {/* Everything below IS still buy-oriented - hidden entirely on
                   a skip verdict (no platform to recommend selling on, no
@@ -3231,25 +3327,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             </>
           )}
 
-          {/* SHARE REVEAL (item 1, 2026-11-11): deliberately OUTSIDE both
-              the CHECK ITEM and main-proof branches above - this button
-              shows on EVERY scan result, priced or not, buy or skip. "It is
-              acquisition": a SKIP is just as shareable a moment as a BUY
-              (mirrors FlexRevealBody's own "a PASS has just as real a card
-              to share as a BUY" reasoning), and a scan the user hasn't
-              priced yet still has a real item/photo/typical-sale-range to
-              show off. See the SHARE REVEAL DATA block above this return
-              for the one place every number shown here is gated to
-              "already unlocked on the proof screen." */}
-          <TouchableOpacity
-            style={{backgroundColor:C.surface,borderRadius:14,paddingVertical:15,paddingHorizontal:12,marginBottom:12,alignItems:"center",justifyContent:"center",flexDirection:"row",gap:8,minHeight:52,borderWidth:1,borderColor:C.green+"40"}}
-            activeOpacity={0.85}
-            onPress={() => setRevealOpen(true)}
-          >
-            <Text style={{fontSize:16}}>{"✨"}</Text>
-            <Text style={{color:C.green,fontSize:15,fontWeight:"900"}}>Share reveal</Text>
-          </TouchableOpacity>
-
           {/* Upgrade nudge for free users */}
           {plan==="free" && scansLeft !== null && scansLeft <= 3 && (
             <TouchableOpacity style={s.upgradeNudge} onPress={()=>onNavigate("upgrade")} activeOpacity={0.88}>
@@ -3263,6 +3340,31 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           )}
 
         </ScrollView>
+
+        {/* SHARE CTA BAR (2026-11-15, share-cta-and-check-item): sticky,
+            outside the ScrollView above (a sibling, not a child) so it
+            stays pinned at the bottom of this screen's own flex:1 area -
+            directly above the tab bar App.tsx renders below this whole
+            screen - for as long as the result is on screen, scroll
+            position notwithstanding. Replaces the two buried "Share as
+            image"/"Share reveal" buttons that used to live in the scroll
+            (see their own removal comments above) with the one obvious
+            entry point into the SAME Share Reveal flow (setRevealOpen) the
+            old "Share reveal" button opened. Gated on hasVerdictOrNumber -
+            never shows on CHECK ITEM (its own card above has nothing yet
+            to share) or on the genuine "Not enough data to price this yet"
+            dead end. */}
+        {hasVerdictOrNumber && (
+          <View style={s.shareCtaBar}>
+            <TouchableOpacity
+              style={s.shareCtaBtn}
+              activeOpacity={0.85}
+              onPress={() => setRevealOpen(true)}
+            >
+              <Text style={s.shareCtaBtnText}>Share this find</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </SafeAreaView>
       </ErrorBoundary>
     );
@@ -3670,12 +3772,26 @@ veloSub: { fontSize: 12, color: C.text3, marginTop: 3 },
   answerCard:     { backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.border, borderRadius: 16, padding: 16, marginBottom: 12, alignItems: "center" },
   answerHeadline: { color: C.text1, fontSize: 20, fontWeight: "900", textAlign: "center" },
   answerSub:      { color: C.text3, fontSize: 13, fontWeight: "600", textAlign: "center", marginTop: 6, lineHeight: 18 },
+  // SHARE CTA BAR (2026-11-15, share-cta-and-check-item) - sticky, outside
+  // the ScrollView, directly above App.tsx's own tab bar. See this file's
+  // own render for the hasVerdictOrNumber gate.
+  shareCtaBar:      { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 14, backgroundColor: C.bg, borderTopWidth: 1, borderTopColor: C.border },
+  shareCtaBtn:      { backgroundColor: C.green, borderRadius: 14, paddingVertical: 16, alignItems: "center", justifyContent: "center" },
+  shareCtaBtnText:  { color: C.greenDark, fontSize: 16, fontWeight: "900" },
   // COLLAPSED ID ROW (2026-11-14, honest-scan-progress item 5): replaces
   // the old full "Help us nail this ID" card for a moderate (not very low)
   // identification-confidence concern.
   idSlimRow:      { paddingVertical: 10, paddingHorizontal: 4, marginBottom: 10 },
   idSlimRowText:  { color: C.text3, fontSize: 12.5, fontWeight: "600", textAlign: "center", textDecorationLine: "underline" },
   noDataCard:     { backgroundColor: "rgba(0,0,0,0.3)", borderWidth: 1, borderColor: C.border, borderRadius: 20, padding: 20, marginBottom: 10 },
+  // CHECK ITEM CARD (2026-11-15, share-cta-and-check-item) - see this
+  // file's own isCheckItem render for how these are used.
+  checkItemPhoto:       { width: "100%", height: 150, borderRadius: 12, marginBottom: 14 },
+  checkItemNameInput:   { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 11, paddingVertical: 12, paddingHorizontal: 14, color: C.text1, fontSize: 15, fontWeight: "700", textAlign: "center" },
+  checkItemConfirmBtn:     { flex: 1, backgroundColor: C.green, borderRadius: 14, paddingVertical: 14, alignItems: "center", justifyContent: "center" },
+  checkItemConfirmBtnText: { color: C.greenDark, fontSize: 15, fontWeight: "900" },
+  checkItemEditBtn:        { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: 14, paddingVertical: 14, alignItems: "center", justifyContent: "center" },
+  checkItemEditBtnText:    { color: C.text2, fontSize: 15, fontWeight: "800" },
   numbersCard:    { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 14, flexDirection: "row", marginBottom: 10, overflow: "hidden" },
   numberItem:     { flex: 1, padding: 14, alignItems: "center", borderRightWidth: 1, borderRightColor: C.border },
   numberLabel:    { color: C.text4, fontSize: 9, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 },
