@@ -237,6 +237,23 @@ export function classifyHeroVerdictLocal(opts: {
   return "SOLID";
 }
 
+// SERVER-FIRST HEADLINE RESOLUTION (2026-11-16, MEASURED: NECA TMNT figure
+// scan showed a local "SOLID" badge while the server's own stored
+// heroVerdict said "THIN" - ScannerScreen.tsx used to ALWAYS recompute the
+// headline locally and never once consulted result.heroVerdict, so any
+// drift between this local port and the server's real classifyHeroVerdict
+// (deal-ai-pro's lib/priceBasis.ts) silently overrode the server's real
+// answer). Single shared precedence rule for every result-screen caller
+// (ScannerScreen.tsx, SpecialtyScreen.tsx): the server's own
+// heroVerdict.headline always wins when present; `computeLocal` only ever
+// runs as a fallback for scans saved before the server carried that field.
+// Centralized here (not re-typed as `serverHeadline ?? ...` at each call
+// site) so the two screens can't independently get this precedence
+// backwards again.
+export function resolveHeroVerdict(serverHeadline: HeroVerdict, computeLocal: () => HeroVerdict): HeroVerdict {
+  return serverHeadline ?? computeLocal();
+}
+
 // SHARED HERO-VERDICT -> TIER METADATA (2026-11-15, crash fix, MEASURED:
 // ~4/9 on-device scans ending on the ErrorBoundary "Cannot read property
 // 'tier' of undefined", right after "Crunching the numbers"): this table

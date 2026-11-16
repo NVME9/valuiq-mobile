@@ -11,6 +11,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 export const SCAN_TIMING_LOG_KEY = "@valuiq_scan_timing_log";
 export const MAX_SCAN_TIMING_LOG = 10;
 
+// SLOW-SCAN THRESHOLD (2026-11-16, MEASURED: real scans normally take
+// 11-16s, so the prior threshold (15000ms, originally 8000ms) fired the
+// "Taking longer than usual, still working" message on nearly every single
+// scan, not just the genuinely slow ones). Raised to sit clearly above the
+// ~16s p90 instead of just above the typical case - see ScannerScreen.tsx's
+// own slowScanMsg effect, the one consumer.
+export const SLOW_SCAN_THRESHOLD_MS = 22000;
+
 export interface ScanTimingEntry {
   at: number;
   elapsedMs: number;

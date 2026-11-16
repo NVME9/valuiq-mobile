@@ -14,7 +14,7 @@
 // return "CHECK ITEM" for a comparable_range match at category scope, but
 // ScannerScreen.tsx's own local META table never had that key - the exact
 // gap this test's "every HeroVerdict value" loop below would have caught.
-import { classifyOutcome, classifyHeroVerdictLocal, metaForHeroVerdict, decisionFromVerdict, type HeroVerdict, type OutcomeTierInput } from "../outcomeTier";
+import { classifyOutcome, classifyHeroVerdictLocal, metaForHeroVerdict, decisionFromVerdict, resolveHeroVerdict, type HeroVerdict, type OutcomeTierInput } from "../outcomeTier";
 
 const BASE_INPUT: OutcomeTierInput = {
   noFlipMargin: false,
@@ -108,6 +108,42 @@ describe("metaForHeroVerdict - never throws, never returns undefined for a real 
     const meta = metaForHeroVerdict("SOME FUTURE VALUE" as unknown as HeroVerdict);
     expect(meta).not.toBeUndefined();
     expect(meta!.tier).toBe("thin");
+  });
+});
+
+describe("resolveHeroVerdict - server headline is the source of truth", () => {
+  // MEASURED BUG (2026-11-16): the NECA TMNT figure scan showed a local
+  // "SOLID" badge while the server's own stored heroVerdict said "THIN" -
+  // ScannerScreen.tsx used to always recompute locally and never consult
+  // result.heroVerdict at all. This is the exact regression test: a server
+  // headline of THIN must win even when the local inputs would clearly
+  // compute SOLID.
+  test("server THIN + local inputs that would compute SOLID -> THIN wins", () => {
+    const computeLocal = () => classifyHeroVerdictLocal({
+      tier: "exact_item", buyPrice: 10, netProfit: 40, roi: 40, sellThroughPct: 10,
+    });
+    expect(computeLocal()).toBe("SOLID"); // sanity: local really would say SOLID here
+    expect(resolveHeroVerdict("THIN", computeLocal)).toBe("THIN");
+  });
+
+  test("server headline absent (old stored scan) falls back to the local compute", () => {
+    const computeLocal = () => classifyHeroVerdictLocal({
+      tier: "exact_item", buyPrice: 10, netProfit: 40, roi: 40, sellThroughPct: 10,
+    });
+    expect(resolveHeroVerdict(null, computeLocal)).toBe("SOLID");
+  });
+
+  test("server headline present as PASS overrides a local SOLID", () => {
+    const computeLocal = () => classifyHeroVerdictLocal({
+      tier: "exact_item", buyPrice: 10, netProfit: 40, roi: 40, sellThroughPct: 10,
+    });
+    expect(resolveHeroVerdict("PASS", computeLocal)).toBe("PASS");
+  });
+
+  test("computeLocal is never invoked when a server headline is present", () => {
+    const computeLocal = jest.fn(() => "SOLID" as HeroVerdict);
+    expect(resolveHeroVerdict("CHECK ITEM", computeLocal)).toBe("CHECK ITEM");
+    expect(computeLocal).not.toHaveBeenCalled();
   });
 });
 

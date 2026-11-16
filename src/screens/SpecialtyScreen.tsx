@@ -10,7 +10,7 @@ import ShareButton from "../components/ShareButton";
 import StagedProgress from "../components/StagedProgress";
 import ProfitFlexHero from "../components/ProfitFlexHero";
 import SegmentOutcomesBlock from "../components/SegmentOutcomesBlock";
-import { classifyOutcome, ROI_BUY_MIN } from "../lib/outcomeTier";
+import { classifyOutcome, ROI_BUY_MIN, metaForHeroVerdict, resolveHeroVerdict, type HeroVerdict } from "../lib/outcomeTier";
 
 // Reusable collapsed-by-default section - local to this screen (not shared
 // with ScannerScreen.tsx's identical-looking one) since it's presentational
@@ -409,13 +409,22 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
       const tier: string = result.priceBasisTier || (result.confirmedByMoat ? "item_moat" : segOut ? "segment" : "ai_only");
       const heroSellThroughPct: number | null = result.sellThroughPct ?? null;
       const heroRoiVal = Number(result.roi) || 0;
-      const headline: "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" | null =
+      // SERVER IS SOURCE OF TRUTH (2026-11-16) - same fix as ScannerScreen.tsx's
+      // identical headline block: result.heroVerdict.headline (the server's
+      // real classifyHeroVerdict answer) wins whenever present; this inline
+      // port only runs as a fallback for scans saved before the server
+      // carried that field. Reads through the shared HeroVerdict type (not
+      // a narrower local union) since the server can also send "CHECK ITEM"
+      // - metaForHeroVerdict below is the one table that knows about it.
+      const serverHeadline: HeroVerdict = (result.heroVerdict?.headline ?? null) as HeroVerdict;
+      const headline: HeroVerdict = resolveHeroVerdict(serverHeadline, () =>
         tier === "ai_only" ? null
         : heroProfit <= 0 ? "PASS"
         : heroRoiVal < ROI_BUY_MIN ? "THIN"
         : tier === "segment" ? "WORTH A LOOK"
         : (heroRoiVal >= 50 && heroSellThroughPct != null && heroSellThroughPct >= 50) ? "WORTH A LOOK"
-        : "SOLID";
+        : "SOLID"
+      );
       if (headline != null) {
         const evidenceLine = segOut
           ? [
@@ -424,13 +433,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
               segOut.resolvedCount > 0 ? `${segOut.resolvedCount} resale outcomes` : null,
             ].filter(Boolean).join(" · ") || null
           : null;
-        const META: Record<string, { emoji: string; accent: string; tier: "hot" | "solid" | "thin" | "skip" }> = {
-          "PASS": { emoji: "🚫", accent: C.red, tier: "skip" },
-          "THIN": { emoji: "🤏", accent: C.yellow, tier: "thin" },
-          "SOLID": { emoji: "✅", accent: C.green, tier: "solid" },
-          "WORTH A LOOK": { emoji: "🔥", accent: C.green, tier: "hot" },
-        };
-        const meta = META[headline];
+        const meta = metaForHeroVerdict(headline)!;
         outcome = {
           tier: meta.tier,
           emoji: meta.emoji,
