@@ -65,6 +65,21 @@ export interface RecordSaleResult {
   scan: SavedSale | null;
 }
 
+// Fired by SaleCaptureCard once a "sold" save succeeds WITH real bought/sold
+// numbers (never on the "skip price" path - there's no sold amount to show
+// a card with). The caller (LogSaleModal) decides from `profit`'s sign
+// whether to hand off to the Share Studio's Win variant or just show a
+// plain "Saved" confirmation - see lib/shareCardPayload.ts's canShareWin.
+export interface SaleLoggedPayload {
+  scanId: string;
+  itemName: string;
+  brand: string | null;
+  photoUri: string | null;
+  boughtPrice: number;
+  soldPrice: number;
+  profit: number;
+}
+
 // Record an outcome via the web PATCH (whitelisted moat fields).
 // For "sold", pass the real price; days_to_sale defaults to createdAt-based
 // but can be overridden (the 2-field sheet pre-fills it, editable) since a

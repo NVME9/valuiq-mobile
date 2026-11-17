@@ -10,8 +10,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Image, ActivityIndicator,
 } from "react-native";
 import { C } from "../lib/theme";
-import { recordSaleOutcome, defaultDaysToSale, buildDisplayTitle, PendingScan } from "../lib/saleCapture";
-import { fetchFlexStat, concreteLine, cacheFlexStat, FlexStat } from "../lib/flexReveal";
+import { recordSaleOutcome, defaultDaysToSale, buildDisplayTitle, PendingScan, SaleLoggedPayload } from "../lib/saleCapture";
 import { CONDITION_OPTIONS } from "../lib/condition";
 
 // Same enum the scraper (valuiq-scraper/scraper.js EXTRACTION_SYSTEM) and
@@ -22,20 +21,20 @@ const PLATFORMS = ["eBay", "Poshmark", "Mercari", "Facebook", "Depop", "Whatnot"
 interface Props {
   token: string;
   scan: PendingScan;
+  // Fires at the very end of save(), ALWAYS - success or failure, with or
+  // without a price. The caller (LogSaleModal) uses this to know the save
+  // attempt is finished; it does NOT by itself mean "close the modal" (a
+  // successful sold save also fires onSold, which the caller may want to
+  // act on first - see that prop's own comment).
   onDone: (scanId: string) => void;
-  // The caller (LogSaleModal) owns presenting the reveal - this card only
-  // ever hands state up, it never renders a Modal of its own.
-  //
-  // onReveal opens the reveal INSTANTLY on a successful save, before the
-  // crowd-comparison stat exists yet (stat starts null - the shell renders
-  // with the real profit/days already known from the save response).
-  // onRevealStat fills in the winning stat once fetchFlexStat resolves, so
-  // the FIRST reveal is never blocked on that network round-trip either.
-  onReveal: (itemName: string, brand: string | null, loadingSubStat: string, netProfit: number | null) => void;
-  onRevealStat: (stat: FlexStat) => void;
+  // Fires ONLY when a "sold" save succeeds WITH a real bought/sold price
+  // pair (never on the "skip price" path - there's no sold amount to
+  // report). The caller owns presenting whatever comes next - this card
+  // only ever hands state up, it never renders a Modal of its own.
+  onSold?: (payload: SaleLoggedPayload) => void;
 }
 
-export default function SaleCaptureCard({ token, scan, onDone, onReveal, onRevealStat }: Props) {
+export default function SaleCaptureCard({ token, scan, onDone, onSold }: Props) {
   const [price, setPrice] = useState("");
   const [days, setDays] = useState(() => String(defaultDaysToSale(scan.created_at)));
   const [saving, setSaving] = useState(false);
@@ -65,20 +64,23 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal, onRevea
     setSaving(false);
 
     if (result.success && result.scan?.id) {
-      const scanId = result.scan.id;
-      // Open the reveal shell INSTANTLY - the real profit/days are already
-      // known from the save response, so there's no reason to block on the
-      // crowd-comparison round-trip before showing anything.
-      onReveal(_name, _brand || null, concreteLine({
-        netProfit: result.scan.net_profit ?? null,
-        daysToSale: result.scan.days_to_sale ?? null,
-      }), result.scan.net_profit ?? null);
-      fetchFlexStat(token, scanId).then((stat) => {
-        if (stat) {
-          onRevealStat(stat);
-          cacheFlexStat(token, scanId, result.scan?.specialty_data, stat);
-        }
-      });
+      // Win hand-off: only when the save actually resolved a real
+      // bought/sold pair (buy_price was already on the row; actual_sold_price
+      // just got written by this save) AND a finite profit - the "skip
+      // price" path has no sold amount to report, so it falls straight
+      // through to onDone below.
+      const boughtPrice = Number(result.scan.buy_price) || 0;
+      const soldPrice = Number(result.scan.actual_sold_price) || (isNaN(p) ? 0 : p);
+      const profit = Number(result.scan.net_profit);
+      if (onSold && boughtPrice > 0 && soldPrice > 0 && Number.isFinite(profit)) {
+        onSold({
+          scanId: result.scan.id,
+          itemName: _name,
+          brand: _brand || null,
+          photoUri: scan.image_url || null,
+          boughtPrice, soldPrice, profit,
+        });
+      }
     }
     onDone(scan.id);
   }

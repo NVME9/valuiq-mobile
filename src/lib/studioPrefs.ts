@@ -1,16 +1,12 @@
-// studioPrefs.ts — on-device personalization for the Share Studio
-// (handle/look/format/hide-price), same AsyncStorage-only, never-sent-to-
-// the-server posture revealPrefs.ts used for the screen this replaced. A
-// new storage key - not a drop-in migration of the old reveal prefs, since
-// the shape changed (look gained "clean", format and hidePrice are new).
+// studioPrefs.ts — on-device personalization for the Share Studio: just the
+// handle. Remembered in AsyncStorage, OFF by default until the user
+// explicitly turns it on (per the card spec) - look/format/crop prefs are
+// gone along with the on-device card drawing they used to configure.
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { StudioFormat, StudioLook } from "./shareStudio";
 
 export interface StudioPrefs {
-  handle: string; // "" is a valid, deliberate "no handle shown" choice
-  look: StudioLook;
-  format: StudioFormat;
-  hidePrice: boolean;
+  handleEnabled: boolean; // must be explicitly turned on - a saved handle string alone never shows it
+  handle: string;
 }
 
 const STORAGE_KEY = "@valuiq_share_studio_prefs";
@@ -21,31 +17,21 @@ function defaultHandle(displayName?: string | null): string {
   return slug ? `@${slug}` : "";
 }
 
-function isLook(v: unknown): v is StudioLook {
-  return v === "dark" || v === "light" || v === "bold" || v === "clean";
-}
-
-function isFormat(v: unknown): v is StudioFormat {
-  return v === "story" || v === "feed" || v === "square";
-}
-
-// `fallbackDisplayName` only seeds the handle the FIRST time this device
-// opens the Studio (no saved prefs yet) - once anything is saved (even an
-// intentionally blank handle), that saved value always wins.
+// `fallbackDisplayName` only seeds the handle TEXT the first time this
+// device opens the Studio (no saved prefs yet) - it never turns the toggle
+// on by itself. Once anything is saved, that saved value always wins.
 export async function loadStudioPrefs(fallbackDisplayName?: string | null): Promise<StudioPrefs> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       return {
+        handleEnabled: typeof parsed?.handleEnabled === "boolean" ? parsed.handleEnabled : false,
         handle: typeof parsed?.handle === "string" ? parsed.handle : defaultHandle(fallbackDisplayName),
-        look: isLook(parsed?.look) ? parsed.look : "dark",
-        format: isFormat(parsed?.format) ? parsed.format : "story",
-        hidePrice: typeof parsed?.hidePrice === "boolean" ? parsed.hidePrice : false,
       };
     }
   } catch {}
-  return { handle: defaultHandle(fallbackDisplayName), look: "dark", format: "story", hidePrice: false };
+  return { handleEnabled: false, handle: defaultHandle(fallbackDisplayName) };
 }
 
 export async function saveStudioPrefs(prefs: StudioPrefs): Promise<void> {

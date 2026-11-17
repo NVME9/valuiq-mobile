@@ -1,21 +1,20 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  StatusBar, ActivityIndicator, RefreshControl, Alert, Image, TextInput, Linking, Share } from "react-native";
+  StatusBar, ActivityIndicator, RefreshControl, Alert, Image, TextInput, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
-import ViewShot from "react-native-view-shot";
-import * as Sharing from "expo-sharing";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import LogSaleModal from "../components/LogSaleModal";
 import PhotoLightbox from "../components/PhotoLightbox";
 import FlipActionsRow from "../components/FlipActionsRow";
 import FlexRevealCard from "../components/FlexRevealCard";
-import ShareCard from "../components/ShareCard";
+import ShareStudio from "../components/ShareStudio";
 import WinsDemoCard from "../components/WinsDemoCard";
-import { toPendingScan } from "../lib/saleCapture";
+import { toPendingScan, SaleLoggedPayload } from "../lib/saleCapture";
 import { fetchFlexStat, cacheFlexStat, readCachedFlexStat, concreteLine, FlexStat } from "../lib/flexReveal";
+import { toneForDecision } from "../lib/shareCardPayload";
 import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty, getWinsSummary, peekProfileData, getScanHistory, peekScanHistory, invalidateScanHistoryCache, getThriftRuns, peekThriftRuns, invalidateThriftRunsCache, emailFromToken } from "../lib/api";
 import { classifyOutcome, OutcomeTierInfo } from "../lib/outcomeTier";
 import ApiDebugPanel from "../components/ApiDebugPanel";
@@ -27,13 +26,13 @@ import ApiDebugPanel from "../components/ApiDebugPanel";
 // same account allowlist, not __DEV__ (ships to real users over OTA).
 const OWNER_EMAILS = ["natev9@comcast.net", "nvisionsinc@gmail.com", "nathanrussell9@outlook.com"];
 
-// Maps either row shape History renders to ShareCard's expected props -
+// Maps either row shape History renders to the Share Studio's expected props -
 // the DB-row shape (scans/specialty, snake_case: item_name, net_profit,
 // sell_price, best_platform, image_url) and the thrift-item shape (an
 // in-memory per-item blob inside a run's JSON, already camelCase: itemName,
 // profit, sellPrice, bestPlatform, thumb instead of image_url). Both are
 // tried via fallback chains so one function covers every FlipActionsRow
-// caller in this file - see shareHistoryRow below.
+// caller in this file - see openShareStudio below.
 function toShareResult(row: any) {
   return {
     itemName: row.itemName || row.item_name || "Item",
@@ -217,19 +216,25 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   const [viewingPhoto, setViewingPhoto] = useState<string|null>(null);
   const [viewingReveal, setViewingReveal] = useState<{ stat: FlexStat | null; itemName: string; brand: string|null; loadingSubStat?: string; netProfit: number | null } | null>(null);
 
-  // Per-item Share (not-sold rows - sold rows share via viewingReveal's
-  // FlexRevealCard instead). One hidden off-screen ShareCard, populated
-  // on demand from whichever row's Share pill was tapped, rather than
-  // rendering one per visible row - same single-target pattern as
-  // viewingReveal/logSaleScan above, avoids mounting N off-screen Image
-  // loads for a 50-row list. See shareHistoryRow below.
-  const [shareTarget, setShareTarget] = useState<any|null>(null);
-  const [sharingRow, setSharingRow] = useState(false);
-  const shareCardRef = useRef<ViewShot>(null);
-  // Bridges ShareCard's onPhotoLoad callback (fired deep inside its Image)
-  // back into the awaited capture flow below - set right before capture
-  // starts, called (and cleared) the moment the photo is ready or errors.
-  const photoReadyRef = useRef<(() => void) | null>(null);
+  // Per-item Share (not-sold rows - sold rows re-view their win via
+  // viewingReveal's FlexRevealCard instead). The one Share Studio instance
+  // for this screen, populated on demand from whichever row's Share pill
+  // was tapped, rather than mounting one per visible row - same
+  // single-target pattern as viewingReveal/logSaleScan above.
+  const [studioTarget, setStudioTarget] = useState<any|null>(null);
+  const [studioOpen, setStudioOpen] = useState(false);
+  // WIN HAND-OFF (replaces the old in-modal FlexRevealBody reveal): the
+  // just-logged sale's real numbers, held here only long enough to open the
+  // Share Studio's Win variant AFTER LogSaleModal has fully closed.
+  const [loggedWin, setLoggedWin] = useState<SaleLoggedPayload|null>(null);
+  const studioWinDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (studioWinDismissTimer.current) clearTimeout(studioWinDismissTimer.current); }, []);
+
+  function openShareStudio(item: any) {
+    setLoggedWin(null);
+    setStudioTarget(item);
+    setStudioOpen(true);
+  }
 
   // Lets a win be revisited from History instead of only ever seeing the
   // Flex Reveal once, at log time - and does it WITHOUT the 1-2s dead-button
@@ -438,47 +443,6 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
         }
       }
     ]);
-  }
-
-  // Re-share ANY already-scanned, not-yet-sold row (Scans/Thrift/Specialty
-  // tabs alike - see toShareResult's dual field-name handling above) as the
-  // SAME branded ShareCard image the fresh scan-result screen produces,
-  // instead of the old shareMsg() plain-text caption. Mirrors
-  // ScannerScreen.tsx's shareResultImage() / FlexRevealCard.tsx's
-  // shareFlexImage() exactly: populate an off-screen ViewShot-wrapped copy
-  // of the card, capture it to PNG, hand it to the native share sheet.
-  async function shareHistoryRow(row: any) {
-    if (sharingRow) return;
-    setSharingRow(true);
-    setShareTarget(row);
-    const fallbackCaption = `Checking out this ${row.itemName || row.item_name || "item"} on ValuIQ.`;
-    try {
-      const available = await Sharing.isAvailableAsync();
-      if (!available || !shareCardRef.current?.capture) {
-        await Share.share({ message: fallbackCaption });
-        return;
-      }
-      // Wait for the off-screen photo (if this row has one) to finish
-      // loading before capturing, so the shared image never snapshots a
-      // blank photo slot - race-proofed with a timeout so a slow/broken
-      // image_url can never hang the share button forever (same "never
-      // hang first paint" philosophy as api.ts's withTimeout/App.tsx's).
-      if (shareRowPhotoUri(row)) {
-        await Promise.race([
-          new Promise<void>(resolve => { photoReadyRef.current = resolve; }),
-          new Promise<void>(resolve => setTimeout(resolve, 4000)),
-        ]);
-      }
-      const uri = await shareCardRef.current.capture();
-      await Sharing.shareAsync(uri, { mimeType: "image/png", dialogTitle: "Share your ValuIQ find" });
-    } catch {
-      // Capture/share failed - never leave the tap dead, fall back to text.
-      try { await Share.share({ message: fallbackCaption }); } catch {}
-    } finally {
-      photoReadyRef.current = null;
-      setSharingRow(false);
-      setShareTarget(null);
-    }
   }
 
   function toggleSelect(id: string) {
@@ -853,8 +817,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                           onViewReveal={() => openReveal(scan)}
                           onEdit={() => onNavigate("scan-confirm", { scan })}
                           onViewResult={() => onNavigate("scanner", { viewScan: scan })}
-                          onShare={() => shareHistoryRow(scan)}
-                          sharing={sharingRow && shareTarget?.id === scan.id}
+                          onShare={() => openShareStudio(scan)}
                           onDelete={() => deleteItem(scan.id, "scan", scan.item_name||"Item")}
                         />
                       </View>
@@ -1059,8 +1022,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                                 onView={() => setViewingPhoto(item.thumb)}
                                 onSold={() => setLogSaleScan({ ...item, created_at: item.created_at || run.created_at })}
                                 onEdit={() => openThriftEditor(run, item)}
-                                onShare={() => shareHistoryRow(item)}
-                                sharing={sharingRow && shareTarget?.id === item.id}
+                                onShare={() => openShareStudio(item)}
                               />
                             </View>
                             )
@@ -1151,8 +1113,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                             onSold={() => setLogSaleScan(item)}
                             onViewReveal={() => openReveal(item)}
                             onEdit={() => { openEditor(item); setExpanded(item.id); }}
-                            onShare={() => shareHistoryRow(item)}
-                            sharing={sharingRow && shareTarget?.id === item.id}
+                            onShare={() => openShareStudio(item)}
                             onDelete={() => deleteItem(item.id, "scan", item.item_name||"Appraisal")}
                           />
                         </View>
@@ -1261,7 +1222,14 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
         token={token}
         scan={logSaleScan ? toPendingScan(logSaleScan) : null}
         onClose={() => { setLogSaleScan(null); invalidateScanHistoryCache(token); loadData(); }}
-        onLeaderboard={() => { setLogSaleScan(null); onNavigate("community", { tab: "leaderboard" }); }}
+        onSold={(payload) => {
+          if (studioWinDismissTimer.current) clearTimeout(studioWinDismissTimer.current);
+          studioWinDismissTimer.current = setTimeout(() => {
+            setStudioTarget(null);
+            setLoggedWin(payload);
+            setStudioOpen(true);
+          }, 350);
+        }}
       />
 
       <FlexRevealCard
@@ -1277,21 +1245,27 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
 
       <PhotoLightbox uri={viewingPhoto} onClose={() => setViewingPhoto(null)} />
 
-      {/* Off-screen, single-instance ShareCard for per-row re-share (see
-          shareHistoryRow above) - only mounted while a row is actually
-          being shared, so this never renders (or loads a photo for) more
-          than one row at a time regardless of list length. */}
-      {shareTarget && (
-        <View style={{ position: "absolute", top: 0, left: -9999 }} pointerEvents="none">
-          <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1, result: "tmpfile" }}>
-            <ShareCard
-              result={toShareResult(shareTarget)}
-              photoUri={shareRowPhotoUri(shareTarget)}
-              onPhotoLoad={() => photoReadyRef.current?.()}
-            />
-          </ViewShot>
-        </View>
-      )}
+      {/* ONE Share Studio for every per-row action on this screen - the
+          not-sold row "Share" action (openShareStudio, scan variant) and
+          the win hand-off from LogSaleModal above (loggedWin, Win variant)
+          alike. Mounted only while one of those is actually set. */}
+      {(studioTarget || loggedWin) ? (
+        <ShareStudio
+          visible={studioOpen}
+          onClose={() => setStudioOpen(false)}
+          token={token}
+          scanId={loggedWin ? loggedWin.scanId : (studioTarget.id != null ? String(studioTarget.id) : null)}
+          itemName={loggedWin ? loggedWin.itemName : toShareResult(studioTarget).itemName}
+          photoBase64={null}
+          photoUri={loggedWin ? loggedWin.photoUri : (shareRowPhotoUri(studioTarget) || null)}
+          paidPrice={loggedWin ? null : (Number(studioTarget.buy_price ?? studioTarget.buyPrice) || null)}
+          sellPrice={loggedWin ? null : (toShareResult(studioTarget).sellPrice ?? null)}
+          profitConfidence="estimate"
+          toneOverride={loggedWin ? undefined : toneForDecision(toShareResult(studioTarget).decision)}
+          isOwner={isOwner}
+          winData={loggedWin ? { boughtPrice: loggedWin.boughtPrice, soldPrice: loggedWin.soldPrice, profit: loggedWin.profit } : null}
+        />
+      ) : null}
       <ApiDebugPanel isOwner={isOwner} winsStats={effWinsSummary} />
     </SafeAreaView>
   );

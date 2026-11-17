@@ -6,16 +6,13 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
-import ViewShot from "react-native-view-shot";
-import * as Sharing from "expo-sharing";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { markScanStage, clearScanStage } from "../lib/scanStage";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
-import ShareCard from "../components/ShareCard";
-import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, rerunScan, invalidateScanHistoryCache, logEvent, logClientError, reportClientError, peekProfileData, ScanRequestError } from "../lib/api";
+import { API_BASE, scanImage, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, rerunScan, invalidateScanHistoryCache, logEvent, logClientError, reportClientError, peekProfileData, ScanRequestError } from "../lib/api";
 import { appendFailureLog, readFailureLog } from "../lib/failureLog";
 import { setLastScanResult } from "../lib/lastScanResult";
 import { recordScanTiming, readScanTimingLog, SLOW_SCAN_THRESHOLD_MS, type ScanTimingEntry } from "../lib/scanTimingLog";
@@ -228,14 +225,19 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [photos, setPhotos] = useState<string[]>([]);
   const [winShared, setWinShared] = useState(false);
   const [sharingWin, setSharingWin] = useState(false);
-  const [sharingImage, setSharingImage] = useState(false);
-  const shareCardRef = useRef<ViewShot>(null);
   // The immediate "log it now" path off a fresh scan result - the SOFT
   // NOTIFICATION ASK below this is the deferred (~2 week reminder) path;
-  // both coexist. Reuses the exact same LogSaleModal/SaleCaptureCard/
-  // FlexRevealBody flow History uses, so a sale logged here gets the same
-  // honest, cached reveal - no separate code path to keep in sync.
+  // both coexist. Reuses the exact same LogSaleModal/SaleCaptureCard flow
+  // History uses, so a sale logged here hands off to the same Share Studio
+  // Win variant - no separate code path to keep in sync.
   const [showLogSale, setShowLogSale] = useState(false);
+  // WIN HAND-OFF (replaces the old in-modal FlexRevealBody reveal): the
+  // just-logged sale's real numbers, held here only long enough to open the
+  // Share Studio's Win variant AFTER LogSaleModal has fully closed (see its
+  // onSold prop's own comment + the dismiss-timer below).
+  const [loggedWin, setLoggedWin] = useState<ShareStudioWinData | null>(null);
+  const studioWinDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (studioWinDismissTimer.current) clearTimeout(studioWinDismissTimer.current); }, []);
   const [brandInput, setBrandInput] = useState("");
   const [goDeeper, setGoDeeper] = useState(false);
   const [description, setDescription] = useState("");
@@ -391,7 +393,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // numbers visibly "sharpen" in place instead of silently swapping. See
   // maybeRefineInBackground below and app/api/lens/refine/route.ts.
   const [refineSeq, setRefineSeq] = useState(0);
-  const [oracle, setOracle] = useState<any>(null);
   // Soft notification ask (never fire Apple's cold prompt un-primed)
   const [pendingCheckIn, setPendingCheckIn] = useState<{scanId:string; itemName:string}|null>(null);
   const [checkInAsked, setCheckInAsked] = useState(false);
@@ -403,24 +404,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     if (granted) { try { await scheduleSaleCheckIn(p.scanId, p.itemName); } catch {} }
   }
   function declineCheckIn() { setPendingCheckIn(null); setCheckInAsked(true); }
-
-  async function shareResultImage() {
-    if (!shareCardRef.current?.capture || sharingImage) return;
-    setSharingImage(true);
-    try {
-      const available = await Sharing.isAvailableAsync();
-      if (!available) {
-        Alert.alert("Sharing not available", "Sharing isn't supported on this device.");
-        return;
-      }
-      const uri = await shareCardRef.current.capture();
-      await Sharing.shareAsync(uri, { mimeType: "image/png", dialogTitle: "Share your ValuIQ find" });
-    } catch {
-      Alert.alert("Couldn't share", "Something went wrong creating the share image. Try again.");
-    } finally {
-      setSharingImage(false);
-    }
-  }
 
   // CHECK ITEM CONFIRM (2026-11-15, share-cta-and-check-item): the "Check
   // This Item" card's own re-run - calls rerunScan() directly (the exact
@@ -601,43 +584,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     }, 900);
     return () => clearTimeout(timer);
   }, [step, result, resultCondition, token]);
-  useEffect(() => {
-    let alive = true;
-    setOracle(null);
-    // HISTORY RESULTS REUSE (BUG 2 - "no API call, no credits used"): the
-    // Oracle fetch only ever feeds ShareCard's off-screen share image (see
-    // its own comment a few lines down) - nothing this screen actually
-    // DISPLAYS reads it. Skipped entirely while viewing a saved result, so
-    // opening one from History (or landing here after a re-run, which
-    // already made its own real network call) never makes a second,
-    // unnecessary one.
-    if (viewingSavedScan) return;
-    const r = result;
-    if (r && !r._error && (r.itemName || r.item_name)) {
-      getProfitOracle(token, {
-        category: r.category,
-        brand: r.brand,
-        itemName: r.itemName || r.item_name,
-        buyPrice: Number(buyPrice) || 0,
-        estValue: Number(r.sellPrice) || 0,
-        // Hand the Oracle the numbers this scan already computed. The lens
-        // math is the source of truth: buyTarget is the 3x rule against the
-        // real sale price, and netProfit already accounts for the winning
-        // platform's actual fee rate and the user's cost. Passing them here
-        // is what stops the Oracle and the platform card from disagreeing.
-        bestPlatform: r.bestPlatform,
-        lensBuyTarget: Number(r.buyTarget) || 0,
-        lensNetProfit: Number(r.netProfit) || 0,
-        // "Did lens actually price this item" signal for the Oracle - separate
-        // from lensNetProfit, which alone can't tell a real $0 profit apart
-        // from "lens gave us nothing."
-        lensSellPrice: Number(r.sellPrice) || 0,
-      }).then((d) => { if (alive && d && d.success) setOracle(d); });
-    }
-    return () => { alive = false; };
-    // buyPrice matters: without it the Oracle is computed once at scan time and
-    // never updates when the user enters what they're actually paying.
-  }, [result, buyPrice, viewingSavedScan]);
   // STORE REVIEW - ACTUAL TRIGGER: fires once per scan the moment its hero
   // headline first resolves to SOLID or WORTH A LOOK (never on PASS/THIN/
   // ai_only - reviewHeadlineRef.current.headline is null for all of those,
@@ -1543,17 +1489,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // content to show even with a null median).
     const crowdMedianAvailable = result?.crowdVerdict?.medianSoldPrice != null && Number(result.crowdVerdict.medianSoldPrice) > 0;
 
-    // ONE ORACLE SOURCE (2026-08-24): the scan result card now reads every
+    // ONE ORACLE SOURCE (2026-08-24): the scan result card reads every
     // Oracle-derived number from `result` itself - lens/route.ts already
     // queries the SAME community moat internally (Wave 1) and embeds its
     // output into result.netProfit/buyTarget/roi/velocity/dataQuality/
-    // priceData. The separately-fetched `oracle`/`oraclePred` state below
-    // (getProfitOracle, a DIFFERENT, independently price-banded query) used
-    // to override these numbers whenever it returned crowd-led data,
-    // which is exactly what let the hero disagree with itself (e.g. "sells
-    // in ~540 days" from one query next to "not enough data yet" from the
-    // other). `oracle` is kept only for ShareCard's share-image rendering
-    // below - it must NOT feed anything the on-screen card shows.
+    // priceData. A separately-fetched Oracle query used to also run here
+    // (a DIFFERENT, independently price-banded query) and override these
+    // numbers whenever it returned crowd-led data, which is exactly what
+    // let the hero disagree with itself (e.g. "sells in ~540 days" from one
+    // query next to "not enough data yet" from the other) - removed
+    // entirely (it only ever fed the old ShareCard's off-screen image,
+    // which is gone too).
     // CONDITION-ADJUSTED RESALE (2026-09-10, items 5/9): resaleFromModel/
     // resaleModelLow/resaleModelHigh (lens/route.ts's FIX 5 instrumentation)
     // are the model's PRE-condition-multiplier range - re-multiplying THESE
@@ -2174,7 +2120,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // label lib/profitOracle.ts computed (buildBadge, keyed on
     // agreeingCount). Never re-derived from dataQuality/crowdConfidence
     // tiers here, so this screen can't drift from what the web scanner or
-    // ShareCard say about the identical scan.
+    // the Share Studio say about the identical scan.
     // DECLUTTER (2026-09-16): only prefix with agreementBadge when it's a
     // REAL, non-generic signal - the old unconditional dataPhrase (which
     // fell back to "Based on market estimate") repeated the exact same
@@ -2427,14 +2373,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     // what the Studio card is allowed to show - ShareStudio itself never
     // recomputes anything, so every gate that withholds a number on THIS
     // proof screen (maxBuyLocked, withholdConfidentNumbers) must be applied
-    // here too, before the value ever reaches that component. studioProfit
-    // mirrors heroProfit when a price was entered, or projects the SAME
-    // formula against the max-buy ceiling when it wasn't.
-    const studioCostBasis = enteredBp > 0 ? enteredBp : (maxBuy || 0);
-    const studioProfit = (!maxBuyLocked && !withholdConfidentNumbers && studioCostBasis > 0 && planningPrice > 0)
-      ? Math.round((planningPrice - localFees - studioCostBasis - shippingCost) * 100) / 100
-      : null;
-    const studioVerdictLabel = maxBuyLocked ? null : outcome.label;
+    // here too, before the value ever reaches that component (see the
+    // heroVerdict={maxBuyLocked ? null : finalHeadline} gate below).
     // DISPLAY NAME: read from whatever profile data is ALREADY cached
     // (peekProfileData - zero network calls from this screen) - only ever
     // seeds the Studio handle field's FIRST-EVER default, never required.
@@ -2491,20 +2431,23 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       >
       <SafeAreaView style={s.safe} edges={["top","left","right"]}>
         <StatusBar barStyle="light-content"/>
-        {/* Off-screen branded card, captured (not displayed) when sharing as an image */}
-        <View style={{ position: "absolute", top: 0, left: -9999 }} pointerEvents="none">
-          <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1, result: "tmpfile" }}>
-            <ShareCard result={result} oracle={oracle} photoBase64={displayPhotoBase64} />
-          </ViewShot>
-        </View>
-        {/* Same log-sale flow History uses (form -> honest Flex Reveal, one
-            Modal throughout) - opened by the "Already sold it?" nudge above,
-            right on this result screen instead of a detour through History. */}
+        {/* Same log-sale flow History uses (one Modal throughout) - opened
+            by the "Already sold it?" nudge above, right on this result
+            screen instead of a detour through History. A profitable save
+            hands off to the Share Studio's Win variant below, AFTER this
+            sheet has fully closed (see LogSaleModal.tsx's onSold comment). */}
         <LogSaleModal
           visible={showLogSale}
           token={token}
           scan={result.id ? toPendingScan(result) : null}
           onClose={() => setShowLogSale(false)}
+          onSold={(payload) => {
+            if (studioWinDismissTimer.current) clearTimeout(studioWinDismissTimer.current);
+            studioWinDismissTimer.current = setTimeout(() => {
+              setLoggedWin({ boughtPrice: payload.boughtPrice, soldPrice: payload.soldPrice, profit: payload.profit });
+              setStudioOpen(true);
+            }, 350);
+          }}
         />
         <ShareStudio
           visible={studioOpen}
@@ -2515,14 +2458,11 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           photoBase64={displayPhotoBase64 || null}
           paidPrice={enteredBp > 0 ? enteredBp : null}
           sellPrice={sellPriceForProfit > 0 ? sellPriceForProfit : null}
-          profit={studioProfit}
-          roi={!maxBuyLocked && !withholdConfidentNumbers ? heroRoi : null}
           profitConfidence={profitConfidence}
-          verdictEmoji={maxBuyLocked ? null : outcome.emoji}
-          verdictLabel={studioVerdictLabel}
+          heroVerdict={maxBuyLocked ? null : finalHeadline}
           displayName={studioDisplayName}
           isOwner={isOwner}
-          winData={studioWinData}
+          winData={loggedWin || studioWinData}
         />
         {/* Nav */}
         <View style={s.nav}>
@@ -3208,11 +3148,10 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
 
               {/* SHARE CTA (2026-11-15, share-cta-and-check-item): the
                   buried "Share as image" button that used to live here is
-                  gone - shareResultImage/ShareCard/the off-screen ViewShot
-                  capture above are all still intact (untouched - out of
-                  scope for this change), just no longer reachable from a
-                  button in the scroll. The one share entry point now is the
-                  sticky "Share this find" bar below the ScrollView, which
+                  gone, and so is the on-device ShareCard/shareResultImage
+                  it used (server-rendered Share Studio replaced both - see
+                  AGENTS.md). The one share entry point now is the sticky
+                  "Share this find" bar below the ScrollView, which
                   opens the Share Studio instead (setStudioOpen) - see that
                   bar's own comment for why one button beats two competing
                   share actions buried in the scroll. */}
