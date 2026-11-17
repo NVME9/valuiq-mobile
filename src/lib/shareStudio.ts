@@ -1,18 +1,29 @@
 // shareStudio.ts — pure logic for the Share Studio (the single post-export
 // screen that replaced RevealScreen/RevealPhotoEditor). No React, no native
 // module, no network - every function here is a straight input->output
-// transform so crop clamping, format sizing, and card text can be unit
-// tested independent of the component tree.
+// transform so crop clamping, zone geometry, verdict-stamp mapping, and
+// price-block text can be unit tested independent of the component tree.
 import { formatMoney } from "./money";
 
 export type StudioFormat = "story" | "feed" | "square";
-export type StudioLook = "dark" | "light" | "bold" | "clean";
+export type StudioLook = "dark" | "light" | "bold";
 export type StudioConfidence = "estimate" | "sold-backed";
+
+// Structurally identical to lib/outcomeTier.ts's own HeroVerdict - kept as
+// a LOCAL copy (not an import) so this presentation-only module never
+// depends on verdict/pricing logic (see AGENTS.md task scope: "Do not touch
+// scan, verdict, pricing, or history logic"). TypeScript's structural
+// typing means a real HeroVerdict value passes straight through at call
+// sites with no cast needed.
+export type StudioHeroVerdict = "PASS" | "THIN" | "WORTH A LOOK" | "SOLID" | "CHECK ITEM" | null;
 
 export interface Size { w: number; h: number }
 export interface Point { x: number; y: number }
 
-// Export pixel sizes (item 7): always 1080 wide, height set by format.
+// Export pixel sizes: always 1080 wide, height set by format. The on-screen
+// card is this SAME canvas, just multiplied down by a `scale` factor (see
+// cardGeometry below) - preview and export can never structurally diverge
+// because they both read every pixel value off one function.
 export const FORMAT_SIZES: Record<StudioFormat, Size> = {
   story: { w: 1080, h: 1920 },
   feed: { w: 1080, h: 1350 },
@@ -29,7 +40,6 @@ export const LOOK_LABELS: Record<StudioLook, string> = {
   dark: "Dark",
   light: "Light",
   bold: "Bold",
-  clean: "Clean",
 };
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -39,9 +49,7 @@ function clamp(n: number, lo: number, hi: number): number {
 // On-screen preview frame for a format, as big as fits inside the available
 // viewport in both dimensions - same "fit, don't overflow" rule
 // RevealPhotoEditor's fixedFrameSize used, generalized to all three ratios.
-export function frameSizeForFormat(format: StudioFormat, maxW: number, maxH: number): Size {
-  const { w: fw, h: fh } = FORMAT_SIZES[format];
-  const ratio = fw / fh; // width/height
+export function frameSizeForRatio(ratio: number, maxW: number, maxH: number): Size {
   let w = maxW;
   let h = w / ratio;
   if (h > maxH) {
@@ -49,6 +57,11 @@ export function frameSizeForFormat(format: StudioFormat, maxW: number, maxH: num
     w = h * ratio;
   }
   return { w, h };
+}
+
+export function frameSizeForFormat(format: StudioFormat, maxW: number, maxH: number): Size {
+  const { w: fw, h: fh } = FORMAT_SIZES[format];
+  return frameSizeForRatio(fw / fh, maxW, maxH);
 }
 
 // "cover" scale: the minimum zoom at which the image fully fills the frame
@@ -62,6 +75,16 @@ export function clampZoomScale(scale: number, min = 1, max = 4): number {
   return clamp(scale, min, max);
 }
 
+export const ZOOM_STEP = 0.1;
+
+// The +/- zoom buttons (item B: "always-working controls") step by a fixed
+// 10% of the base cover scale, then re-clamp into the normal [1,4] range -
+// a button press can NEVER do nothing, unlike a pinch gesture a device
+// might fail to recognize.
+export function stepZoomScale(scale: number, direction: 1 | -1, step: number = ZOOM_STEP): number {
+  return clampZoomScale(scale + direction * step);
+}
+
 // Clamps a pan translate so the frame is always fully covered by the image
 // at the given user zoom - the frame can never show empty space outside the
 // photo. `scale` is the user's own pinch-zoom multiplier (1 = just covering).
@@ -73,72 +96,193 @@ export function clampPanTranslate(t: Point, scale: number, img: Size, frame: Siz
   return { x: clamp(t.x, -maxX, maxX), y: clamp(t.y, -maxY, maxY) };
 }
 
-export interface CardTextInput {
-  itemName: string;
-  verdictEmoji?: string | null;
-  verdictLabel?: string | null;
+export interface ImagePlacement { w: number; h: number; left: number; top: number }
+
+// The exact on-screen placement of the cropped photo inside a frame of
+// `nativeFrame` (in native, scale=1 units) displayed at `displayScale` -
+// used by BOTH the "Adjust photo" editor's own on-screen preview and the
+// card's photo zone (at displayScale=previewScale or 1). Same formula in
+// both places, so what the user crops to is pixel-identical to what ends
+// up on the exported card, not just visually similar.
+export function imagePlacement(img: Size, nativeFrame: Size, crop: { scale: number; translate: Point }, displayScale: number): ImagePlacement {
+  const abs = coverScale(img, nativeFrame) * crop.scale;
+  const w = img.w * abs * displayScale;
+  const h = img.h * abs * displayScale;
+  const containerW = nativeFrame.w * displayScale;
+  const containerH = nativeFrame.h * displayScale;
+  return {
+    w, h,
+    left: containerW / 2 - w / 2 + crop.translate.x * displayScale,
+    top: containerH / 2 - h / 2 + crop.translate.y * displayScale,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// CARD ZONE GEOMETRY (item A: "Card layout must not depend on the device")
+//
+// Five zones, stacked top to bottom with zero gap and zero overlap BY
+// CONSTRUCTION: each zone's y is the previous zone's y+h, and the final
+// zone (footer) simply takes whatever height is left. There is no way for
+// two zones to occupy the same pixel row - the overlap test below is
+// therefore a genuine structural guarantee, not a visual judgment call.
+// ---------------------------------------------------------------------------
+export type ZoneName = "photo" | "stamp" | "price" | "name" | "footer";
+export type Zones = Record<ZoneName, { y: number; h: number }>;
+
+// Fixed-height zones (same at every format - a tilted stamp and the footer
+// mark don't need to grow with a taller canvas).
+const STAMP_H = 90;
+const FOOTER_H = 90;
+
+// The three flexible zones split whatever height remains, as a fraction of
+// that remainder. Fractions sum to 1 per format so rounding slack lands on
+// the footer only (never on photo/stamp/price/name, i.e. never where it
+// could cause an overlap). Square gives the price/name zones relatively
+// more room than story does, since there's less total height to share.
+const ZONE_FRACTIONS: Record<StudioFormat, { photo: number; price: number; name: number }> = {
+  story: { photo: 0.60, price: 0.24, name: 0.16 },
+  feed: { photo: 0.54, price: 0.28, name: 0.18 },
+  square: { photo: 0.46, price: 0.32, name: 0.22 },
+};
+
+export function zonesForFormat(format: StudioFormat): Zones {
+  const { h: H } = FORMAT_SIZES[format];
+  const frac = ZONE_FRACTIONS[format];
+  const flexH = H - STAMP_H - FOOTER_H;
+  const photoH = Math.round(flexH * frac.photo);
+  const priceH = Math.round(flexH * frac.price);
+  const nameH = Math.round(flexH * frac.name);
+
+  let y = 0;
+  const photo = { y, h: photoH }; y += photoH;
+  const stamp = { y, h: STAMP_H }; y += STAMP_H;
+  const price = { y, h: priceH }; y += priceH;
+  const name = { y, h: nameH }; y += nameH;
+  const footer = { y, h: H - y }; // absorbs all rounding slack, always >= 0
+
+  return { photo, stamp, price, name, footer };
+}
+
+// The native (scale=1, 1080-wide-canvas) size of just the photo zone, in
+// its own right aspect ratio - this is the shape the "Adjust photo" crop
+// frame uses, so what the user crops to is EXACTLY what the card's photo
+// zone will show, never a different (e.g. full 9:16 story) aspect that
+// would make the on-screen crop a lie about what gets exported.
+export function photoZoneSize(format: StudioFormat): Size {
+  const zones = zonesForFormat(format);
+  return { w: FORMAT_SIZES[format].w, h: zones.photo.h };
+}
+
+// Scales every zone's y/h by a pixel-per-pixel factor - the SAME geometry
+// function the export canvas uses, just multiplied down for an on-screen
+// preview. This (not a CSS transform) is how "preview == export" is
+// guaranteed: there is only one source of truth for where anything sits.
+export function scaleZones(zones: Zones, scale: number): Zones {
+  const out = {} as Zones;
+  (Object.keys(zones) as ZoneName[]).forEach((k) => {
+    out[k] = { y: zones[k].y * scale, h: zones[k].h * scale };
+  });
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// VERDICT STAMP (item: "server heroVerdict mapped to friendly words")
+// ---------------------------------------------------------------------------
+const STAMP_WORDS: Partial<Record<Exclude<StudioHeroVerdict, null>, string>> = {
+  SOLID: "GOOD FLIP",
+  "WORTH A LOOK": "GOOD FLIP", // decisionFromVerdict buckets this with SOLID as "BUY"
+  THIN: "THIN MARGIN",
+  PASS: "PASS",
+  // "CHECK ITEM" is deliberately absent - falls through to null below.
+};
+
+// CHECK ITEM, null, or any future/unknown verdict value all resolve to "no
+// stamp" - never "UNCONFIRMED" or any other hedge-word headline. This is
+// the ONE place that mapping happens, so a future HeroVerdict addition
+// degrades to "no stamp" instead of silently printing something untested.
+export function stampForHeroVerdict(verdict: StudioHeroVerdict): string | null {
+  if (verdict == null) return null;
+  return STAMP_WORDS[verdict] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// PRICE BLOCK (item: paid line + big lime price + estimate caption +
+// profit line, each independently gated)
+// ---------------------------------------------------------------------------
+export interface PriceBlockInput {
   paidPrice: number | null;
   sellPrice: number | null;
   profit: number | null;
-  roi: number | null; // percent, already rounded or not - rounded here
+  roi: number | null;
   confidence: StudioConfidence;
   hidePrice: boolean;
 }
 
-export interface CardText {
-  itemName: string;
-  verdictText: string | null;
-  priceLine: string | null;
-  statsLine: string | null;
+export interface PriceBlock {
+  paidLine: string | null; // "Paid $X" - hidden whenever hidePrice is on
+  bigLine: string | null; // "Worth ~$Y" (estimate) or "Sells for $Y" (sold-backed)
+  caption: string | null; // "estimate" - ONLY on confidence "estimate", never jargon
+  profitLine: string | null; // "+$Z profit · N% ROI" - ONLY on confidence "sold-backed"
 }
 
-// Builds the three text lines every look renders (item 4): verdict+emoji,
-// "paid $X -> est. sell $Y" (or "sell $Y" when sold-backed), and a
-// profit/ROI line that ONLY appears for sold-backed confidence - an estimate
-// never gets a precise-looking ROI percentage next to it (same honesty rule
-// lib/profitBanner.ts already applies to the result screen's own banner).
-export function buildCardText(input: CardTextInput): CardText {
-  const verdictText = input.verdictLabel
-    ? [input.verdictEmoji, input.verdictLabel].filter(Boolean).join(" ")
+export function buildPriceBlock(input: PriceBlockInput): PriceBlock {
+  const { paidPrice, sellPrice, profit, roi, confidence, hidePrice } = input;
+
+  const paidLine = !hidePrice && paidPrice != null ? `Paid ${formatMoney(paidPrice)}` : null;
+
+  const bigLine = sellPrice != null
+    ? (confidence === "sold-backed" ? `Sells for ${formatMoney(sellPrice)}` : `Worth ~${formatMoney(sellPrice)}`)
     : null;
 
-  const sellTxt = input.sellPrice != null ? formatMoney(input.sellPrice) : null;
-  const paidTxt = !input.hidePrice && input.paidPrice != null ? formatMoney(input.paidPrice) : null;
+  const caption = confidence === "estimate" && bigLine != null ? "estimate" : null;
 
-  let priceLine: string | null = null;
-  if (sellTxt) {
-    const sellPhrase = input.confidence === "estimate" ? `est. sell ${sellTxt}` : `sell ${sellTxt}`;
-    priceLine = paidTxt
-      ? `paid ${paidTxt} → ${sellPhrase}`
-      : sellPhrase[0].toUpperCase() + sellPhrase.slice(1);
+  let profitLine: string | null = null;
+  if (confidence === "sold-backed" && profit != null) {
+    const sign = profit < 0 ? "-" : "+";
+    const roiTxt = roi != null ? ` · ${Math.round(roi)}% ROI` : "";
+    profitLine = `${sign}${formatMoney(Math.abs(profit))} profit${roiTxt}`;
   }
 
-  let statsLine: string | null = null;
-  if (input.confidence === "sold-backed" && input.profit != null) {
-    const sign = input.profit < 0 ? "-" : "+";
-    const roiTxt = input.roi != null ? ` · ${Math.round(input.roi)}% ROI` : "";
-    statsLine = `${sign}${formatMoney(Math.abs(input.profit))} profit${roiTxt}`;
-  }
-
-  return { itemName: input.itemName, verdictText, priceLine, statsLine };
+  return { paidLine, bigLine, caption, profitLine };
 }
 
-export interface WinCardTextInput {
+// ---------------------------------------------------------------------------
+// WIN VARIANT (a logged sale's real bought/sold/profit numbers - no
+// confidence gating needed, every input here came from an actual logged
+// sale, never a projection)
+// ---------------------------------------------------------------------------
+export interface WinCardInput {
   boughtPrice: number;
   soldPrice: number;
   profit: number;
 }
 
-// The Win variant (item 6) only ever shows real logged numbers - no
-// confidence gating needed since every input here came from an actual
-// logged sale, never a projection.
-export function buildWinCardText(input: WinCardTextInput): { headline: string } {
+export interface WinCardText {
+  subLine: string; // "Bought $X -> Sold $Y"
+  bigLine: string; // "+$Z profit" (honest sign - a logged loss still reads as a loss)
+}
+
+export function buildWinCardText(input: WinCardInput): WinCardText {
+  const sign = input.profit < 0 ? "-" : "+";
   return {
-    headline: `Bought ${formatMoney(input.boughtPrice)}, sold ${formatMoney(input.soldPrice)}, profit ${formatMoney(input.profit)}`,
+    subLine: `Bought ${formatMoney(input.boughtPrice)} → Sold ${formatMoney(input.soldPrice)}`,
+    bigLine: `${sign}${formatMoney(Math.abs(input.profit))} profit`,
   };
 }
 
-// File-size readout for the owner debug line (item 9).
+// ---------------------------------------------------------------------------
+// ITEM NAME (item: name-fit rules) - the name is NEVER pre-truncated here.
+// Overflow is handled entirely by the Text component's own
+// adjustsFontSizeToFit/minimumFontScale (shrink-to-fit), never by slicing
+// characters and appending "..." - that's what produced "American Flag and
+// I..." on-device. This function exists so the "never truncate" rule is
+// itself a testable, named contract instead of an implicit assumption.
+// ---------------------------------------------------------------------------
+export function fitItemName(name: string): string {
+  return name;
+}
+
+// File-size readout for the owner debug line.
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;

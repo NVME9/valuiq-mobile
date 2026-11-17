@@ -22,7 +22,7 @@ function defaultHandle(displayName?: string | null): string {
 }
 
 function isLook(v: unknown): v is StudioLook {
-  return v === "dark" || v === "light" || v === "bold" || v === "clean";
+  return v === "dark" || v === "light" || v === "bold";
 }
 
 function isFormat(v: unknown): v is StudioFormat {

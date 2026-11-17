@@ -2434,7 +2434,18 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const studioProfit = (!maxBuyLocked && !withholdConfidentNumbers && studioCostBasis > 0 && planningPrice > 0)
       ? Math.round((planningPrice - localFees - studioCostBasis - shippingCost) * 100) / 100
       : null;
-    const studioVerdictLabel = maxBuyLocked ? null : outcome.label;
+    // SHARE STUDIO STAMP (2026-11-17): the Studio's verdict stamp is driven
+    // by the real HeroVerdict enum (SOLID/THIN/WORTH A LOOK/PASS/CHECK
+    // ITEM), not outcome.label's looser tier text ("HOT BUY"/"BUY"/etc,
+    // which only matches HeroVerdict's wording when the override block
+    // above ran) - lib/shareStudio.ts's stampForHeroVerdict is the ONE
+    // place that maps those 5 values to stamp words, so it needs the real
+    // enum value here. Same server-first precedence resolveHeroVerdict
+    // already encodes (server's result.heroVerdict.headline wins when
+    // present; finalHeadline is the local fallback for old stored scans),
+    // and the same maxBuyLocked gate outcome.label used to be shown behind,
+    // so a locked verdict never shows a stamp.
+    const studioHeroVerdict: HeroVerdict = maxBuyLocked ? null : resolveHeroVerdict(result.heroVerdict?.headline ?? null, () => finalHeadline);
     // DISPLAY NAME: read from whatever profile data is ALREADY cached
     // (peekProfileData - zero network calls from this screen) - only ever
     // seeds the Studio handle field's FIRST-EVER default, never required.
@@ -2518,8 +2529,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           profit={studioProfit}
           roi={!maxBuyLocked && !withholdConfidentNumbers ? heroRoi : null}
           profitConfidence={profitConfidence}
-          verdictEmoji={maxBuyLocked ? null : outcome.emoji}
-          verdictLabel={studioVerdictLabel}
+          heroVerdict={studioHeroVerdict}
           displayName={studioDisplayName}
           isOwner={isOwner}
           winData={studioWinData}
