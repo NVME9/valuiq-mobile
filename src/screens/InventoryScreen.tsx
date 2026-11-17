@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, RefreshControl, Modal, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import ScannerMark from "../components/ScannerMark";
 import { API_BASE } from "../lib/api";
 import ShareButton from "../components/ShareButton";
@@ -95,12 +96,12 @@ export default function InventoryScreen({ token, plan, onNavigate, onBack }: Pro
           <Pressable style={s.sheet} onPress={e=>e.stopPropagation()}>
             <View style={s.sheetHandle}/>
             <Text style={s.sheetTitle}>{editing?"Edit Item":"Add to Inventory"}</Text>
-            <ScrollView>
+            <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
               <Text style={s.fieldLabel}>Item Name *</Text>
               <TextInput style={s.input} value={form.itemName} onChangeText={v=>setForm(f=>({...f,itemName:v}))} placeholder="e.g. Lululemon, Leggings" placeholderTextColor={C.text4}/>
               <View style={{flexDirection:"row",gap:10}}>
-                <View style={{flex:1}}><Text style={s.fieldLabel}>Bought For</Text><TextInput style={s.input} value={form.boughtPrice} onChangeText={v=>setForm(f=>({...f,boughtPrice:v}))} placeholder="$0" placeholderTextColor={C.text4} keyboardType="decimal-pad"/></View>
-                <View style={{flex:1}}><Text style={s.fieldLabel}>Target Sell Price</Text><TextInput style={s.input} value={form.targetPrice} onChangeText={v=>setForm(f=>({...f,targetPrice:v}))} placeholder="$0" placeholderTextColor={C.text4} keyboardType="decimal-pad"/></View>
+                <View style={{flex:1}}><Text style={s.fieldLabel}>Bought For</Text><TextInput style={s.input} value={form.boughtPrice} onChangeText={v=>setForm(f=>({...f,boughtPrice:v}))} placeholder="$0" placeholderTextColor={C.text4} {...numericFieldProps("decimal")}/></View>
+                <View style={{flex:1}}><Text style={s.fieldLabel}>Target Sell Price</Text><TextInput style={s.input} value={form.targetPrice} onChangeText={v=>setForm(f=>({...f,targetPrice:v}))} placeholder="$0" placeholderTextColor={C.text4} {...numericFieldProps("decimal")}/></View>
               </View>
               <Text style={s.fieldLabel}>Status</Text>
               <View style={{flexDirection:"row",gap:8,marginBottom:12}}>

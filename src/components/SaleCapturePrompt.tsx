@@ -10,17 +10,24 @@
 // of ignoring it, and no dismiss. This version only ever shows a collapsed
 // line until tapped, offers a real "not yet" (snoozes, doesn't lie), a real
 // "gave up" (resolves it so it stops asking), and a dismiss.
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator } from "react-native";
 import { C } from "../lib/theme";
 import LogSaleModal from "./LogSaleModal";
+import ShareStudio, { ShareStudioWinData } from "./ShareStudio";
 import { getScanHistory, invalidateScanHistoryCache } from "../lib/api";
-import { toPendingScan, recordSaleOutcome, snoozeCapture, PendingScan } from "../lib/saleCapture";
+import { toPendingScan, recordSaleOutcome, snoozeCapture, PendingScan, SaleLoggedPayload } from "../lib/saleCapture";
 
 interface Props {
   token: string;
   onNavigate: (screen: string, data?: any) => void;
 }
+
+// How long LogSaleModal's own slide-down dismiss animation takes, roughly -
+// the Win Studio only opens AFTER that completes (never in the same render
+// commit as closing this sheet - see LogSaleModal.tsx's own header comment
+// on the two-Modals-racing incident this avoids).
+const MODAL_DISMISS_MS = 350;
 
 // "Not yet" means genuinely still listed - the user just confirmed it, so
 // re-asking next week is pure nagging. Deliberately longer than a first-ask
@@ -39,6 +46,11 @@ export default function SaleCapturePrompt({ token, onNavigate }: Props) {
   const [dismissed, setDismissed] = useState(false); // session-only - reappears next app open
   const [busyId, setBusyId]       = useState<string | null>(null);
   const [logSaleScan, setLogSaleScan] = useState<PendingScan | null>(null);
+  const [winPayload, setWinPayload] = useState<SaleLoggedPayload | null>(null);
+  const [studioOpen, setStudioOpen] = useState(false);
+  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (dismissTimer.current) clearTimeout(dismissTimer.current); }, []);
 
   useEffect(() => {
     let alive = true;
@@ -154,7 +166,31 @@ export default function SaleCapturePrompt({ token, onNavigate }: Props) {
         scan={logSaleScan}
         onClose={() => setLogSaleScan(null)}
         onSaved={(scanId) => { removeItem(scanId); invalidateScanHistoryCache(token); }}
+        onSold={(payload) => {
+          setLogSaleScan(null);
+          if (dismissTimer.current) clearTimeout(dismissTimer.current);
+          dismissTimer.current = setTimeout(() => { setWinPayload(payload); setStudioOpen(true); }, MODAL_DISMISS_MS);
+        }}
       />
+      {winPayload ? (
+        <ShareStudio
+          visible={studioOpen}
+          onClose={() => setStudioOpen(false)}
+          token={token}
+          scanId={winPayload.scanId}
+          itemName={winPayload.itemName}
+          photoBase64={null}
+          photoUri={winPayload.photoUri}
+          paidPrice={null}
+          sellPrice={null}
+          profit={winPayload.profit}
+          roi={null}
+          profitConfidence="sold-backed"
+          heroVerdict={null}
+          winData={{ boughtPrice: winPayload.boughtPrice, soldPrice: winPayload.soldPrice, profit: winPayload.profit } as ShareStudioWinData}
+          onLeaderboard={() => { setStudioOpen(false); onNavigate("leaderboard"); }}
+        />
+      ) : null}
     </View>
   );
 }

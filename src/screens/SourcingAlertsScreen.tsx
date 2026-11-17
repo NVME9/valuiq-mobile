@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import HeaderLogo from "../components/HeaderLogo";
 import { API_BASE } from "../lib/api";
 
@@ -62,7 +63,7 @@ export default function SourcingAlertsScreen({ token, plan, onNavigate, onBack }
         <View style={s.logoRow}><HeaderLogo textStyle={s.logoText}/></View>
         {isPaid&&<TouchableOpacity onPress={()=>setCreating(v=>!v)} style={[s.navBtn,{marginLeft:"auto" as any,borderColor:C.green+"40"}]}><Text style={[s.navBtnText,{color:C.green}]}>+ New Alert</Text></TouchableOpacity>}
       </View>
-      <ScrollView contentContainerStyle={{padding:20,paddingBottom:60}} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>}>
+      <ScrollView contentContainerStyle={{padding:20,paddingBottom:60}} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>}>
         <Text style={s.h1}>🔔 Sourcing Alerts</Text>
         <Text style={[s.body,{marginBottom:20}]}>ValuIQ checks eBay daily and emails you when deals matching your criteria appear.</Text>
 
@@ -75,8 +76,8 @@ export default function SourcingAlertsScreen({ token, plan, onNavigate, onBack }
             <Text style={s.label}>Keywords *</Text>
             <TextInput style={s.input} value={keywords} onChangeText={setKeywords} placeholder="e.g. Nike, Dunk Low, Stanley, Cup, Vitamix" placeholderTextColor={C.text4}/>
             <View style={{flexDirection:"row",gap:10,marginTop:10}}>
-              <View style={{flex:1}}><Text style={s.label}>Max Buy Price</Text><TextInput style={s.input} value={maxPrice} onChangeText={setMaxPrice} placeholder="$50" placeholderTextColor={C.text4} keyboardType="decimal-pad"/></View>
-              <View style={{flex:1}}><Text style={s.label}>Min Profit</Text><TextInput style={s.input} value={minProfit} onChangeText={setMinProfit} placeholder="$20" placeholderTextColor={C.text4} keyboardType="decimal-pad"/></View>
+              <View style={{flex:1}}><Text style={s.label}>Max Buy Price</Text><TextInput style={s.input} value={maxPrice} onChangeText={setMaxPrice} placeholder="$50" placeholderTextColor={C.text4} {...numericFieldProps("decimal")}/></View>
+              <View style={{flex:1}}><Text style={s.label}>Min Profit</Text><TextInput style={s.input} value={minProfit} onChangeText={setMinProfit} placeholder="$20" placeholderTextColor={C.text4} {...numericFieldProps("decimal")}/></View>
             </View>
             <View style={{flexDirection:"row",gap:10,marginTop:14}}>
               <TouchableOpacity style={[s.greenBtn,{flex:1}]} onPress={saveAlert} disabled={saving}>

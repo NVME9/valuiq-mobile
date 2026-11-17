@@ -1,11 +1,9 @@
 // ShareStudio.tsx — the single post-scan share screen, replacing
-// RevealScreen.tsx/RevealPhotoEditor.tsx (both removed). One full-screen
-// Modal with exactly two modes: the main screen (format + look + preview +
-// two buttons + Share) and a dedicated full-screen "Adjust photo" mode for
-// crop gestures. Neither mode uses a ScrollView - the main screen's preview
-// is a fixed flex:1 region measured via onLayout, and Adjust mode is its
-// own full-screen view, so nothing can push the preview off-screen and
-// nothing can swallow a pinch/pan gesture into scroll momentum.
+// RevealScreen.tsx/RevealPhotoEditor.tsx (both removed), and now also the
+// one Studio screen the post-sale win flow and the Wins-tab per-row share
+// navigate into (see ScannerScreen.tsx/HistoryScreen.tsx/LogSaleModal.tsx) -
+// the scan and win flows share this exact screen and its exact controls;
+// only the card CONTENT variant differs (isWin/winData).
 //
 // PREVIEW == EXPORT (structural, not just "should match"): the card is
 // built once, in lib/shareStudio.ts's zonesForFormat(), as a fixed
@@ -18,30 +16,30 @@
 //
 // NO GESTURE-HANDLER, NO REANIMATED, NO MEDIA-LIBRARY (build #46 audit -
 // scripts/native-modules-build46.json): pinch/pan/double-tap is plain
-// PanResponder + plain React state, same posture RevealPhotoEditor.tsx
-// used. There is no Save button - expo-media-library isn't in the binary -
-// the system share sheet (expo-sharing) already offers "Save Image" for a
-// shared PNG, so Save degrades to that instead of a broken button.
+// PanResponder + plain React state. There is no Save button -
+// expo-media-library isn't in the binary - the system share sheet
+// (expo-sharing) already offers "Save Image" for a shared PNG.
 //
 // OTA-SAFE IMPORTS: ViewShot/Sharing/FileSystem resolve native modules at
 // module scope - a guarded require (not a static import) keeps a missing
-// module from crashing the whole app at launch, same convention the file
-// this replaced used.
+// module from crashing the whole app at launch.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Modal, View, Text, StyleSheet, TouchableOpacity, Image,
-  Dimensions, Share, TextInput, ActivityIndicator, Switch, PanResponder,
-  KeyboardAvoidingView, Platform, LayoutChangeEvent,
+  Dimensions, Share, TextInput, ActivityIndicator, PanResponder,
+  Platform, LayoutChangeEvent, ScrollView, Keyboard,
 } from "react-native";
 import Svg, { Path, Defs, RadialGradient, Stop, Rect } from "react-native-svg";
 import { C } from "../lib/theme";
 import ValuIQLogo from "./ValuIQLogo";
 import Wordmark from "./Wordmark";
+import { ScanFrameBackground, ScanCorners } from "./ScanFrameBackground";
+import { doneFieldProps } from "./KeyboardDoneBar";
 import {
   StudioFormat, StudioLook, StudioConfidence, StudioHeroVerdict, Size, Point,
-  FORMAT_SIZES, FORMAT_LABELS, LOOK_LABELS,
+  FORMAT_SIZES, FORMAT_LABELS, LOOK_LABELS, PHOTO_FRAME_INSET,
   frameSizeForFormat, frameSizeForRatio, photoZoneSize, zonesForFormat, scaleZones,
-  coverScale, clampZoomScale, stepZoomScale, clampPanTranslate, imagePlacement,
+  clampZoomScale, stepZoomScale, clampPanTranslate, imagePlacement,
   minCropScale, defaultCropScale,
   stampForHeroVerdict, buildPriceBlock, buildWinCardText, PriceBlock, WinCardText,
   formatFileSize,
@@ -62,10 +60,10 @@ const TAP_SLOP = 10;
 
 // Text wrapper used for EVERY piece of text on the card itself - hard-codes
 // allowFontScaling to false with no way for a caller to override it, so a
-// device with a large system text size (item 2's own root cause) can never
-// blow up the card layout. ellipsizeMode defaults to "clip" (never "tail"/
-// "head"/"middle", which print "...") - overflow is handled exclusively by
-// adjustsFontSizeToFit shrinking the font, never by truncating characters.
+// device with a large system text size can never blow up the card layout.
+// ellipsizeMode defaults to "clip" (never "tail"/"head"/"middle", which
+// print "...") - overflow is handled exclusively by adjustsFontSizeToFit
+// shrinking the font, never by truncating characters.
 function CardText({ style, numberOfLines, adjustsFontSizeToFit, minimumFontScale, children }: {
   style?: any; numberOfLines?: number; adjustsFontSizeToFit?: boolean; minimumFontScale?: number; children?: React.ReactNode;
 }) {
@@ -92,22 +90,33 @@ function CloseIcon({ color, size = 20 }: { color: string; size?: number }) {
   );
 }
 
-// bg/card here are the SAME dark near-black ValuIQ uses for the real win
-// card (ShareCard.tsx's C.bg/C.surface, FlexRevealCard's C.bg) - "dark" is
-// deliberately the closest match to that existing look, which is why it
-// stays the default (see studioPrefs.ts). divider is the footer panel's
-// top-border tint (ShareCard's footer bar divider), tuned per look so it
-// reads on both a near-black and a white card.
-const LOOKS: Record<StudioLook, { bg: string; card: string; text: string; sub: string; accent: string; chip: string; divider: string; onAccent: string; bigPrice?: boolean }> = {
-  dark: { bg: "#0a0906", card: "#17150f", text: "#f5f2ed", sub: "#bdb8b0", accent: C.green, chip: "rgba(255,255,255,0.08)", divider: "rgba(255,255,255,0.1)", onAccent: C.greenDark },
+function AdjustIcon({ color, size = 16 }: { color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path d="M4 7 h10 M4 17 h6" stroke={color} strokeWidth={2.4} strokeLinecap="round" />
+      <Path d="M20 7 h-2 M20 17 h-4" stroke={color} strokeWidth={2.4} strokeLinecap="round" />
+      <Path d="M14 4.5 v5" stroke={color} strokeWidth={2.4} strokeLinecap="round" />
+      <Path d="M8 14.5 v5" stroke={color} strokeWidth={2.4} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+// Colors only differ between looks - same grid/corners/zone structure for
+// all three (per the card spec: "Looks (colors only)"). bg/card/grid are
+// the near-black-plus-lime default for "dark"; "light"/"bold" swap the
+// palette but keep the exact same ScanFrameBackground+ScanCorners+glow
+// treatment, just in different colors.
+const LOOKS: Record<StudioLook, { bg: string; card: string; gridBg: string; text: string; sub: string; accent: string; chip: string; chipFilled: string; divider: string; onAccent: string }> = {
+  dark: { bg: "#0a0906", card: "#0c0c0a", gridBg: "#0c0c0a", text: "#f5f2ed", sub: "#bdb8b0", accent: C.green, chip: "rgba(255,255,255,0.08)", chipFilled: C.green, divider: "rgba(255,255,255,0.1)", onAccent: C.greenDark },
   // MEASURED: light's accent is a dark green ("#2c7a1f") for readable
   // contrast on a light panel - the other looks' near-black greenDark
   // label would be low-contrast there, so the Share button label is white.
-  light: { bg: "#f0ece3", card: "#ffffff", text: "#1c1a17", sub: "#6b655c", accent: "#2c7a1f", chip: "rgba(0,0,0,0.06)", divider: "rgba(0,0,0,0.1)", onAccent: "#ffffff" },
-  bold: { bg: "#120a00", card: "#0c0600", text: "#fff6e0", sub: "#e8c26b", accent: C.gold, chip: "rgba(255,255,255,0.1)", divider: "rgba(255,255,255,0.12)", onAccent: "#2a1c00", bigPrice: true },
+  light: { bg: "#f0ece3", card: "#f5f2ea", gridBg: "#f5f2ea", text: "#1c1a17", sub: "#6b655c", accent: "#2c7a1f", chip: "rgba(0,0,0,0.06)", chipFilled: "#2c7a1f", divider: "rgba(0,0,0,0.1)", onAccent: "#ffffff" },
+  bold: { bg: "#120a00", card: "#0e0800", gridBg: "#0e0800", text: "#fff6e0", sub: "#e8c26b", accent: C.gold, chip: "rgba(255,255,255,0.1)", chipFilled: C.gold, divider: "rgba(255,255,255,0.12)", onAccent: "#2a1c00" },
 };
 
 const HOOK_PRESETS = ["Would you flip it?", "Found this at the thrift", "Pass or buy?", "Real find, real numbers."];
+const CUSTOM_HOOK_MAX = 40;
 
 export interface ShareStudioWinData {
   boughtPrice: number;
@@ -136,14 +145,9 @@ interface StudioCardContentProps {
 }
 
 // Font sizes below are a FRACTION of their own zone's height, not a fixed
-// px number - a zone given more room (e.g. Story's bigger price zone) gets
-// a visibly bigger hero number for free, and nothing is ever stuck looking
-// small inside a tall box (the old fixed-88px price in a ~400px-tall zone
-// was most of what read as "tiny text, empty space" - see AGENTS.md's
-// Studio problem report). Multipliers are tuned so the tallest realistic
-// stack (paid + big + profit, or big + caption) stays inside the zone with
-// margin to spare (checked by hand against every STORY_ZONE_H/ZONE_FRACTIONS
-// combination in lib/shareStudio.ts).
+// px number - a zone given more room gets a visibly bigger hero number for
+// free. Multipliers are tuned so the tallest realistic stack (paid + big +
+// profit, or big + caption) stays inside the zone with margin to spare.
 function priceFonts(priceH: number) {
   return { paid: priceH * 0.11, big: priceH * 0.42, caption: priceH * 0.09, profit: priceH * 0.14 };
 }
@@ -151,21 +155,15 @@ function nameFontSize(nameH: number) {
   return nameH * 0.38;
 }
 function stampFontSize(stampH: number) {
-  return stampH * 0.34;
+  return stampH * 0.3;
 }
 
 // The exported/previewed card itself - every number here is zones/geometry
 // from lib/shareStudio.ts multiplied by `scale`. Nothing is hardcoded to a
 // device size, and nothing here can overlap another zone (zonesForFormat's
-// own header comment explains why that's structural, not incidental).
-//
-// LOOK BORROWED FROM THE REAL WIN CARD (ShareCard.tsx / FlexRevealCard.tsx):
-// full-bleed photo up top, a bordered rotated verdict "stamp" pill, a huge
-// glowing hero number (FlexRevealCard's radial-gradient glow treatment,
-// just applied to this card's price zone instead of a photo-less screen),
-// the item name below it, and a divided footer bar carrying the brand mark
-// + handle - same bones ShareCard's header/photo/body/footer used, just
-// mapped onto the fixed zone geometry every Studio format already shares.
+// own header comment explains why that's structural, not incidental) - the
+// one deliberate exception is the STAMP, which breaks out of its own zone
+// to visually overlap the photo frame's bottom-left corner (see below).
 export function StudioCardContent({ format, scale, look, photoUri, imgSize, crop, handle, hook, isWin, winText, stampText, priceBlock, itemName, isLoss }: StudioCardContentProps) {
   const palette = LOOKS[look];
   const canvas = FORMAT_SIZES[format];
@@ -174,42 +172,71 @@ export function StudioCardContent({ format, scale, look, photoUri, imgSize, crop
   const zones = scaleZones(zonesForFormat(format), scale);
   const nativePhoto = photoZoneSize(format);
   const accent = isLoss ? C.red : palette.accent;
+  // Photo frame: inset 72px from the SIDES only (card spec) - fills the
+  // whole photo zone's height (zones.photo.h IS the frame height - see
+  // lib/shareStudio.ts's PHOTO_FRAME_INSET/photoZoneSize comment), so the
+  // frame-height-share tuning (Story ~52%/Feed ~50%/Square ~46%) is exactly
+  // this box's own height, not a looser zone reservation around it.
+  const inset = PHOTO_FRAME_INSET * scale;
+  const frameX = inset;
+  const frameW = W - inset * 2;
+  const frameY = zones.photo.y;
+  const frameH = zones.photo.h;
+  // place/backdropPlace are computed against nativePhoto (photoZoneSize -
+  // already inset-aware: w = 1080 - 72*2), at displayScale=scale, so their
+  // left/top are relative to a container of EXACTLY (frameW, frameH) at
+  // displayScale=scale - i.e. relative to the frame box itself, no further
+  // offset needed when rendering inside a View positioned at (frameX, frameY).
   const place = imgSize ? imagePlacement(imgSize, nativePhoto, crop, scale) : null;
-  // The ALWAYS-cover-filled backdrop copy, dimmed, sitting behind the real
-  // (possibly "contain"/letterboxed) crop - so the photo zone is never left
-  // showing raw flat background in the gaps a contain crop leaves. A plain
-  // dark dim rather than a true gaussian blur (no new native module in
-  // build #46 - see scripts/native-modules-build46.json) but it reads the
-  // same way: a soft, out-of-focus-looking fill, never empty.
+  // ALWAYS-cover-filled backdrop copy, blurred (Image blurRadius - RN core,
+  // no new native module) and dimmed, sitting behind the real (contain-by-
+  // default, so usually letterboxed) crop - the photo frame is never left
+  // showing raw flat background in the gaps a contain crop leaves.
   const backdropPlace = imgSize ? imagePlacement(imgSize, nativePhoto, { scale: 1, translate: { x: 0, y: 0 } }, scale) : null;
   const showStamp = isWin || !!stampText;
   const priceFont = priceFonts(zones.price.h);
   const nameFont = nameFontSize(zones.name.h);
   const stampFont = stampFontSize(zones.stamp.h);
   const glowColor = isLoss ? C.red : palette.accent;
+  const stampPillH = zones.stamp.h * 0.72;
 
   return (
     <View style={[st.card, { width: W, height: H, backgroundColor: palette.card, borderRadius: 18 * scale }]}>
-      {/* PHOTO ZONE - as large as the win-card-style layout allows for this
-          format (see zonesForFormat's own comment). */}
-      <View style={{ position: "absolute", top: zones.photo.y, left: 0, width: W, height: zones.photo.h, overflow: "hidden", backgroundColor: C.surfaceHigh }}>
+      {/* BACKGROUND - near-black + faint lime grid, the exact same look
+          (ScanFrameBackground) the app splash screen uses, across the
+          WHOLE canvas (not just the photo frame). */}
+      <ScanFrameBackground width={W} height={H} bg={palette.gridBg} accent={palette.accent} cellSize={60 * scale} opacity={0.08} strokeWidth={Math.max(1, scale)} />
+
+      {/* PHOTO ZONE - photo "contain" by default (whole photo visible,
+          never cut off - see lib/shareStudio.ts's defaultCropScale) over a
+          blurred, cover-filled copy of itself so there are no empty bars. */}
+      <View style={{ position: "absolute", top: frameY, left: frameX, width: frameW, height: frameH, overflow: "hidden", backgroundColor: C.surfaceHigh, borderRadius: 6 * scale }}>
         {photoUri && backdropPlace ? (
-          <Image source={{ uri: photoUri }} resizeMode="cover" style={{ position: "absolute", width: backdropPlace.w, height: backdropPlace.h, left: backdropPlace.left, top: backdropPlace.top, opacity: 0.45 }} />
+          <Image
+            source={{ uri: photoUri }}
+            resizeMode="cover"
+            blurRadius={Platform.OS === "android" ? 14 : 30}
+            style={{ position: "absolute", width: backdropPlace.w, height: backdropPlace.h, left: backdropPlace.left, top: backdropPlace.top }}
+          />
         ) : null}
         {photoUri && backdropPlace ? (
-          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(0,0,0,0.35)" }]} />
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(0,0,0,0.4)" }]} />
         ) : null}
         {photoUri && place ? (
-          <Image source={{ uri: photoUri }} resizeMode="cover" style={{ position: "absolute", width: place.w, height: place.h, left: place.left, top: place.top }} />
+          <Image
+            source={{ uri: photoUri }}
+            resizeMode="contain"
+            style={{ position: "absolute", width: place.w, height: place.h, left: place.left, top: place.top }}
+          />
         ) : null}
         <View style={[st.wordmarkPill, { paddingHorizontal: 10 * scale, paddingVertical: 5 * scale, top: 14 * scale, left: 14 * scale, gap: 5 * scale }]}>
           <ValuIQLogo accent={C.green} size={13 * scale} />
           <CardText style={{ color: "#fff", fontSize: 11 * scale, fontWeight: "800", letterSpacing: 0.5 }}>ValuIQ</CardText>
         </View>
         {hook ? (
-          <View style={{ position: "absolute", left: 14 * scale, right: 14 * scale, bottom: 12 * scale, alignItems: "center" }}>
-            <View style={{ backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 10 * scale, paddingHorizontal: 12 * scale, paddingVertical: 7 * scale, maxWidth: "100%" }}>
-              <CardText numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.6} style={{ color: "#fff", fontSize: 22 * scale, fontWeight: "800", textAlign: "center" }}>
+          <View style={{ position: "absolute", left: 14 * scale, right: 14 * scale, top: "38%", alignItems: "center" }}>
+            <View style={{ backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 10 * scale, paddingHorizontal: 12 * scale, paddingVertical: 7 * scale, maxWidth: "100%" }}>
+              <CardText numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.6} style={{ color: "#fff", fontSize: 26 * scale, fontWeight: "900", textAlign: "center" }}>
                 {hook}
               </CardText>
             </View>
@@ -217,21 +244,28 @@ export function StudioCardContent({ format, scale, look, photoUri, imgSize, crop
         ) : null}
       </View>
 
-      {/* STAMP ZONE - ShareCard's bordered verdict pill, tilted like
-          FlexRevealCard's achievement badge. */}
-      <View style={{ position: "absolute", top: zones.stamp.y, left: 0, width: W, height: zones.stamp.h, alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-        {showStamp ? (
-          <View style={{ borderWidth: 3 * scale, borderColor: accent, borderRadius: 8 * scale, paddingHorizontal: 18 * scale, paddingVertical: 8 * scale, transform: [{ rotate: "-6deg" }] }}>
+      {/* FRAME CORNERS - four lime L-brackets AT the photo frame's inset
+          box, the "viewfinder" look (same ScanCorners the splash uses). */}
+      <ScanCorners x={frameX} y={frameY} w={frameW} h={frameH} armLength={90 * scale} thickness={8 * scale} color={accent} />
+
+      {/* STAMP - tilted -6deg, outlined, deliberately positioned to
+          OVERLAP the photo frame's bottom-left corner (not confined to its
+          own "stamp" zone below the photo) - the zone itself still reserves
+          the vertical space that pushes price/name/footer down, this view
+          just breaks out of it via absolute positioning centered on the
+          photo/stamp zone boundary. */}
+      {showStamp ? (
+        <View style={{ position: "absolute", left: frameX + 4 * scale, top: frameY + frameH - stampPillH / 2, alignItems: "flex-start" }}>
+          <View style={{ borderWidth: 3 * scale, borderColor: accent, backgroundColor: palette.card, borderRadius: 8 * scale, paddingHorizontal: 16 * scale, paddingVertical: 7 * scale, transform: [{ rotate: "-6deg" }] }}>
             <CardText numberOfLines={1} style={{ color: accent, fontSize: stampFont, fontWeight: "900", letterSpacing: 1.5 * scale }}>
               {isWin ? "SOLD" : stampText}
             </CardText>
           </View>
-        ) : null}
-      </View>
+        </View>
+      ) : null}
 
-      {/* PRICE ZONE - the hero moment, styled after FlexRevealCard's glow-
-          backed count-up number: a soft radial glow behind a huge, bold
-          price figure instead of a flat small number on a bare panel. */}
+      {/* PRICE ZONE - the hero moment: a soft radial glow behind a huge,
+          bold price figure. */}
       <View style={{ position: "absolute", top: zones.price.y, left: 0, width: W, height: zones.price.h, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 * scale, overflow: "hidden" }}>
         <View style={{ position: "absolute", top: 0, left: 0 }} pointerEvents="none">
           <Svg width={W} height={zones.price.h}>
@@ -246,11 +280,11 @@ export function StudioCardContent({ format, scale, look, photoUri, imgSize, crop
         </View>
         {isWin && winText ? (
           <>
-            <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ color: palette.sub, fontSize: priceFont.paid, fontWeight: "700" }}>
-              {winText.subLine}
-            </CardText>
-            <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} style={{ color: accent, fontSize: priceFont.big, fontWeight: "900", marginTop: 4 * scale, textShadowColor: glowColor + "80", textShadowRadius: 24 * scale, textShadowOffset: { width: 0, height: 0 } }}>
+            <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} style={{ color: accent, fontSize: priceFont.big, fontWeight: "900", textShadowColor: glowColor + "80", textShadowRadius: 24 * scale, textShadowOffset: { width: 0, height: 0 } }}>
               {winText.bigLine}
+            </CardText>
+            <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ color: palette.sub, fontSize: priceFont.paid, fontWeight: "700", marginTop: 6 * scale }}>
+              {winText.subLine}
             </CardText>
           </>
         ) : (
@@ -279,30 +313,18 @@ export function StudioCardContent({ format, scale, look, photoUri, imgSize, crop
         )}
       </View>
 
-      {/* NAME ZONE - numberOfLines=2 + adjustsFontSizeToFit + a minimumFontScale
-          floor is what replaces the old single-line "American Flag and I..."
-          truncation: the font shrinks until two lines hold the whole name,
-          it is never cut off with an ellipsis. Font size is a fraction of
-          the zone's own height (nameFontSize), so it reads big and bold
-          like the win card's item-name line, not the old fixed 40px. */}
+      {/* NAME ZONE - numberOfLines=2 + adjustsFontSizeToFit + a
+          minimumFontScale floor: the font shrinks until two lines hold the
+          whole name, never cut off with an ellipsis. */}
       <View style={{ position: "absolute", top: zones.name.y, left: 0, width: W, height: zones.name.h, alignItems: "center", justifyContent: "center", paddingHorizontal: 28 * scale, overflow: "hidden" }}>
         <CardText numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.5} style={{ color: palette.text, fontSize: nameFont, fontWeight: "800", textAlign: "center", lineHeight: nameFont * 1.15 }}>
           {itemName}
         </CardText>
       </View>
 
-      {/* FOOTER ZONE - ShareCard's footer-bar treatment: a divided panel
-          (top border, subtly different tint) rather than bare canvas, so
-          Story's reserved bottom safe-zone strip reads as an intentional
-          brand footer, not dead space. Story has enough room here to also
-          carry ShareCard's own tagline; Feed/Square keep just the
-          handle/wordmark row their shorter footer always had. */}
-      <View style={{ position: "absolute", top: zones.footer.y, left: 0, width: W, height: zones.footer.h, alignItems: "center", justifyContent: "center", backgroundColor: palette.chip, borderTopWidth: 1 * scale, borderTopColor: palette.divider }}>
-        {format === "story" ? (
-          <CardText numberOfLines={1} style={{ color: palette.sub, fontSize: 20 * scale, fontWeight: "600", letterSpacing: 0.5 * scale, marginBottom: 14 * scale }}>
-            what resellers actually made
-          </CardText>
-        ) : null}
+      {/* FOOTER ZONE - one line: handle (if set) + wordmark. No tall
+          footer band, no empty dark block - zones tile the canvas. */}
+      <View style={{ position: "absolute", top: zones.footer.y, left: 0, width: W, height: zones.footer.h, alignItems: "center", justifyContent: "center", borderTopWidth: 1 * scale, borderTopColor: palette.divider }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 * scale }}>
           {handle ? <CardText numberOfLines={1} style={{ color: palette.sub, fontSize: 22 * scale, fontWeight: "700" }}>{handle}</CardText> : null}
           {handle ? <View style={{ width: 1, height: 16 * scale, backgroundColor: palette.sub, opacity: 0.4 }} /> : null}
@@ -321,6 +343,10 @@ export interface ShareStudioProps {
   scanId: string | null;
   itemName: string;
   photoBase64: string | null;
+  // Alternative to photoBase64 for callers that only have a remote URI on
+  // hand (e.g. History re-sharing an already-logged row, which stores
+  // image_url, not a base64 payload) - photoBase64 wins if both are passed.
+  photoUri?: string | null;
   paidPrice: number | null;
   sellPrice: number | null;
   profit: number | null;
@@ -330,19 +356,22 @@ export interface ShareStudioProps {
   displayName?: string | null;
   isOwner?: boolean;
   winData?: ShareStudioWinData | null;
+  onLeaderboard?: () => void;
 }
 
 export default function ShareStudio(props: ShareStudioProps) {
   const {
-    visible, onClose, token, scanId, itemName, photoBase64, paidPrice, sellPrice,
-    profit, roi, profitConfidence, heroVerdict, displayName, isOwner, winData,
+    visible, onClose, token, scanId, itemName, photoBase64, photoUri: photoUriProp, paidPrice, sellPrice,
+    profit, roi, profitConfidence, heroVerdict, displayName, isOwner, winData, onLeaderboard,
   } = props;
 
   const [prefs, setPrefs] = useState<StudioPrefs>({ handle: "", look: "dark", format: "story", hidePrice: false });
-  const [isWin, setIsWin] = useState(false);
+  const isWin = !!winData;
   const [hook, setHook] = useState<string | null>(null);
+  const [customHookOpen, setCustomHookOpen] = useState(false);
+  const [customHookText, setCustomHookText] = useState("");
+  const [handleEditOpen, setHandleEditOpen] = useState(false);
   const [mode, setMode] = useState<"main" | "adjust">("main");
-  const [customizeOpen, setCustomizeOpen] = useState(false);
   const [imgSize, setImgSize] = useState<Size | null>(null);
   const [cropByFormat, setCropByFormat] = useState<Record<StudioFormat, CropState>>({
     story: DEFAULT_CROP, feed: DEFAULT_CROP, square: DEFAULT_CROP,
@@ -357,10 +386,10 @@ export default function ShareStudio(props: ShareStudioProps) {
   const shareCardRef = useRef<InstanceType<NonNullable<typeof ViewShot>>>(null);
   const openedLoggedFor = useRef<string | null>(null);
 
-  // The crop a format should land on before any touch - defaultCropScale
-  // (contain-biased on Feed/Square for a wider-than-tall photo, cover
-  // otherwise). Falls back to plain cover when imgSize isn't known yet
-  // (e.g. "Reset" tapped mid-load) rather than guessing.
+  // The crop a format should land on before any touch - always
+  // defaultCropScale (contain-by-default on every format - see
+  // lib/shareStudio.ts). Falls back to plain cover when imgSize isn't
+  // known yet (e.g. "Reset" tapped mid-load) rather than guessing.
   function smartDefaultCrop(format: StudioFormat, img: Size | null): CropState {
     return { scale: img ? defaultCropScale(format, img) : 1, translate: { x: 0, y: 0 } };
   }
@@ -370,15 +399,16 @@ export default function ShareStudio(props: ShareStudioProps) {
     loadStudioPrefs(displayName).then(setPrefs);
     setImgSize(null);
     setCropByFormat({ story: DEFAULT_CROP, feed: DEFAULT_CROP, square: DEFAULT_CROP });
-    setIsWin(!!winData);
     setHook(null);
+    setCustomHookOpen(false);
+    setCustomHookText("");
+    setHandleEditOpen(false);
     setMode("main");
-    setCustomizeOpen(false);
     setStatus(null);
     const openKey = `${scanId ?? "none"}:${Date.now()}`;
     if (openedLoggedFor.current !== openKey) {
       openedLoggedFor.current = openKey;
-      logEvent(token, "share_studio_opened", { scanId }).catch(() => {});
+      logEvent(token, "share_studio_opened", { scanId, isWin }).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
@@ -391,7 +421,7 @@ export default function ShareStudio(props: ShareStudioProps) {
     });
   }
 
-  const photoUri = photoBase64 ? `data:image/jpeg;base64,${photoBase64}` : null;
+  const photoUri = photoBase64 ? `data:image/jpeg;base64,${photoBase64}` : (photoUriProp || null);
   const previewFrame = useMemo(() => frameSizeForFormat(prefs.format, previewBox.w, previewBox.h), [prefs.format, previewBox.w, previewBox.h]);
   const previewScale = previewFrame.w / FORMAT_SIZES[prefs.format].w;
   const nativePhoto = useMemo(() => photoZoneSize(prefs.format), [prefs.format]);
@@ -408,14 +438,9 @@ export default function ShareStudio(props: ShareStudioProps) {
   const stampText = useMemo(() => stampForHeroVerdict(heroVerdict), [heroVerdict]);
   const winText = useMemo(() => (winData ? buildWinCardText(winData) : undefined), [winData]);
 
-  // Applies the smart (contain-biased where it matters) default crop to
-  // the CURRENT format the first time its real image size is known -
-  // guarded on the crop still being untouched (scale===1, no pan) so a
-  // user's own pinch/pan/zoom is never overwritten. Runs again on every
-  // format switch so a format visited for the first time after imgSize is
-  // already known (the common case - imgSize usually resolves almost
-  // instantly) gets its own smart default too, not just whichever format
-  // happened to be active when imgSize first loaded.
+  // Applies the smart default crop to the CURRENT format the first time its
+  // real image size is known - guarded on the crop still being untouched
+  // (scale===1, no pan) so a user's own pinch/pan/zoom is never overwritten.
   useEffect(() => {
     if (!imgSize) return;
     setCropByFormat((c) => {
@@ -429,11 +454,8 @@ export default function ShareStudio(props: ShareStudioProps) {
   }, [prefs.format, imgSize]);
 
   // ---- pinch / pan / double-tap (PanResponder - no gesture-handler), only
-  // live in "Adjust photo" mode. liveRef (MEASURED: stale-closure bug) -
-  // PanResponder.create runs ONCE inside useRef's lazy initializer, so its
-  // handlers close over whatever `crop`/`imgSize`/`adjustScale`/`format`
-  // were on the FIRST render forever after - mutated directly in the render
-  // body (not an effect) so every callback reads the current values.
+  // live in "Adjust photo" mode. liveRef (stale-closure guard) - mutated
+  // directly in the render body so every callback reads current values.
   const liveRef = useRef({ format: prefs.format, crop, imgSize, nativePhoto, adjustScale });
   liveRef.current = { format: prefs.format, crop, imgSize, nativePhoto, adjustScale };
 
@@ -468,8 +490,6 @@ export default function ShareStudio(props: ShareStudioProps) {
             pinchStartDist.current = dist;
             pinchStartScale.current = liveCrop.scale;
           }
-          // Minimum zoom is "contain" (whole photo visible), not a flat 1
-          // (= cover, forced crop) - see minCropScale's own header comment.
           const minScale = liveImg ? minCropScale(liveImg, liveFrame) : 1;
           const nextScale = clampZoomScale(pinchStartScale.current * (dist / pinchStartDist.current), minScale);
           const nextTranslate = liveImg ? clampPanTranslate(liveCrop.translate, nextScale, liveImg, liveFrame) : liveCrop.translate;
@@ -481,10 +501,6 @@ export default function ShareStudio(props: ShareStudioProps) {
           const dxScreen = t.pageX - panStart.current.x;
           const dyScreen = t.pageY - panStart.current.y;
           if (Math.abs(dxScreen) > TAP_SLOP || Math.abs(dyScreen) > TAP_SLOP) touchMoved.current = true;
-          // Convert on-screen pixel movement into NATIVE (scale=1) units by
-          // dividing out the Adjust screen's own display scale, so the
-          // stored crop is resolution-independent and reusable, unchanged,
-          // by the card's photo zone at ITS OWN scale (previewScale or 1).
           const dxNative = dxScreen / liveAdjScale;
           const dyNative = dyScreen / liveAdjScale;
           const nextTranslate = liveImg
@@ -549,9 +565,6 @@ export default function ShareStudio(props: ShareStudioProps) {
         if (isOwner) {
           const target = FORMAT_SIZES[prefs.format];
           let bytes = 0;
-          // SDK 54's expo-file-system dropped getInfoAsync for a synchronous
-          // File class (new File(uri).size) - see this repo's own AGENTS.md
-          // note to check the versioned docs before touching anything here.
           if (FileSystem) {
             try {
               bytes = new (FileSystem as any).File(uri).size || 0;
@@ -575,8 +588,6 @@ export default function ShareStudio(props: ShareStudioProps) {
 
   function onPreviewLayout(e: LayoutChangeEvent) {
     const { width, height } = e.nativeEvent.layout;
-    // 12px side margins only (the preview's own flex:1 box already excludes
-    // the top bar, controls row, and Share button above/below it).
     if (width > 0 && height > 0) setPreviewBox({ w: width - 24, h: height });
   }
   function onAdjustLayout(e: LayoutChangeEvent) {
@@ -593,6 +604,18 @@ export default function ShareStudio(props: ShareStudioProps) {
   ) : null;
 
   const adjustPlace = imgSize ? imagePlacement(imgSize, nativePhoto, crop, adjustScale) : null;
+
+  function openPreset(h: string) {
+    setHook((cur) => (cur === h ? null : h));
+    setCustomHookOpen(false);
+  }
+
+  function commitCustomHook() {
+    const t = customHookText.trim();
+    setHook(t ? t : null);
+    setCustomHookOpen(false);
+    Keyboard.dismiss();
+  }
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
@@ -641,7 +664,7 @@ export default function ShareStudio(props: ShareStudioProps) {
           </View>
         ) : (
           <View style={st.root}>
-            {/* Top bar: just the close icon + the format segmented control
+            {/* Top bar: X icon (left) + the Story|Feed|Square control
                 filling the rest - no "Share studio" title eating a row. */}
             <View style={st.topBar}>
               <TouchableOpacity onPress={onClose} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }} style={st.closeHit}>
@@ -660,9 +683,10 @@ export default function ShareStudio(props: ShareStudioProps) {
               </View>
             </View>
 
-            {/* The preview takes ALL remaining height above the controls
-                row + Share button, scaled to fit with 12px side margins
-                (onPreviewLayout). Tapping it opens Adjust photo. */}
+            {/* The preview takes ALL remaining height above the controls -
+                scaled to fit with 12px side margins (onPreviewLayout).
+                Tapping anywhere on it ALSO opens Adjust photo - the pill
+                button is a second, more discoverable way in. */}
             <View style={{ flex: 1, width: "100%", alignItems: "center", justifyContent: "center" }} onLayout={onPreviewLayout}>
               <TouchableOpacity activeOpacity={0.9} onPress={() => setMode("adjust")} style={[st.cardShadow, { width: previewFrame.w, height: previewFrame.h }]}>
                 <StudioCardContent
@@ -681,27 +705,118 @@ export default function ShareStudio(props: ShareStudioProps) {
                   itemName={itemName}
                   isLoss={isLoss}
                 />
+                <TouchableOpacity
+                  style={[st.adjustPill, { backgroundColor: palette.accent }]}
+                  onPress={() => setMode("adjust")}
+                  activeOpacity={0.85}
+                >
+                  <AdjustIcon color={palette.onAccent} size={15} />
+                  <Text style={[st.adjustPillText, { color: palette.onAccent }]}>Adjust photo</Text>
+                </TouchableOpacity>
               </TouchableOpacity>
             </View>
 
-            {/* ONE controls row: 3 look pills + Adjust + Customize. */}
-            <View style={st.controlsRow}>
+            {/* ROW 1: Dark | Light | Bold look pills. */}
+            <View style={st.lookRow}>
               {(["dark", "light", "bold"] as StudioLook[]).map((l) => (
                 <TouchableOpacity
                   key={l}
                   style={[st.lookPill, { backgroundColor: LOOKS[l].card, borderColor: prefs.look === l ? LOOKS[l].accent : C.border }]}
                   onPress={() => updatePrefs({ look: l })}
                 >
-                  <Text style={{ color: LOOKS[l].text, fontSize: 11, fontWeight: "800" }} numberOfLines={1}>{LOOK_LABELS[l]}</Text>
+                  <Text style={{ color: LOOKS[l].text, fontSize: 13, fontWeight: "800" }} numberOfLines={1}>{LOOK_LABELS[l]}</Text>
                 </TouchableOpacity>
               ))}
-              <TouchableOpacity style={st.controlBtn} onPress={() => setMode("adjust")}>
-                <Text style={st.controlBtnText} numberOfLines={1}>Adjust</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={st.controlBtn} onPress={() => setCustomizeOpen(true)}>
-                <Text style={st.controlBtnText} numberOfLines={1}>Customize</Text>
-              </TouchableOpacity>
             </View>
+
+            {/* ROW 2: PERSONALIZE - always visible, never collapsed behind
+                a sheet/dropdown. One horizontally-scrolling row of pills:
+                4 hook presets, a Custom hook pill (opens an inline text
+                input), the handle pill (shows the saved handle, opens an
+                inline text input), and the Hide price toggle pill. */}
+            <Text style={st.personalizeLabel}>PERSONALIZE</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={st.personalizeRow}
+              style={st.personalizeScroll}
+            >
+              {HOOK_PRESETS.map((h) => {
+                const selected = hook === h;
+                return (
+                  <TouchableOpacity
+                    key={h}
+                    style={[st.personalizePill, selected && { backgroundColor: palette.chipFilled, borderColor: palette.chipFilled }]}
+                    onPress={() => openPreset(h)}
+                  >
+                    <Text style={[st.personalizePillText, selected && { color: palette.onAccent, fontWeight: "900" }]} numberOfLines={1}>{h}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+
+              {customHookOpen ? (
+                <View style={[st.personalizePill, st.personalizeInputPill, { borderColor: palette.accent }]}>
+                  <TextInput
+                    style={st.personalizeInput}
+                    value={customHookText}
+                    onChangeText={(t) => setCustomHookText(t.slice(0, CUSTOM_HOOK_MAX))}
+                    placeholder="Your hook..."
+                    placeholderTextColor={C.text4}
+                    autoFocus
+                    maxLength={CUSTOM_HOOK_MAX}
+                    {...doneFieldProps()}
+                    onSubmitEditing={commitCustomHook}
+                  />
+                  <TouchableOpacity onPress={commitCustomHook} style={st.personalizeInputDone}>
+                    <Text style={[st.personalizeInputDoneText, { color: palette.accent }]}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={[st.personalizePill, hook != null && !HOOK_PRESETS.includes(hook) && { backgroundColor: palette.chipFilled, borderColor: palette.chipFilled }]}
+                  onPress={() => { setCustomHookText(hook && !HOOK_PRESETS.includes(hook) ? hook : ""); setCustomHookOpen(true); }}
+                >
+                  <Text style={[st.personalizePillText, hook != null && !HOOK_PRESETS.includes(hook) && { color: palette.onAccent, fontWeight: "900" }]} numberOfLines={1}>
+                    {hook != null && !HOOK_PRESETS.includes(hook) ? hook : "Custom hook"}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {handleEditOpen ? (
+                <View style={[st.personalizePill, st.personalizeInputPill, { borderColor: palette.accent }]}>
+                  <TextInput
+                    style={st.personalizeInput}
+                    value={prefs.handle}
+                    onChangeText={(t) => updatePrefs({ handle: t })}
+                    placeholder="@yourname"
+                    placeholderTextColor={C.text4}
+                    autoFocus
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    maxLength={30}
+                    {...doneFieldProps()}
+                    onSubmitEditing={() => { setHandleEditOpen(false); Keyboard.dismiss(); }}
+                  />
+                  <TouchableOpacity onPress={() => { setHandleEditOpen(false); Keyboard.dismiss(); }} style={st.personalizeInputDone}>
+                    <Text style={[st.personalizeInputDoneText, { color: palette.accent }]}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity style={st.personalizePill} onPress={() => setHandleEditOpen(true)}>
+                  <Text style={st.personalizePillText} numberOfLines={1}>{prefs.handle ? prefs.handle : "+ Add your @handle"}</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[st.personalizePill, prefs.hidePrice && { backgroundColor: palette.chipFilled, borderColor: palette.chipFilled }]}
+                onPress={() => updatePrefs({ hidePrice: !prefs.hidePrice })}
+              >
+                <Text style={[st.personalizePillText, prefs.hidePrice && { color: palette.onAccent, fontWeight: "900" }]} numberOfLines={1}>
+                  {prefs.hidePrice ? "Price hidden" : "Hide price"}
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
 
             {isOwner && debug ? (
               <Text style={st.debugLine}>
@@ -709,21 +824,26 @@ export default function ShareStudio(props: ShareStudioProps) {
               </Text>
             ) : null}
 
+            {/* ROW 3: Share. Win variant adds a small "See the leaderboard"
+                link underneath. */}
             <View style={st.bottomBar}>
               {status ? (
                 <Text style={[st.statusText, status.kind === "fail" && st.statusTextFail]} numberOfLines={2}>{status.text}</Text>
               ) : null}
               <TouchableOpacity style={[st.shareBtn, { backgroundColor: palette.accent }]} onPress={share} disabled={sharing} activeOpacity={0.85}>
-                {sharing ? <ActivityIndicator color={palette.onAccent} /> : <Text style={[st.shareBtnText, { color: palette.onAccent }]}>Share →</Text>}
+                {sharing ? <ActivityIndicator color={palette.onAccent} /> : <Text style={[st.shareBtnText, { color: palette.onAccent }]}>Share</Text>}
               </TouchableOpacity>
+              {isWin && onLeaderboard ? (
+                <TouchableOpacity onPress={onLeaderboard} style={st.leaderboardLink}>
+                  <Text style={[st.leaderboardLinkText, { color: palette.sub }]}>See the leaderboard →</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           </View>
         )}
 
         {/* Off-screen capture - the SAME StudioCardContent at scale=1, the
-            real 1080px-wide canvas, never a small copy resized up. ViewShot's
-            width/height option pins the raster to exactly FORMAT_SIZES
-            pixels regardless of device pixel ratio. */}
+            real 1080px-wide canvas, never a small copy resized up. */}
         {ViewShot ? (
           <View style={{ position: "absolute", top: 0, left: -9999 }} pointerEvents="none">
             <ViewShot
@@ -755,58 +875,6 @@ export default function ShareStudio(props: ShareStudioProps) {
             </ViewShot>
           </View>
         ) : null}
-
-        {customizeOpen ? (
-          <KeyboardAvoidingView style={StyleSheet.absoluteFillObject} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-            <View style={st.sheetBackdrop}>
-              <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setCustomizeOpen(false)} />
-              <View style={st.sheet}>
-                <View style={st.sheetHeader}>
-                  <Text style={st.sheetTitle}>Customize</Text>
-                  <TouchableOpacity onPress={() => setCustomizeOpen(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                    <Text style={[st.sheetDoneText, { color: palette.accent }]}>Done</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <Text style={st.fieldLabel}>Handle</Text>
-                <TextInput
-                  style={st.input}
-                  value={prefs.handle}
-                  onChangeText={(t) => updatePrefs({ handle: t })}
-                  placeholder="@yourname (optional)"
-                  placeholderTextColor={C.text4}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-
-                <Text style={st.fieldLabel}>Hook (tap to set, tap again to clear)</Text>
-                <View style={st.chipRow}>
-                  {HOOK_PRESETS.map((h) => (
-                    <TouchableOpacity
-                      key={h}
-                      style={[st.chip, hook === h && { borderColor: palette.accent, backgroundColor: palette.chip }]}
-                      onPress={() => setHook((cur) => (cur === h ? null : h))}
-                    >
-                      <Text style={[st.chipText, hook === h && { color: palette.accent }]} numberOfLines={1}>{h}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <View style={st.toggleRow}>
-                  <Text style={st.fieldLabel}>Hide price</Text>
-                  <Switch value={prefs.hidePrice} onValueChange={(v) => updatePrefs({ hidePrice: v })} trackColor={{ true: palette.accent }} />
-                </View>
-
-                {winData ? (
-                  <View style={st.toggleRow}>
-                    <Text style={st.fieldLabel}>Show as Win card</Text>
-                    <Switch value={isWin} onValueChange={setIsWin} trackColor={{ true: palette.accent }} />
-                  </View>
-                ) : null}
-              </View>
-            </View>
-          </KeyboardAvoidingView>
-        ) : null}
       </View>
     </Modal>
   );
@@ -816,8 +884,6 @@ const st = StyleSheet.create({
   root: { flex: 1 },
   card: { overflow: "hidden", borderWidth: 1, borderColor: C.border },
   wordmarkPill: { position: "absolute", flexDirection: "row", alignItems: "center", backgroundColor: "rgba(0,0,0,0.45)", borderRadius: 100 },
-  // Top bar: X icon + the segmented control filling the rest of the row -
-  // no title (TASK 3: a bigger, simpler Studio screen).
   topBar: { flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
   closeHit: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
   topTitle: { color: C.text1, fontSize: 16, fontWeight: "800", flexShrink: 1, textAlign: "center" },
@@ -825,17 +891,32 @@ const st = StyleSheet.create({
   segment: { flex: 1, paddingVertical: 7, borderRadius: 9, borderWidth: 1.5, borderColor: C.border, alignItems: "center" },
   segmentText: { fontSize: 12, fontWeight: "800" },
   cardShadow: { borderRadius: 18, shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 6 },
-  // ONE controls row: 3 look pills + Adjust + Customize (TASK 3).
-  controlsRow: { flexDirection: "row", gap: 6, width: "100%", paddingHorizontal: 16, marginTop: 8 },
-  lookPill: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 100, borderWidth: 1.5, alignItems: "center" },
-  controlBtn: { flex: 1, paddingVertical: 9, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, alignItems: "center" },
-  controlBtnText: { color: C.text1, fontSize: 12, fontWeight: "800" },
+  // "Adjust photo" pill, ON the preview (bottom-right corner), min 44px tall.
+  adjustPill: { position: "absolute", right: 10, bottom: 10, flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44, paddingHorizontal: 14, borderRadius: 100, shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
+  adjustPillText: { fontSize: 13, fontWeight: "800" },
+  // ROW 1: look pills.
+  lookRow: { flexDirection: "row", gap: 8, width: "100%", paddingHorizontal: 16, marginTop: 10 },
+  lookPill: { flex: 1, paddingVertical: 10, borderRadius: 100, borderWidth: 1.5, alignItems: "center" },
+  // ROW 2: Personalize - always-visible horizontal pill scroller, never a
+  // sheet/dropdown/collapse.
+  personalizeLabel: { color: C.green, fontSize: 11, fontWeight: "900", letterSpacing: 1.5, marginTop: 14, marginLeft: 16, marginBottom: 6 },
+  personalizeScroll: { width: "100%" },
+  personalizeRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, alignItems: "center" },
+  personalizePill: { minHeight: 44, paddingHorizontal: 16, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface, alignItems: "center", justifyContent: "center" },
+  personalizePillText: { color: C.text2, fontSize: 14, fontWeight: "700" },
+  personalizeInputPill: { flexDirection: "row", alignItems: "center", paddingLeft: 16, paddingRight: 8, minWidth: 180 },
+  personalizeInput: { color: C.text1, fontSize: 14, fontWeight: "600", minWidth: 100, paddingVertical: 0 },
+  personalizeInputDone: { paddingHorizontal: 8, paddingVertical: 6 },
+  personalizeInputDoneText: { fontSize: 13, fontWeight: "800" },
   debugLine: { color: C.text4, fontSize: 10, fontFamily: "monospace" as any, marginTop: 8, textAlign: "center", paddingHorizontal: 16 },
-  bottomBar: { paddingHorizontal: 20, paddingBottom: 36, paddingTop: 10, gap: 8 },
+  // ROW 3: Share.
+  bottomBar: { paddingHorizontal: 20, paddingBottom: 30, paddingTop: 14, gap: 8 },
   statusText: { color: C.text2, fontSize: 12, textAlign: "center" },
   statusTextFail: { color: C.red },
   shareBtn: { borderRadius: 14, paddingVertical: 16, alignItems: "center" },
   shareBtnText: { fontSize: 16, fontWeight: "900" },
+  leaderboardLink: { alignItems: "center", paddingVertical: 4 },
+  leaderboardLinkText: { fontSize: 13, fontWeight: "700" },
 
   // Adjust-photo mode
   adjustTopBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
@@ -849,17 +930,4 @@ const st = StyleSheet.create({
   zoomResetText: { color: C.text2, fontSize: 13, fontWeight: "800" },
   doneBtn: { marginHorizontal: 20, marginBottom: 30, borderRadius: 14, paddingVertical: 15, alignItems: "center" },
   doneBtnText: { fontSize: 15, fontWeight: "900" },
-
-  // Customize sheet
-  sheetBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.6)" },
-  sheet: { backgroundColor: C.bg, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, paddingBottom: 34, borderTopWidth: 1, borderColor: C.border },
-  sheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  sheetTitle: { color: C.text1, fontSize: 16, fontWeight: "800" },
-  sheetDoneText: { fontSize: 14, fontWeight: "800" },
-  fieldLabel: { color: C.text4, fontSize: 11, fontWeight: "700", textTransform: "uppercase", marginBottom: 6, marginTop: 10 },
-  input: { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 10, color: C.text1, fontSize: 14, padding: 11 },
-  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: { backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.border, borderRadius: 100, paddingHorizontal: 12, paddingVertical: 7 },
-  chipText: { color: C.text2, fontSize: 12, fontWeight: "700" },
-  toggleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
 });

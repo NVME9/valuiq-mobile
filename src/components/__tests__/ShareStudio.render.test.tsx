@@ -41,6 +41,17 @@ function collectTextNodes(node: any, out: any[] = []): any[] {
   return out;
 }
 
+// Counts every rendered host node by type - react-native-svg's <Svg> root
+// shows up as "RNSVGSvgView", RN's own <Image> as "Image".
+function countByType(node: any, out: Record<string, number> = {}): Record<string, number> {
+  if (node == null) return out;
+  if (Array.isArray(node)) { node.forEach((n) => countByType(n, out)); return out; }
+  if (typeof node !== "object") return out;
+  if (node.type) out[node.type] = (out[node.type] || 0) + 1;
+  if (node.children) countByType(node.children, out);
+  return out;
+}
+
 const LOOKS: StudioLook[] = ["dark", "light", "bold"];
 const FORMATS: StudioFormat[] = ["story", "feed", "square"];
 
@@ -72,6 +83,13 @@ describe("StudioCardContent", () => {
         for (const n of textNodes) {
           expect(n.props.allowFontScaling).toBe(false);
         }
+        // ScanFrameBackground (grid) + ScanCorners (photo-frame brackets)
+        // + the price-zone glow are each one react-native-svg <Svg> root -
+        // at least 3 on screen, never silently dropped.
+        const types = countByType(json);
+        expect(types.RNSVGSvgView ?? 0).toBeGreaterThanOrEqual(3);
+        // The photo itself (cover backdrop + contain copy) actually renders.
+        expect(types.Image ?? 0).toBeGreaterThanOrEqual(2);
       });
     }
 

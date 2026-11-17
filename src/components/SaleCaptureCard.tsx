@@ -10,9 +10,9 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Image, ActivityIndicator,
 } from "react-native";
 import { C } from "../lib/theme";
-import { recordSaleOutcome, defaultDaysToSale, buildDisplayTitle, PendingScan } from "../lib/saleCapture";
-import { fetchFlexStat, concreteLine, cacheFlexStat, FlexStat } from "../lib/flexReveal";
+import { recordSaleOutcome, defaultDaysToSale, buildDisplayTitle, PendingScan, SaleLoggedPayload } from "../lib/saleCapture";
 import { CONDITION_OPTIONS } from "../lib/condition";
+import { numericFieldProps } from "./KeyboardDoneBar";
 
 // Same enum the scraper (valuiq-scraper/scraper.js EXTRACTION_SYSTEM) and
 // the admin log-sale route validate against - keeps every sold_platform
@@ -22,20 +22,20 @@ const PLATFORMS = ["eBay", "Poshmark", "Mercari", "Facebook", "Depop", "Whatnot"
 interface Props {
   token: string;
   scan: PendingScan;
+  // The caller (LogSaleModal) owns presenting whatever comes next - this
+  // card only ever hands state up, it never renders a Modal of its own.
+  // Always called last, unconditionally, once the save resolves (success
+  // or not) - closes whatever sheet is hosting this card.
   onDone: (scanId: string) => void;
-  // The caller (LogSaleModal) owns presenting the reveal - this card only
-  // ever hands state up, it never renders a Modal of its own.
-  //
-  // onReveal opens the reveal INSTANTLY on a successful save, before the
-  // crowd-comparison stat exists yet (stat starts null - the shell renders
-  // with the real profit/days already known from the save response).
-  // onRevealStat fills in the winning stat once fetchFlexStat resolves, so
-  // the FIRST reveal is never blocked on that network round-trip either.
-  onReveal: (itemName: string, brand: string | null, loadingSubStat: string, netProfit: number | null) => void;
-  onRevealStat: (stat: FlexStat) => void;
+  // Fired ONLY when a "sold" save succeeds WITH a real bought/sold price
+  // pair (never on the "skip price" path) - the caller uses this to
+  // navigate into the Share Studio's Win variant (see
+  // AGENTS.md: "after a sale is logged, navigate straight into this
+  // Studio with the Win variant - the post-sale reveal screen is removed").
+  onSold?: (payload: SaleLoggedPayload) => void;
 }
 
-export default function SaleCaptureCard({ token, scan, onDone, onReveal, onRevealStat }: Props) {
+export default function SaleCaptureCard({ token, scan, onDone, onSold }: Props) {
   const [price, setPrice] = useState("");
   const [days, setDays] = useState(() => String(defaultDaysToSale(scan.created_at)));
   const [saving, setSaving] = useState(false);
@@ -65,20 +65,23 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal, onRevea
     setSaving(false);
 
     if (result.success && result.scan?.id) {
-      const scanId = result.scan.id;
-      // Open the reveal shell INSTANTLY - the real profit/days are already
-      // known from the save response, so there's no reason to block on the
-      // crowd-comparison round-trip before showing anything.
-      onReveal(_name, _brand || null, concreteLine({
-        netProfit: result.scan.net_profit ?? null,
-        daysToSale: result.scan.days_to_sale ?? null,
-      }), result.scan.net_profit ?? null);
-      fetchFlexStat(token, scanId).then((stat) => {
-        if (stat) {
-          onRevealStat(stat);
-          cacheFlexStat(token, scanId, result.scan?.specialty_data, stat);
-        }
-      });
+      // Win Studio hand-off: only when the save actually resolved a real
+      // bought/sold pair (buy_price was already on the row; actual_sold_price
+      // just got written by this save, from the typed price) AND a finite
+      // profit - the "skip price" path has no sold amount to show a Win
+      // card with, so it falls through to the plain onDone close below.
+      const boughtPrice = Number(result.scan.buy_price) || 0;
+      const soldPrice = Number(result.scan.actual_sold_price) || (isNaN(p) ? 0 : p);
+      const profit = Number(result.scan.net_profit);
+      if (onSold && boughtPrice > 0 && soldPrice > 0 && Number.isFinite(profit)) {
+        onSold({
+          scanId: result.scan.id,
+          itemName: _name,
+          brand: _brand || null,
+          photoUri: scan.image_url || null,
+          boughtPrice, soldPrice, profit,
+        });
+      }
     }
     onDone(scan.id);
   }
@@ -119,9 +122,9 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal, onRevea
             style={s.priceInput}
             value={price}
             onChangeText={setPrice}
-            keyboardType="decimal-pad"
             placeholder="0.00"
             placeholderTextColor={C.text4}
+            {...numericFieldProps("decimal")}
           />
         </View>
         <View style={s.daysField}>
@@ -135,9 +138,9 @@ export default function SaleCaptureCard({ token, scan, onDone, onReveal, onRevea
             style={s.daysInput}
             value={days}
             onChangeText={(t) => setDays(t.replace(/[^0-9]/g, ""))}
-            keyboardType="number-pad"
             placeholderTextColor={C.text4}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 4 }}
+            {...numericFieldProps("integer")}
           />
           <Text style={s.daysLabel}>days</Text>
         </View>

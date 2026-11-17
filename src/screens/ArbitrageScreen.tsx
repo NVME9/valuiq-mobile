@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import HeaderLogo from "../components/HeaderLogo";
 import { API_BASE } from "../lib/api";
 
@@ -48,7 +49,7 @@ export default function ArbitrageScreen({ token, plan, onNavigate, onBack }: Pro
         {results.length>0&&<TouchableOpacity onPress={()=>{setResults([]);setSummary("");}} style={[s.navBtn,{marginLeft:"auto" as any}]}><Text style={s.navBtnText}>New Search</Text></TouchableOpacity>}
       </View>
 
-      <ScrollView contentContainerStyle={{padding:20,paddingBottom:60}}>
+      <ScrollView contentContainerStyle={{padding:20,paddingBottom:60}} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Text style={s.h1}>📈 Arbitrage Search</Text>
         <Text style={[s.body,{marginBottom:20}]}>Find underpriced items on eBay where the spread is big enough to profit on resale.</Text>
 
@@ -61,7 +62,7 @@ export default function ArbitrageScreen({ token, plan, onNavigate, onBack }: Pro
               <TextInput style={s.input} value={query} onChangeText={setQuery} placeholder="e.g. Nike Dunk Low, Stanley Cup, KitchenAid Mixer" placeholderTextColor={C.text4} onSubmitEditing={search}/>
             </View>
             <View><Text style={s.label}>Max buy price (optional)</Text>
-              <TextInput style={s.input} value={maxBuy} onChangeText={setMaxBuy} placeholder="$50" placeholderTextColor={C.text4} keyboardType="decimal-pad"/>
+              <TextInput style={s.input} value={maxBuy} onChangeText={setMaxBuy} placeholder="$50" placeholderTextColor={C.text4} {...numericFieldProps("decimal")}/>
             </View>
             <TouchableOpacity style={s.greenBtn} onPress={search} disabled={loading}>
               {loading?<ActivityIndicator color={C.greenDark}/>:<Text style={s.greenBtnText}>Find Arbitrage →</Text>}

@@ -6,15 +6,13 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
-import ViewShot from "react-native-view-shot";
-import * as Sharing from "expo-sharing";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { markScanStage, clearScanStage } from "../lib/scanStage";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
-import ShareCard from "../components/ShareCard";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import { API_BASE, scanImage, getProfitOracle, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, rerunScan, invalidateScanHistoryCache, logEvent, logClientError, reportClientError, peekProfileData, ScanRequestError } from "../lib/api";
 import { appendFailureLog, readFailureLog } from "../lib/failureLog";
 import { setLastScanResult } from "../lib/lastScanResult";
@@ -36,7 +34,7 @@ import { formatMoney } from "../lib/money";
 import { resolveProfitConfidence, buildAnswerBannerText } from "../lib/profitBanner";
 import { selectRecentSales } from "../lib/recentSales";
 import LogSaleModal from "../components/LogSaleModal";
-import { toPendingScan } from "../lib/saleCapture";
+import { toPendingScan, SaleLoggedPayload } from "../lib/saleCapture";
 import { CONDITION_OPTIONS, CONDITION_TO_DB } from "../lib/condition";
 import { buildCheckItemRerunPayload } from "../lib/checkItemConfirm";
 import { deriveCheckItemCard } from "../lib/checkItemCard";
@@ -228,14 +226,16 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   const [photos, setPhotos] = useState<string[]>([]);
   const [winShared, setWinShared] = useState(false);
   const [sharingWin, setSharingWin] = useState(false);
-  const [sharingImage, setSharingImage] = useState(false);
-  const shareCardRef = useRef<ViewShot>(null);
   // The immediate "log it now" path off a fresh scan result - the SOFT
   // NOTIFICATION ASK below this is the deferred (~2 week reminder) path;
-  // both coexist. Reuses the exact same LogSaleModal/SaleCaptureCard/
-  // FlexRevealBody flow History uses, so a sale logged here gets the same
-  // honest, cached reveal - no separate code path to keep in sync.
+  // both coexist. Reuses the exact same LogSaleModal/SaleCaptureCard flow
+  // History uses - a successful "sold" save with real numbers hands off to
+  // the Share Studio's Win variant (see loggedWin/studioWinDismissTimer
+  // below), the post-sale reveal screen this used to open is gone.
   const [showLogSale, setShowLogSale] = useState(false);
+  const [loggedWin, setLoggedWin] = useState<ShareStudioWinData | null>(null);
+  const studioWinDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (studioWinDismissTimer.current) clearTimeout(studioWinDismissTimer.current); }, []);
   const [brandInput, setBrandInput] = useState("");
   const [goDeeper, setGoDeeper] = useState(false);
   const [description, setDescription] = useState("");
@@ -403,24 +403,6 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     if (granted) { try { await scheduleSaleCheckIn(p.scanId, p.itemName); } catch {} }
   }
   function declineCheckIn() { setPendingCheckIn(null); setCheckInAsked(true); }
-
-  async function shareResultImage() {
-    if (!shareCardRef.current?.capture || sharingImage) return;
-    setSharingImage(true);
-    try {
-      const available = await Sharing.isAvailableAsync();
-      if (!available) {
-        Alert.alert("Sharing not available", "Sharing isn't supported on this device.");
-        return;
-      }
-      const uri = await shareCardRef.current.capture();
-      await Sharing.shareAsync(uri, { mimeType: "image/png", dialogTitle: "Share your ValuIQ find" });
-    } catch {
-      Alert.alert("Couldn't share", "Something went wrong creating the share image. Try again.");
-    } finally {
-      setSharingImage(false);
-    }
-  }
 
   // CHECK ITEM CONFIRM (2026-11-15, share-cta-and-check-item): the "Check
   // This Item" card's own re-run - calls rerunScan() directly (the exact
@@ -1407,7 +1389,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // - UPGRADE -
   if (step === "upgrade") return (
     <SafeAreaView style={s.safe} edges={["top","left","right"]}>
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 24, paddingBottom: 60 }}>
+      <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 24, paddingBottom: 60 }}>
         <Text style={{ fontSize: 52, textAlign: "center", marginBottom: 16 }}></Text>
         <Text style={[s.h1, { textAlign: "center" }]}>Free scans used up</Text>
         <Text style={[s.body, { textAlign: "center", marginBottom: 24 }]}>
@@ -2502,20 +2484,26 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
       >
       <SafeAreaView style={s.safe} edges={["top","left","right"]}>
         <StatusBar barStyle="light-content"/>
-        {/* Off-screen branded card, captured (not displayed) when sharing as an image */}
-        <View style={{ position: "absolute", top: 0, left: -9999 }} pointerEvents="none">
-          <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1, result: "tmpfile" }}>
-            <ShareCard result={result} oracle={oracle} photoBase64={displayPhotoBase64} />
-          </ViewShot>
-        </View>
-        {/* Same log-sale flow History uses (form -> honest Flex Reveal, one
-            Modal throughout) - opened by the "Already sold it?" nudge above,
-            right on this result screen instead of a detour through History. */}
+        {/* Same log-sale flow History uses (one Modal throughout, no second
+            Modal racing it) - opened by the "Already sold it?" nudge above,
+            right on this result screen instead of a detour through History.
+            A successful save with real numbers (onSold) hands off to the
+            Share Studio's Win variant below, AFTER this sheet actually
+            finishes dismissing - never in the same render commit as closing
+            it (see LogSaleModal.tsx's own header comment). */}
         <LogSaleModal
           visible={showLogSale}
           token={token}
           scan={result.id ? toPendingScan(result) : null}
           onClose={() => setShowLogSale(false)}
+          onSold={(payload: SaleLoggedPayload) => {
+            setShowLogSale(false);
+            if (studioWinDismissTimer.current) clearTimeout(studioWinDismissTimer.current);
+            studioWinDismissTimer.current = setTimeout(() => {
+              setLoggedWin({ boughtPrice: payload.boughtPrice, soldPrice: payload.soldPrice, profit: payload.profit });
+              setStudioOpen(true);
+            }, 350);
+          }}
         />
         <ShareStudio
           visible={studioOpen}
@@ -2532,7 +2520,8 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           heroVerdict={studioHeroVerdict}
           displayName={studioDisplayName}
           isOwner={isOwner}
-          winData={studioWinData}
+          winData={loggedWin || studioWinData}
+          onLeaderboard={() => { setStudioOpen(false); onNavigate("leaderboard"); }}
         />
         {/* Nav */}
         <View style={s.nav}>
@@ -2559,7 +2548,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         {/* paddingBottom covers the sticky Share CTA bar below this
             ScrollView (s.shareCtaBar) - without it, the last card in the
             scroll sits partly behind that bar instead of above it. */}
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,paddingBottom:hasVerdictOrNumber?130:60}} showsVerticalScrollIndicator={false}>
+        <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{padding:16,paddingBottom:hasVerdictOrNumber?130:60}} showsVerticalScrollIndicator={false}>
 
           {/* ALWAYS-ANSWER PROOF SCREEN (2026-11-10): there is no "not
               enough data / can't price" dead end any more - a thin/no-data
@@ -2801,7 +2790,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                       onChangeText={(t) => { setBuyPrice(t); setBuyPriceSource("user"); }}
                       placeholder="Tag price"
                       placeholderTextColor={C.text4}
-                      keyboardType="decimal-pad"
+                      {...numericFieldProps("decimal")}
                     />
                   </View>
                   {/* RESULT-FIX item 9 (2026-11-15): exactly two states -
@@ -3484,7 +3473,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         <TouchableOpacity onPress={() => (result ? setStep("result") : reset())} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
         <HeaderLogo textStyle={s.logoText}/>
       </View>
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+      <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
         <Text style={[s.h2, { marginBottom: 4 }]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.85}>
           Add any details
         </Text>

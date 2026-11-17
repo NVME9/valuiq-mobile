@@ -5,7 +5,6 @@ import {
 } from "react-native";
 import { C } from "./src/lib/theme";
 import LogoBadge from "./src/components/LogoBadge";
-import ScopeBackground from "./src/components/ScopeBackground";
 import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache, getScanById, invalidateScanHistoryCache, SessionRestoreNetworkError, logClientError, logEvent, reportClientError, flushQueuedClientErrors } from "./src/lib/api";
 import ErrorBoundary from "./src/components/ErrorBoundary";
 import { readScanStage, clearScanStage } from "./src/lib/scanStage";
@@ -14,7 +13,10 @@ import { disableFontScaling } from "./src/lib/disableFontScaling";
 import { supabase } from "./src/lib/supabase";
 import { addSaleCheckInTapListener } from "./src/lib/notifications";
 import LogSaleModal from "./src/components/LogSaleModal";
-import { toPendingScan } from "./src/lib/saleCapture";
+import ShareStudio, { ShareStudioWinData } from "./src/components/ShareStudio";
+import { toPendingScan, SaleLoggedPayload } from "./src/lib/saleCapture";
+import { KeyboardDoneAccessory } from "./src/components/KeyboardDoneBar";
+import { ScanFrameBackground, ScanCorners } from "./src/components/ScanFrameBackground";
 import * as Updates from "expo-updates";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { isBiometricEnabled, isBiometricAvailable, authenticateWithBiometrics, saveBiometricRefreshToken } from "./src/lib/biometrics";
@@ -73,7 +75,7 @@ export type Screen =
   "profile"|"relist"|"hot-now"|"arbitrage"|"upgrade"|
   "bundle"|"alerts"|"leaderboard"|"inventory"|"profit-tracker"|"deal-hunter"|"ai-coach"|"history"|"faq"|"admin"|"titan"|"import-sales"|"sold-data-debug"|"scan-confirm";
 
-const { height } = Dimensions.get("window");
+const { width, height } = Dimensions.get("window");
 
 // Races any promise against a timeout - used for the expo-updates check on
 // launch (see init()) so a slow/unreachable update service can never hang
@@ -164,7 +166,11 @@ function SplashScreen({ onDone }: { onDone:()=>void }) {
   return (
     <Animated.View style={[ss.splash, { opacity }]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bgDeep} />
-      <ScopeBackground accent={C.green} botInset={70} />
+      {/* ONE shared look with the new Share Studio card background - see
+          ScanFrameBackground.tsx's own header comment. Full-screen grid +
+          lens-style corner brackets inset from the screen edges. */}
+      <ScanFrameBackground width={width} height={height} bg={C.bgDeep} accent={C.green} />
+      <ScanCorners x={22} y={60} w={width - 44} h={height - 130} armLength={36} thickness={3} color={C.green} opacity={0.75} />
 
       <View style={ss.content}>
         {/* Logo block */}
@@ -856,6 +862,16 @@ export default function App() {
   // state) since the tapped notification can be up to ~12 days old and the
   // app may have been killed and relaunched since it fired.
   const [tapScan, setTapScan] = useState<any|null>(null);
+  // Win Studio hand-off for the "Did it sell?" push-tap flow - see
+  // LogSaleModal.tsx's own header comment on why this opens AFTER the sale
+  // sheet actually finishes dismissing (rootDismissTimer), never in the
+  // same render commit as closing it.
+  const [rootWinPayload, setRootWinPayload] = useState<SaleLoggedPayload | null>(null);
+  const [rootStudioOpen, setRootStudioOpen] = useState(false);
+  const rootDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => { if (rootDismissTimer.current) clearTimeout(rootDismissTimer.current); };
+  }, []);
   useEffect(() => {
     const sub = addSaleCheckInTapListener(async (scanId) => {
       if (!token) return;
@@ -1183,10 +1199,34 @@ export default function App() {
               scan={tapScan ? toPendingScan(tapScan) : null}
               onClose={() => setTapScan(null)}
               onSaved={() => invalidateScanHistoryCache(token)}
+              onSold={(payload) => {
+                setTapScan(null);
+                if (rootDismissTimer.current) clearTimeout(rootDismissTimer.current);
+                rootDismissTimer.current = setTimeout(() => { setRootWinPayload(payload); setRootStudioOpen(true); }, 350);
+              }}
             />
+            {rootWinPayload ? (
+              <ShareStudio
+                visible={rootStudioOpen}
+                onClose={() => setRootStudioOpen(false)}
+                token={token}
+                scanId={rootWinPayload.scanId}
+                itemName={rootWinPayload.itemName}
+                photoBase64={null}
+                photoUri={rootWinPayload.photoUri}
+                paidPrice={null}
+                sellPrice={null}
+                profit={rootWinPayload.profit}
+                roi={null}
+                profitConfidence="sold-backed"
+                heroVerdict={null}
+                winData={{ boughtPrice: rootWinPayload.boughtPrice, soldPrice: rootWinPayload.soldPrice, profit: rootWinPayload.profit } as ShareStudioWinData}
+              />
+            ) : null}
           </View>
         )}
       </Animated.View>
+      <KeyboardDoneAccessory />
     </View>
   </SafeAreaProvider>
   );

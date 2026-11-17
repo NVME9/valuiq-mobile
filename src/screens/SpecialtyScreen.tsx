@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import HeaderLogo from "../components/HeaderLogo";
 import { analyzeSpecialty, emailFromToken } from "../lib/api";
 import ShareButton from "../components/ShareButton";
@@ -767,7 +768,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
         <TouchableOpacity onPress={reset} style={s.navBack}><Text style={s.navBackText}>←</Text></TouchableOpacity>
         <View style={s.logoRow}><HeaderLogo textStyle={s.logoText}/></View>
       </View>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <View style={{flexDirection:"row", alignItems:"center", gap:10, marginBottom:10}}>
           <View style={[s.catBadge, {marginBottom:0, flex:1}]}>
             <Text style={{ fontSize: 22 }}>{selectedCat.icon}</Text>
@@ -822,7 +823,7 @@ export default function SpecialtyScreen({ token, onNavigate, onBack, navData }: 
             onChangeText={v => setBuyPriceInput(v.replace(/[^0-9.]/g, ""))}
             placeholder="What you paid or are considering paying"
             placeholderTextColor={C.text4}
-            keyboardType="decimal-pad"
+            {...numericFieldProps("decimal")}
           />
         </View>
 

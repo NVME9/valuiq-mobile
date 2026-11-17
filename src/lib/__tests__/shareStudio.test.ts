@@ -161,10 +161,10 @@ describe("zonesForFormat - structural no-overlap guarantee", () => {
     }
   });
 
-  test("photoZoneSize's height matches zonesForFormat's own photo zone, at the full 1080 canvas width", () => {
+  test("photoZoneSize's height matches zonesForFormat's own photo zone, width inset 72px from each side", () => {
     for (const format of formats) {
       const size = photoZoneSize(format);
-      expect(size.w).toBe(1080);
+      expect(size.w).toBe(1080 - 72 * 2);
       expect(size.h).toBe(zonesForFormat(format).photo.h);
     }
   });
@@ -191,6 +191,34 @@ describe("zonesForFormat - structural no-overlap guarantee", () => {
       expect(zones.photo.h).toBeGreaterThan(zones.price.h);
       expect(zones.photo.h).toBeGreaterThan(zones.name.h);
       expect(zones.photo.h).toBeGreaterThan(zones.footer.h);
+    }
+  });
+
+  // Card spec's own frame-height targets ("Story about 52%, Feed about
+  // 50%, Square about 46%") - loose tolerance (+/-1.5 points) since these
+  // are tuned, hand-picked constants, not a formula with an exact target.
+  test("photo zone's share of the full canvas matches the card spec's frame-height targets", () => {
+    const targets: Record<StudioFormat, number> = { story: 0.52, feed: 0.50, square: 0.46 };
+    for (const format of ["story", "feed", "square"] as StudioFormat[]) {
+      const share = zonesForFormat(format).photo.h / FORMAT_SIZES[format].h;
+      expect(share).toBeGreaterThan(targets[format] - 0.015);
+      expect(share).toBeLessThan(targets[format] + 0.015);
+    }
+  });
+
+  // No gap between any two adjacent zones can exceed 40px - by construction
+  // every zone starts exactly where the previous one ends (gap is always
+  // 0), but this names that structural fact as its own explicit assertion
+  // per the task's own "no gap larger than 40px" wording.
+  test("no gap between adjacent zones exceeds 40px (by construction, every gap is exactly 0)", () => {
+    for (const format of ["story", "feed", "square"] as StudioFormat[]) {
+      const zones = zonesForFormat(format);
+      const order: ZoneName[] = ["photo", "stamp", "price", "name", "footer"];
+      for (let i = 0; i < order.length - 1; i++) {
+        const gap = zones[order[i + 1]].y - (zones[order[i]].y + zones[order[i]].h);
+        expect(gap).toBeGreaterThanOrEqual(0);
+        expect(gap).toBeLessThanOrEqual(40);
+      }
     }
   });
 });
@@ -224,23 +252,20 @@ describe("defaultCropScale (default crop rules)", () => {
   const tallImg = { w: 800, h: 2000 }; // taller than wide (portrait)
   const squareImg = { w: 1000, h: 1000 };
 
-  test("Story always defaults to cover (1), regardless of photo orientation", () => {
-    expect(defaultCropScale("story", wideImg)).toBe(1);
-    expect(defaultCropScale("story", tallImg)).toBe(1);
-  });
-
-  test("Feed/Square default to contain-biased (< 1) for a wider-than-tall photo", () => {
-    for (const format of ["feed", "square"] as StudioFormat[]) {
-      const scale = defaultCropScale(format, wideImg);
-      expect(scale).toBeLessThan(1);
-      expect(scale).toBe(minCropScale(wideImg, photoZoneSize(format)));
-    }
-  });
-
-  test("Feed/Square still default to cover (1) for a portrait or square photo", () => {
-    for (const format of ["feed", "square"] as StudioFormat[]) {
-      expect(defaultCropScale(format, tallImg)).toBe(1);
-      expect(defaultCropScale(format, squareImg)).toBe(1);
+  // "Contain by default" is unconditional now (spec: "NEVER cut off") -
+  // defaultCropScale is just minCropScale, for EVERY orientation, not only
+  // a wider-than-tall photo. minCropScale only happens to equal 1 (cover)
+  // when the image's own aspect ratio exactly matches the zone's - true for
+  // neither a portrait nor a landscape image against these zones (all
+  // three formats' photo zones are themselves landscape rectangles), so
+  // this asserts the real invariant (delegates to minCropScale) rather than
+  // a hardcoded expected number.
+  test("every format/orientation defaults to exactly minCropScale - always contain, never force-cropped", () => {
+    for (const format of ["story", "feed", "square"] as StudioFormat[]) {
+      for (const img of [wideImg, tallImg, squareImg]) {
+        expect(defaultCropScale(format, img)).toBe(minCropScale(img, photoZoneSize(format)));
+        expect(defaultCropScale(format, img)).toBeLessThanOrEqual(1);
+      }
     }
   });
 

@@ -108,18 +108,15 @@ export function stepZoomScale(scale: number, direction: 1 | -1, step: number = Z
 }
 
 // The crop.scale a format should START at, before the user touches
-// anything. Story keeps the old "cover" default (its tall 9:16 zone suits
-// the typical portrait thrift photo). Feed/Square are the formats whose
-// zones are closer to square, where a WIDER-than-tall photo at cover
-// crops the sides off the subject - those default to "contain" instead
-// (whole photo visible, letterboxed) so the subject is never cut off
-// before the user has even touched the crop. A portrait/square photo on
-// Feed/Square still defaults to cover - contain would just add pointless
-// letterboxing on photos that already fit the zone fine.
+// anything - ALWAYS "contain" (the whole photo visible, never cropped) on
+// every format, per the card spec ("Photo shown contain by default...
+// NEVER cut off. Adjust photo lets me crop tighter."). A same-aspect or
+// taller-than-the-zone photo's contain scale already equals cover (no
+// letterboxing to add), so this never changes behavior for that case -
+// only a wider-than-the-zone photo (the one that USED to get force-cropped
+// at cover) is affected.
 export function defaultCropScale(format: StudioFormat, img: Size): number {
-  if (format === "story") return 1;
   if (img.w <= 0 || img.h <= 0) return 1;
-  if (img.w <= img.h) return 1;
   return minCropScale(img, photoZoneSize(format));
 }
 
@@ -176,21 +173,25 @@ export type Zones = Record<ZoneName, { y: number; h: number }>;
 // (handle/wordmark - the least essential line) is the one thing allowed to
 // fall into the reserved bottom strip.
 const STORY_TEXT_BAND_END = 1440;
-const STORY_ZONE_H = { stamp: 100, price: 320, name: 170 };
+// Tuned so photo gets ~52% of the FULL 1920 canvas (998/1920) while stamp/
+// price/name still sum to exactly 442 = 1440 - 998, keeping every one of
+// them inside the y=250..1440 safe band by construction.
+const STORY_ZONE_H = { stamp: 80, price: 235, name: 127 };
 
 // Feed/Square have no equivalent platform-UI overlay to dodge, so their
 // three flexible zones just split whatever height remains (after the fixed
-// stamp/footer bands) as a fraction of that remainder - same approach as
-// before, just re-tuned to give photo more room now that this card is
-// styled like the win card (big hero number, not a big empty panel) rather
-// than needing a tall price/name block to not look bare.
+// stamp/footer bands) as a fraction of that remainder. Fractions tuned so
+// photo lands at ~50% (Feed) / ~46% (Square) of the FULL canvas height, not
+// just of the flexible remainder - see each format's own comment.
 const FIXED: Record<"feed" | "square", { stamp: number; footer: number }> = {
   feed: { stamp: 90, footer: 100 },
   square: { stamp: 80, footer: 90 },
 };
+// Feed: flexH = 1350-90-100 = 1160; photo 0.582*1160 ≈ 675 = 50.0% of 1350.
+// Square: flexH = 1080-80-90 = 910; photo 0.546*910 ≈ 497 = 46.0% of 1080.
 const ZONE_FRACTIONS: Record<"feed" | "square", { photo: number; price: number; name: number }> = {
-  feed: { photo: 0.62, price: 0.24, name: 0.14 },
-  square: { photo: 0.58, price: 0.26, name: 0.16 },
+  feed: { photo: 0.582, price: 0.264, name: 0.154 },
+  square: { photo: 0.546, price: 0.281, name: 0.173 },
 };
 
 export function zonesForFormat(format: StudioFormat): Zones {
@@ -225,14 +226,22 @@ export function zonesForFormat(format: StudioFormat): Zones {
   return { photo, stamp, price, name, footer };
 }
 
-// The native (scale=1, 1080-wide-canvas) size of just the photo zone, in
-// its own right aspect ratio - this is the shape the "Adjust photo" crop
-// frame uses, so what the user crops to is EXACTLY what the card's photo
-// zone will show, never a different (e.g. full 9:16 story) aspect that
+// Photo frame inset from the sides (card spec: "photo inset 72px from the
+// sides") - subtracted from BOTH left and right, never top/bottom (the
+// frame still fills its whole zone height - see zonesForFormat's own
+// photo.h), so the frame-height-share tuning above (STORY_ZONE_H/
+// ZONE_FRACTIONS) stays exactly the photo frame's own height, not a looser
+// zone reservation around it.
+export const PHOTO_FRAME_INSET = 72;
+
+// The native (scale=1, 1080-canvas) size of just the photo FRAME (already
+// inset from the sides), in its own right aspect ratio - this is the shape
+// the "Adjust photo" crop frame uses, so what the user crops to is EXACTLY
+// what the card's photo frame will show, never a different aspect that
 // would make the on-screen crop a lie about what gets exported.
 export function photoZoneSize(format: StudioFormat): Size {
   const zones = zonesForFormat(format);
-  return { w: FORMAT_SIZES[format].w, h: zones.photo.h };
+  return { w: FORMAT_SIZES[format].w - PHOTO_FRAME_INSET * 2, h: zones.photo.h };
 }
 
 // Scales every zone's y/h by a pixel-per-pixel factor - the SAME geometry
