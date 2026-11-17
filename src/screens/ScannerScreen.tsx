@@ -41,7 +41,7 @@ import { CONDITION_OPTIONS, CONDITION_TO_DB } from "../lib/condition";
 import { buildCheckItemRerunPayload } from "../lib/checkItemConfirm";
 import { deriveCheckItemCard } from "../lib/checkItemCard";
 import { evaluateReview, requestReviewIfEligible, REVIEW_PROMPT_DELAY_MS, ReviewDebugState } from "../lib/storeReview";
-import RevealScreen from "../components/RevealScreen";
+import ShareStudio, { ShareStudioWinData } from "../components/ShareStudio";
 
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
@@ -721,26 +721,24 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // take the price field, nav, and everything else below with it for no
   // reason - same narrowing logic as the existing price-field boundary.
   const [resultCardBoundaryKey, setResultCardBoundaryKey] = useState(0);
-  // SHARE REVEAL (2026-11-11): available on every scan, not just a BUY -
-  // see the "Share reveal" button's own comment below for why.
-  const [revealOpen, setRevealOpen] = useState(false);
+  // SHARE STUDIO (2026-11-17, replaces RevealScreen/RevealPhotoEditor):
+  // available on every scan, not just a BUY - see the sticky "Share this
+  // find" bar's own comment below for why.
+  const [studioOpen, setStudioOpen] = useState(false);
 
   function reset() {
     setStep("camera");
     setResult(null);
     // MEMORY FIX (2026-11-14, edit-photo->rescan crash investigation):
-    // reset() never closed the Share Reveal modal if it was still open -
-    // RevealScreen (plus its off-screen ViewShot export card) and, inside
-    // it, RevealPhotoEditor (which eager-bakes a full decoded image into
-    // state on every rotate/flip/straighten) can together be holding
-    // several extra decoded images in native memory. Leaving that whole
-    // tree mounted while a brand-new scan immediately starts capturing and
-    // compressing MORE photos stacks peak memory right at the "Uploading
-    // your photos" stage - the exact stage a suspected OOM crash was seen
-    // at after a scan -> Edit Photo -> Done -> New Scan sequence. Closing
-    // it here guarantees that whole subtree (and its decoded images)
-    // unmounts before the next scan's own captures begin.
-    setRevealOpen(false);
+    // reset() never closed the Share Studio modal if it was still open -
+    // its own off-screen ViewShot export card can be holding an extra
+    // decoded image in native memory. Leaving that whole tree mounted while
+    // a brand-new scan immediately starts capturing and compressing MORE
+    // photos stacks peak memory right at the "Uploading your photos" stage -
+    // the exact stage a suspected OOM crash was seen at after a scan ->
+    // New Scan sequence. Closing it here guarantees that whole subtree (and
+    // its decoded image) unmounts before the next scan's own captures begin.
+    setStudioOpen(false);
     scanStageTimersRef.current.forEach(clearTimeout);
     scanStageTimersRef.current = [];
     clearScanStage();
@@ -2425,31 +2423,38 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
     const confidenceLabel = confidenceTier === "high" ? "High confidence" : confidenceTier === "medium" ? "Medium confidence" : "Estimate - verify";
     const confidenceColor = confidenceTier === "high" ? C.green : confidenceTier === "medium" ? C.yellow : C.text4;
 
-    // SHARE REVEAL DATA (2026-11-11): the ONE place this screen decides
-    // what the reveal card is allowed to show - RevealScreen itself never
-    // recomputes anything (see its own header comment), so every gate that
-    // withholds a number on THIS proof screen (maxBuyLocked,
-    // withholdConfidentNumbers) must be applied here too, before the value
-    // ever reaches that component. revealProfitAfterFees mirrors heroProfit
-    // when a price was entered, or projects the SAME formula against the
-    // max-buy ceiling when it wasn't - "profit after fees" always means
-    // something concrete, never a bare $0 for an unpriced scan.
-    const revealCostBasis = enteredBp > 0 ? enteredBp : (maxBuy || 0);
-    const revealProfitAfterFees = (!maxBuyLocked && !withholdConfidentNumbers && revealCostBasis > 0 && planningPrice > 0)
-      ? Math.round((planningPrice - localFees - revealCostBasis - shippingCost) * 100) / 100
+    // SHARE STUDIO DATA (2026-11-17): the ONE place this screen decides
+    // what the Studio card is allowed to show - ShareStudio itself never
+    // recomputes anything, so every gate that withholds a number on THIS
+    // proof screen (maxBuyLocked, withholdConfidentNumbers) must be applied
+    // here too, before the value ever reaches that component. studioProfit
+    // mirrors heroProfit when a price was entered, or projects the SAME
+    // formula against the max-buy ceiling when it wasn't.
+    const studioCostBasis = enteredBp > 0 ? enteredBp : (maxBuy || 0);
+    const studioProfit = (!maxBuyLocked && !withholdConfidentNumbers && studioCostBasis > 0 && planningPrice > 0)
+      ? Math.round((planningPrice - localFees - studioCostBasis - shippingCost) * 100) / 100
       : null;
-    const revealProfitLabel = enteredBp > 0 ? "actual profit after fees" : "projected profit after fees";
-    const revealVerdictLabel = maxBuyLocked ? null : outcome.label;
-    // CREATOR CODE (item 3): read from whatever profile data is ALREADY
-    // cached (peekProfileData - zero network calls from this screen, see
-    // its own "no API call" comment elsewhere in this file) - no confirmed
-    // field name exists for this yet server-side, so every plausible one is
-    // tried and this just quietly renders nothing if none match ("skip if
-    // not available," per spec - never a placeholder or an error).
+    const studioVerdictLabel = maxBuyLocked ? null : outcome.label;
+    // DISPLAY NAME: read from whatever profile data is ALREADY cached
+    // (peekProfileData - zero network calls from this screen) - only ever
+    // seeds the Studio handle field's FIRST-EVER default, never required.
     const cachedProfile: any = peekProfileData(token)?.profile;
-    const revealCreatorCode: string | null =
-      cachedProfile?.creatorCode || cachedProfile?.creator_code || cachedProfile?.myCreatorCode || cachedProfile?.my_creator_code || null;
-    const revealDisplayName: string | null = cachedProfile?.display_name || cachedProfile?.full_name || null;
+    const studioDisplayName: string | null = cachedProfile?.display_name || cachedProfile?.full_name || null;
+    // WIN VARIANT (item 6): a logged sale's real bought/sold/profit numbers,
+    // read straight off the raw saved-scan row (navData.viewScan - the SAME
+    // row HistoryScreen already reads actual_sold_price/buy_price/net_profit
+    // off) when this mount is viewing one. Read-only - never recomputed,
+    // never touches scan/history logic, just presentation input.
+    const viewScanRow: any = navData?.viewScan;
+    const loggedSoldPrice = Number(viewScanRow?.actual_sold_price) || 0;
+    const loggedBuyPrice = Number(viewScanRow?.buy_price) || 0;
+    const studioWinData: ShareStudioWinData | null = (loggedSoldPrice > 0 && loggedBuyPrice > 0)
+      ? {
+          boughtPrice: loggedBuyPrice,
+          soldPrice: loggedSoldPrice,
+          profit: viewScanRow?.net_profit != null ? Number(viewScanRow.net_profit) : loggedSoldPrice - loggedBuyPrice,
+        }
+      : null;
 
     // TOP-LEVEL ERROR BOUNDARY (2026-11-10, proof-screen - finishes the
     // "top-level ErrorBoundary around scan->result flow" crash-hardening
@@ -2501,23 +2506,23 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           scan={result.id ? toPendingScan(result) : null}
           onClose={() => setShowLogSale(false)}
         />
-        <RevealScreen
-          visible={revealOpen}
-          onClose={() => setRevealOpen(false)}
+        <ShareStudio
+          visible={studioOpen}
+          onClose={() => setStudioOpen(false)}
           token={token}
           scanId={(result.id ?? result.scanId ?? result.scan_id) != null ? String(result.id ?? result.scanId ?? result.scan_id) : null}
           itemName={result.itemName || result.item_name || "Unknown Item"}
           photoBase64={displayPhotoBase64 || null}
-          enteredPrice={enteredBp > 0 ? enteredBp : null}
-          typicalPrice={sellPriceForProfit > 0 ? sellPriceForProfit : null}
-          priceLow={hasServerRange ? serverPriceLow : null}
-          priceHigh={hasServerRange ? serverPriceHigh : null}
-          profitAfterFees={revealProfitAfterFees}
-          profitLabel={revealProfitLabel}
-          verdictLabel={revealVerdictLabel}
-          verdictAccent={outcome.accent}
-          displayName={revealDisplayName}
-          creatorCode={revealCreatorCode}
+          paidPrice={enteredBp > 0 ? enteredBp : null}
+          sellPrice={sellPriceForProfit > 0 ? sellPriceForProfit : null}
+          profit={studioProfit}
+          roi={!maxBuyLocked && !withholdConfidentNumbers ? heroRoi : null}
+          profitConfidence={profitConfidence}
+          verdictEmoji={maxBuyLocked ? null : outcome.emoji}
+          verdictLabel={studioVerdictLabel}
+          displayName={studioDisplayName}
+          isOwner={isOwner}
+          winData={studioWinData}
         />
         {/* Nav */}
         <View style={s.nav}>
@@ -3208,7 +3213,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                   scope for this change), just no longer reachable from a
                   button in the scroll. The one share entry point now is the
                   sticky "Share this find" bar below the ScrollView, which
-                  opens Share Reveal instead (setRevealOpen) - see that
+                  opens the Share Studio instead (setStudioOpen) - see that
                   bar's own comment for why one button beats two competing
                   share actions buried in the scroll. */}
 
@@ -3437,17 +3442,17 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
             position notwithstanding. Replaces the two buried "Share as
             image"/"Share reveal" buttons that used to live in the scroll
             (see their own removal comments above) with the one obvious
-            entry point into the SAME Share Reveal flow (setRevealOpen) the
-            old "Share reveal" button opened. Gated on hasVerdictOrNumber -
-            never shows on CHECK ITEM (its own card above has nothing yet
-            to share) or on the genuine "Not enough data to price this yet"
-            dead end. */}
+            entry point into the Share Studio (setStudioOpen), which replaced
+            the old RevealScreen this bar used to open. Gated on
+            hasVerdictOrNumber - never shows on CHECK ITEM (its own card
+            above has nothing yet to share) or on the genuine "Not enough
+            data to price this yet" dead end. */}
         {hasVerdictOrNumber && (
           <View style={s.shareCtaBar}>
             <TouchableOpacity
               style={s.shareCtaBtn}
               activeOpacity={0.85}
-              onPress={() => setRevealOpen(true)}
+              onPress={() => setStudioOpen(true)}
             >
               <Text style={s.shareCtaBtnText}>Share this find</Text>
             </TouchableOpacity>

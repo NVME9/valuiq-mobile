@@ -143,7 +143,7 @@ function main() {
     console.log(`  ${pkg}`);
     for (const f of fileSet) console.log(`    imported by ${f}`);
   }
-  console.log("\nFix: either lazy-require the module (guarded try/catch, feature hidden when it's missing - see RevealScreen.tsx/RevealPhotoEditor.tsx for the pattern), or hold this change for the next native build and regenerate the baseline from that build's commit.");
+  console.log("\nFix: either lazy-require the module (guarded try/catch, feature hidden when it's missing - see ShareStudio.tsx for the pattern), or hold this change for the next native build and regenerate the baseline from that build's commit.");
   process.exit(1);
 }
 
