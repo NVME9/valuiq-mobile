@@ -71,6 +71,27 @@ export function coverScale(img: Size, frame: Size): number {
   return Math.max(frame.w / img.w, frame.h / img.h);
 }
 
+// "contain" scale: the (smaller) zoom at which the WHOLE image fits inside
+// the frame with no cropping at all - the counterpart to coverScale's
+// Math.max, letterboxed on whichever axis has slack. This is what lets the
+// photo zone show a subject in full instead of being forced to crop it.
+export function containScale(img: Size, frame: Size): number {
+  if (img.w <= 0 || img.h <= 0) return 1;
+  return Math.min(frame.w / img.w, frame.h / img.h);
+}
+
+// The lowest RELATIVE crop.scale (relative to coverScale, same unit every
+// other crop value in this file uses) that still shows the image fully
+// contained in the frame - always <= 1 since contain <= cover by
+// definition. clampZoomScale's own default floor of 1 is cover (the old,
+// crop-forced minimum); passing this as the `min` argument is what lets
+// "Adjust photo" zoom OUT past cover to show the whole subject.
+export function minCropScale(img: Size, frame: Size): number {
+  const cover = coverScale(img, frame);
+  if (cover <= 0) return 1;
+  return containScale(img, frame) / cover;
+}
+
 export function clampZoomScale(scale: number, min = 1, max = 4): number {
   return clamp(scale, min, max);
 }
@@ -78,11 +99,28 @@ export function clampZoomScale(scale: number, min = 1, max = 4): number {
 export const ZOOM_STEP = 0.1;
 
 // The +/- zoom buttons (item B: "always-working controls") step by a fixed
-// 10% of the base cover scale, then re-clamp into the normal [1,4] range -
-// a button press can NEVER do nothing, unlike a pinch gesture a device
-// might fail to recognize.
-export function stepZoomScale(scale: number, direction: 1 | -1, step: number = ZOOM_STEP): number {
-  return clampZoomScale(scale + direction * step);
+// 10% of the base cover scale, then re-clamp into the normal [1,4] range (or
+// [min,4] when a caller passes a lower floor, e.g. minCropScale, to allow
+// zooming out to "contain") - a button press can NEVER do nothing, unlike a
+// pinch gesture a device might fail to recognize.
+export function stepZoomScale(scale: number, direction: 1 | -1, step: number = ZOOM_STEP, min = 1): number {
+  return clampZoomScale(scale + direction * step, min);
+}
+
+// The crop.scale a format should START at, before the user touches
+// anything. Story keeps the old "cover" default (its tall 9:16 zone suits
+// the typical portrait thrift photo). Feed/Square are the formats whose
+// zones are closer to square, where a WIDER-than-tall photo at cover
+// crops the sides off the subject - those default to "contain" instead
+// (whole photo visible, letterboxed) so the subject is never cut off
+// before the user has even touched the crop. A portrait/square photo on
+// Feed/Square still defaults to cover - contain would just add pointless
+// letterboxing on photos that already fit the zone fine.
+export function defaultCropScale(format: StudioFormat, img: Size): number {
+  if (format === "story") return 1;
+  if (img.w <= 0 || img.h <= 0) return 1;
+  if (img.w <= img.h) return 1;
+  return minCropScale(img, photoZoneSize(format));
 }
 
 // Clamps a pan translate so the frame is always fully covered by the image
@@ -129,24 +167,48 @@ export function imagePlacement(img: Size, nativeFrame: Size, crop: { scale: numb
 export type ZoneName = "photo" | "stamp" | "price" | "name" | "footer";
 export type Zones = Record<ZoneName, { y: number; h: number }>;
 
-// Fixed-height zones (same at every format - a tilted stamp and the footer
-// mark don't need to grow with a taller canvas).
-const STAMP_H = 90;
-const FOOTER_H = 90;
+// Instagram Stories overlay native UI at the very top and across roughly
+// the bottom quarter (reply bar) - key TEXT has to stay inside y=250..1440
+// or a viewer's own UI chrome sits on top of it. That band is a HARD
+// ceiling on how much room stamp+price+name can claim; the photo is not
+// text and is free to run full-bleed above it, so photo gets everything
+// up to that ceiling (as large as the safe band allows) and footer
+// (handle/wordmark - the least essential line) is the one thing allowed to
+// fall into the reserved bottom strip.
+const STORY_TEXT_BAND_END = 1440;
+const STORY_ZONE_H = { stamp: 100, price: 320, name: 170 };
 
-// The three flexible zones split whatever height remains, as a fraction of
-// that remainder. Fractions sum to 1 per format so rounding slack lands on
-// the footer only (never on photo/stamp/price/name, i.e. never where it
-// could cause an overlap). Square gives the price/name zones relatively
-// more room than story does, since there's less total height to share.
-const ZONE_FRACTIONS: Record<StudioFormat, { photo: number; price: number; name: number }> = {
-  story: { photo: 0.60, price: 0.24, name: 0.16 },
-  feed: { photo: 0.54, price: 0.28, name: 0.18 },
-  square: { photo: 0.46, price: 0.32, name: 0.22 },
+// Feed/Square have no equivalent platform-UI overlay to dodge, so their
+// three flexible zones just split whatever height remains (after the fixed
+// stamp/footer bands) as a fraction of that remainder - same approach as
+// before, just re-tuned to give photo more room now that this card is
+// styled like the win card (big hero number, not a big empty panel) rather
+// than needing a tall price/name block to not look bare.
+const FIXED: Record<"feed" | "square", { stamp: number; footer: number }> = {
+  feed: { stamp: 90, footer: 100 },
+  square: { stamp: 80, footer: 90 },
+};
+const ZONE_FRACTIONS: Record<"feed" | "square", { photo: number; price: number; name: number }> = {
+  feed: { photo: 0.62, price: 0.24, name: 0.14 },
+  square: { photo: 0.58, price: 0.26, name: 0.16 },
 };
 
 export function zonesForFormat(format: StudioFormat): Zones {
   const { h: H } = FORMAT_SIZES[format];
+
+  if (format === "story") {
+    const { stamp: stampH, price: priceH, name: nameH } = STORY_ZONE_H;
+    const photoH = STORY_TEXT_BAND_END - stampH - priceH - nameH;
+    let y = 0;
+    const photo = { y, h: photoH }; y += photoH;
+    const stamp = { y, h: stampH }; y += stampH;
+    const price = { y, h: priceH }; y += priceH;
+    const name = { y, h: nameH }; y += nameH;
+    const footer = { y, h: H - y }; // the reserved bottom strip, by construction >= H - 1440
+    return { photo, stamp, price, name, footer };
+  }
+
+  const { stamp: STAMP_H, footer: FOOTER_H } = FIXED[format];
   const frac = ZONE_FRACTIONS[format];
   const flexH = H - STAMP_H - FOOTER_H;
   const photoH = Math.round(flexH * frac.photo);

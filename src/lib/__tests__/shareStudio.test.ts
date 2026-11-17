@@ -7,6 +7,9 @@ import {
   frameSizeForFormat,
   frameSizeForRatio,
   coverScale,
+  containScale,
+  minCropScale,
+  defaultCropScale,
   clampZoomScale,
   stepZoomScale,
   clampPanTranslate,
@@ -69,6 +72,10 @@ describe("clampZoomScale / stepZoomScale", () => {
     expect(stepZoomScale(1, 1)).toBeCloseTo(1.1, 5);
     expect(stepZoomScale(1, -1)).toBe(1); // already at the floor, button press is a no-op at the clamp, never negative
     expect(stepZoomScale(3.95, 1)).toBe(4); // clamps at the ceiling
+  });
+  test("a caller can pass a lower floor (e.g. minCropScale) to allow zooming out below the default cover floor of 1", () => {
+    expect(stepZoomScale(0.6, -1, 0.1, 0.5)).toBeCloseTo(0.5, 5); // clamps at the custom floor, not 1
+    expect(stepZoomScale(0.6, 1, 0.1, 0.5)).toBeCloseTo(0.7, 5);
   });
 });
 
@@ -160,6 +167,85 @@ describe("zonesForFormat - structural no-overlap guarantee", () => {
       expect(size.w).toBe(1080);
       expect(size.h).toBe(zonesForFormat(format).photo.h);
     }
+  });
+
+  // Story-specific: Instagram overlays native UI at the very top and across
+  // roughly the bottom quarter of a Story - key TEXT (the stamp/price/name
+  // zones) has to stay inside y=250..1440 or a viewer's own chrome covers
+  // it. Only the photo (not text) is allowed to run through y=0..250; only
+  // the footer (handle/wordmark, least essential) is allowed to fall past
+  // y=1440.
+  test("story: key text (stamp/price/name) stays inside the y=250..1440 safe band", () => {
+    const zones = zonesForFormat("story");
+    expect(zones.stamp.y).toBeGreaterThanOrEqual(250);
+    expect(zones.name.y + zones.name.h).toBeLessThanOrEqual(1440);
+    // footer (handle/wordmark) is the one zone allowed into the reserved
+    // bottom strip - it must start at/after the text band's own end.
+    expect(zones.footer.y).toBeGreaterThanOrEqual(1440);
+  });
+
+  test("feed/square have no such safe-band ceiling - photo is free to be the dominant zone", () => {
+    for (const format of ["feed", "square"] as StudioFormat[]) {
+      const zones = zonesForFormat(format);
+      expect(zones.photo.h).toBeGreaterThan(zones.stamp.h);
+      expect(zones.photo.h).toBeGreaterThan(zones.price.h);
+      expect(zones.photo.h).toBeGreaterThan(zones.name.h);
+      expect(zones.photo.h).toBeGreaterThan(zones.footer.h);
+    }
+  });
+});
+
+describe("containScale / minCropScale (never force-cropping the subject)", () => {
+  test("containScale picks the SMALLER of the two axis ratios (the opposite of coverScale)", () => {
+    expect(containScale({ w: 100, h: 200 }, { w: 50, h: 50 })).toBe(0.25);
+    expect(containScale({ w: 200, h: 100 }, { w: 300, h: 300 })).toBe(1.5);
+  });
+  test("degenerate image size never divides by zero", () => {
+    expect(containScale({ w: 0, h: 0 }, { w: 100, h: 100 })).toBe(1);
+  });
+  test("minCropScale is <= 1 (contain is always <= cover) and exactly 1 for a same-aspect image/frame", () => {
+    const img = { w: 1000, h: 1000 };
+    const frame = { w: 500, h: 500 };
+    expect(minCropScale(img, frame)).toBe(1);
+  });
+  test("minCropScale is well below 1 for a wide photo in a tall/square frame - it CAN zoom out past cover", () => {
+    const img = { w: 2000, h: 500 }; // very wide
+    const frame = { w: 500, h: 500 }; // square zone
+    const min = minCropScale(img, frame);
+    expect(min).toBeLessThan(1);
+    // at that min, the absolute scale equals containScale exactly - the
+    // whole image fits with no cropping at all.
+    expect(coverScale(img, frame) * min).toBeCloseTo(containScale(img, frame), 5);
+  });
+});
+
+describe("defaultCropScale (default crop rules)", () => {
+  const wideImg = { w: 2000, h: 800 }; // wider than tall
+  const tallImg = { w: 800, h: 2000 }; // taller than wide (portrait)
+  const squareImg = { w: 1000, h: 1000 };
+
+  test("Story always defaults to cover (1), regardless of photo orientation", () => {
+    expect(defaultCropScale("story", wideImg)).toBe(1);
+    expect(defaultCropScale("story", tallImg)).toBe(1);
+  });
+
+  test("Feed/Square default to contain-biased (< 1) for a wider-than-tall photo", () => {
+    for (const format of ["feed", "square"] as StudioFormat[]) {
+      const scale = defaultCropScale(format, wideImg);
+      expect(scale).toBeLessThan(1);
+      expect(scale).toBe(minCropScale(wideImg, photoZoneSize(format)));
+    }
+  });
+
+  test("Feed/Square still default to cover (1) for a portrait or square photo", () => {
+    for (const format of ["feed", "square"] as StudioFormat[]) {
+      expect(defaultCropScale(format, tallImg)).toBe(1);
+      expect(defaultCropScale(format, squareImg)).toBe(1);
+    }
+  });
+
+  test("a degenerate image size never crashes and defaults to cover", () => {
+    expect(defaultCropScale("feed", { w: 0, h: 0 })).toBe(1);
   });
 });
 

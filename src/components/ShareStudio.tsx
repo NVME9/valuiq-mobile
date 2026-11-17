@@ -33,7 +33,7 @@ import {
   Dimensions, Share, TextInput, ActivityIndicator, Switch, PanResponder,
   KeyboardAvoidingView, Platform, LayoutChangeEvent,
 } from "react-native";
-import Svg, { Path } from "react-native-svg";
+import Svg, { Path, Defs, RadialGradient, Stop, Rect } from "react-native-svg";
 import { C } from "../lib/theme";
 import ValuIQLogo from "./ValuIQLogo";
 import Wordmark from "./Wordmark";
@@ -42,6 +42,7 @@ import {
   FORMAT_SIZES, FORMAT_LABELS, LOOK_LABELS,
   frameSizeForFormat, frameSizeForRatio, photoZoneSize, zonesForFormat, scaleZones,
   coverScale, clampZoomScale, stepZoomScale, clampPanTranslate, imagePlacement,
+  minCropScale, defaultCropScale,
   stampForHeroVerdict, buildPriceBlock, buildWinCardText, PriceBlock, WinCardText,
   formatFileSize,
 } from "../lib/shareStudio";
@@ -91,13 +92,19 @@ function CloseIcon({ color, size = 20 }: { color: string; size?: number }) {
   );
 }
 
-const LOOKS: Record<StudioLook, { bg: string; card: string; text: string; sub: string; accent: string; chip: string; onAccent: string; bigPrice?: boolean }> = {
-  dark: { bg: "#0a0906", card: "#17150f", text: "#f5f2ed", sub: "#bdb8b0", accent: C.green, chip: "rgba(255,255,255,0.08)", onAccent: C.greenDark },
+// bg/card here are the SAME dark near-black ValuIQ uses for the real win
+// card (ShareCard.tsx's C.bg/C.surface, FlexRevealCard's C.bg) - "dark" is
+// deliberately the closest match to that existing look, which is why it
+// stays the default (see studioPrefs.ts). divider is the footer panel's
+// top-border tint (ShareCard's footer bar divider), tuned per look so it
+// reads on both a near-black and a white card.
+const LOOKS: Record<StudioLook, { bg: string; card: string; text: string; sub: string; accent: string; chip: string; divider: string; onAccent: string; bigPrice?: boolean }> = {
+  dark: { bg: "#0a0906", card: "#17150f", text: "#f5f2ed", sub: "#bdb8b0", accent: C.green, chip: "rgba(255,255,255,0.08)", divider: "rgba(255,255,255,0.1)", onAccent: C.greenDark },
   // MEASURED: light's accent is a dark green ("#2c7a1f") for readable
   // contrast on a light panel - the other looks' near-black greenDark
   // label would be low-contrast there, so the Share button label is white.
-  light: { bg: "#f0ece3", card: "#ffffff", text: "#1c1a17", sub: "#6b655c", accent: "#2c7a1f", chip: "rgba(0,0,0,0.06)", onAccent: "#ffffff" },
-  bold: { bg: "#120a00", card: "#0c0600", text: "#fff6e0", sub: "#e8c26b", accent: C.gold, chip: "rgba(255,255,255,0.1)", onAccent: "#2a1c00", bigPrice: true },
+  light: { bg: "#f0ece3", card: "#ffffff", text: "#1c1a17", sub: "#6b655c", accent: "#2c7a1f", chip: "rgba(0,0,0,0.06)", divider: "rgba(0,0,0,0.1)", onAccent: "#ffffff" },
+  bold: { bg: "#120a00", card: "#0c0600", text: "#fff6e0", sub: "#e8c26b", accent: C.gold, chip: "rgba(255,255,255,0.1)", divider: "rgba(255,255,255,0.12)", onAccent: "#2a1c00", bigPrice: true },
 };
 
 const HOOK_PRESETS = ["Would you flip it?", "Found this at the thrift", "Pass or buy?", "Real find, real numbers."];
@@ -128,10 +135,37 @@ interface StudioCardContentProps {
   isLoss: boolean;
 }
 
+// Font sizes below are a FRACTION of their own zone's height, not a fixed
+// px number - a zone given more room (e.g. Story's bigger price zone) gets
+// a visibly bigger hero number for free, and nothing is ever stuck looking
+// small inside a tall box (the old fixed-88px price in a ~400px-tall zone
+// was most of what read as "tiny text, empty space" - see AGENTS.md's
+// Studio problem report). Multipliers are tuned so the tallest realistic
+// stack (paid + big + profit, or big + caption) stays inside the zone with
+// margin to spare (checked by hand against every STORY_ZONE_H/ZONE_FRACTIONS
+// combination in lib/shareStudio.ts).
+function priceFonts(priceH: number) {
+  return { paid: priceH * 0.11, big: priceH * 0.42, caption: priceH * 0.09, profit: priceH * 0.14 };
+}
+function nameFontSize(nameH: number) {
+  return nameH * 0.38;
+}
+function stampFontSize(stampH: number) {
+  return stampH * 0.34;
+}
+
 // The exported/previewed card itself - every number here is zones/geometry
 // from lib/shareStudio.ts multiplied by `scale`. Nothing is hardcoded to a
 // device size, and nothing here can overlap another zone (zonesForFormat's
 // own header comment explains why that's structural, not incidental).
+//
+// LOOK BORROWED FROM THE REAL WIN CARD (ShareCard.tsx / FlexRevealCard.tsx):
+// full-bleed photo up top, a bordered rotated verdict "stamp" pill, a huge
+// glowing hero number (FlexRevealCard's radial-gradient glow treatment,
+// just applied to this card's price zone instead of a photo-less screen),
+// the item name below it, and a divided footer bar carrying the brand mark
+// + handle - same bones ShareCard's header/photo/body/footer used, just
+// mapped onto the fixed zone geometry every Studio format already shares.
 export function StudioCardContent({ format, scale, look, photoUri, imgSize, crop, handle, hook, isWin, winText, stampText, priceBlock, itemName, isLoss }: StudioCardContentProps) {
   const palette = LOOKS[look];
   const canvas = FORMAT_SIZES[format];
@@ -141,13 +175,30 @@ export function StudioCardContent({ format, scale, look, photoUri, imgSize, crop
   const nativePhoto = photoZoneSize(format);
   const accent = isLoss ? C.red : palette.accent;
   const place = imgSize ? imagePlacement(imgSize, nativePhoto, crop, scale) : null;
-  const priceFontSize = (palette.bigPrice ? 104 : 88) * scale;
+  // The ALWAYS-cover-filled backdrop copy, dimmed, sitting behind the real
+  // (possibly "contain"/letterboxed) crop - so the photo zone is never left
+  // showing raw flat background in the gaps a contain crop leaves. A plain
+  // dark dim rather than a true gaussian blur (no new native module in
+  // build #46 - see scripts/native-modules-build46.json) but it reads the
+  // same way: a soft, out-of-focus-looking fill, never empty.
+  const backdropPlace = imgSize ? imagePlacement(imgSize, nativePhoto, { scale: 1, translate: { x: 0, y: 0 } }, scale) : null;
   const showStamp = isWin || !!stampText;
+  const priceFont = priceFonts(zones.price.h);
+  const nameFont = nameFontSize(zones.name.h);
+  const stampFont = stampFontSize(zones.stamp.h);
+  const glowColor = isLoss ? C.red : palette.accent;
 
   return (
     <View style={[st.card, { width: W, height: H, backgroundColor: palette.card, borderRadius: 18 * scale }]}>
-      {/* PHOTO ZONE */}
+      {/* PHOTO ZONE - as large as the win-card-style layout allows for this
+          format (see zonesForFormat's own comment). */}
       <View style={{ position: "absolute", top: zones.photo.y, left: 0, width: W, height: zones.photo.h, overflow: "hidden", backgroundColor: C.surfaceHigh }}>
+        {photoUri && backdropPlace ? (
+          <Image source={{ uri: photoUri }} resizeMode="cover" style={{ position: "absolute", width: backdropPlace.w, height: backdropPlace.h, left: backdropPlace.left, top: backdropPlace.top, opacity: 0.45 }} />
+        ) : null}
+        {photoUri && backdropPlace ? (
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(0,0,0,0.35)" }]} />
+        ) : null}
         {photoUri && place ? (
           <Image source={{ uri: photoUri }} resizeMode="cover" style={{ position: "absolute", width: place.w, height: place.h, left: place.left, top: place.top }} />
         ) : null}
@@ -166,47 +217,61 @@ export function StudioCardContent({ format, scale, look, photoUri, imgSize, crop
         ) : null}
       </View>
 
-      {/* STAMP ZONE */}
-      <View style={{ position: "absolute", top: zones.stamp.y, left: 0, width: W, height: zones.stamp.h, alignItems: "center", justifyContent: "center" }}>
+      {/* STAMP ZONE - ShareCard's bordered verdict pill, tilted like
+          FlexRevealCard's achievement badge. */}
+      <View style={{ position: "absolute", top: zones.stamp.y, left: 0, width: W, height: zones.stamp.h, alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
         {showStamp ? (
           <View style={{ borderWidth: 3 * scale, borderColor: accent, borderRadius: 8 * scale, paddingHorizontal: 18 * scale, paddingVertical: 8 * scale, transform: [{ rotate: "-6deg" }] }}>
-            <CardText numberOfLines={1} style={{ color: accent, fontSize: 28 * scale, fontWeight: "900", letterSpacing: 1.5 * scale }}>
+            <CardText numberOfLines={1} style={{ color: accent, fontSize: stampFont, fontWeight: "900", letterSpacing: 1.5 * scale }}>
               {isWin ? "SOLD" : stampText}
             </CardText>
           </View>
         ) : null}
       </View>
 
-      {/* PRICE ZONE */}
-      <View style={{ position: "absolute", top: zones.price.y, left: 0, width: W, height: zones.price.h, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 * scale }}>
+      {/* PRICE ZONE - the hero moment, styled after FlexRevealCard's glow-
+          backed count-up number: a soft radial glow behind a huge, bold
+          price figure instead of a flat small number on a bare panel. */}
+      <View style={{ position: "absolute", top: zones.price.y, left: 0, width: W, height: zones.price.h, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 * scale, overflow: "hidden" }}>
+        <View style={{ position: "absolute", top: 0, left: 0 }} pointerEvents="none">
+          <Svg width={W} height={zones.price.h}>
+            <Defs>
+              <RadialGradient id="priceGlow" cx="50%" cy="48%" r="60%">
+                <Stop offset="0%" stopColor={glowColor} stopOpacity={0.3} />
+                <Stop offset="100%" stopColor={glowColor} stopOpacity={0} />
+              </RadialGradient>
+            </Defs>
+            <Rect x={0} y={0} width={W} height={zones.price.h} fill="url(#priceGlow)" />
+          </Svg>
+        </View>
         {isWin && winText ? (
           <>
-            <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ color: palette.sub, fontSize: 30 * scale, fontWeight: "700" }}>
+            <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ color: palette.sub, fontSize: priceFont.paid, fontWeight: "700" }}>
               {winText.subLine}
             </CardText>
-            <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} style={{ color: accent, fontSize: priceFontSize, fontWeight: "900", marginTop: 4 * scale }}>
+            <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} style={{ color: accent, fontSize: priceFont.big, fontWeight: "900", marginTop: 4 * scale, textShadowColor: glowColor + "80", textShadowRadius: 24 * scale, textShadowOffset: { width: 0, height: 0 } }}>
               {winText.bigLine}
             </CardText>
           </>
         ) : (
           <>
             {priceBlock.paidLine ? (
-              <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ color: palette.sub, fontSize: 30 * scale, fontWeight: "700" }}>
+              <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ color: palette.sub, fontSize: priceFont.paid, fontWeight: "700" }}>
                 {priceBlock.paidLine}
               </CardText>
             ) : null}
             {priceBlock.bigLine ? (
-              <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} style={{ color: accent, fontSize: priceFontSize, fontWeight: "900", marginTop: 4 * scale }}>
+              <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} style={{ color: accent, fontSize: priceFont.big, fontWeight: "900", marginTop: 4 * scale, textShadowColor: glowColor + "80", textShadowRadius: 24 * scale, textShadowOffset: { width: 0, height: 0 } }}>
                 {priceBlock.bigLine}
               </CardText>
             ) : null}
             {priceBlock.caption ? (
-              <CardText numberOfLines={1} style={{ color: palette.sub, fontSize: 22 * scale, fontWeight: "600", marginTop: 2 * scale }}>
+              <CardText numberOfLines={1} style={{ color: palette.sub, fontSize: priceFont.caption, fontWeight: "600", marginTop: 2 * scale }}>
                 {priceBlock.caption}
               </CardText>
             ) : null}
             {priceBlock.profitLine ? (
-              <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ color: accent, fontSize: 34 * scale, fontWeight: "900", marginTop: 6 * scale }}>
+              <CardText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ color: accent, fontSize: priceFont.profit, fontWeight: "900", marginTop: 6 * scale }}>
                 {priceBlock.profitLine}
               </CardText>
             ) : null}
@@ -217,19 +282,33 @@ export function StudioCardContent({ format, scale, look, photoUri, imgSize, crop
       {/* NAME ZONE - numberOfLines=2 + adjustsFontSizeToFit + a minimumFontScale
           floor is what replaces the old single-line "American Flag and I..."
           truncation: the font shrinks until two lines hold the whole name,
-          it is never cut off with an ellipsis. */}
-      <View style={{ position: "absolute", top: zones.name.y, left: 0, width: W, height: zones.name.h, alignItems: "center", justifyContent: "center", paddingHorizontal: 28 * scale }}>
-        <CardText numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.5} style={{ color: palette.text, fontSize: 40 * scale, fontWeight: "800", textAlign: "center", lineHeight: 46 * scale }}>
+          it is never cut off with an ellipsis. Font size is a fraction of
+          the zone's own height (nameFontSize), so it reads big and bold
+          like the win card's item-name line, not the old fixed 40px. */}
+      <View style={{ position: "absolute", top: zones.name.y, left: 0, width: W, height: zones.name.h, alignItems: "center", justifyContent: "center", paddingHorizontal: 28 * scale, overflow: "hidden" }}>
+        <CardText numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.5} style={{ color: palette.text, fontSize: nameFont, fontWeight: "800", textAlign: "center", lineHeight: nameFont * 1.15 }}>
           {itemName}
         </CardText>
       </View>
 
-      {/* FOOTER ZONE - handle (if set) + the wordmark mark, nothing else. */}
-      <View style={{ position: "absolute", top: zones.footer.y, left: 0, width: W, height: zones.footer.h, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 * scale }}>
-        {handle ? <CardText numberOfLines={1} style={{ color: palette.sub, fontSize: 22 * scale, fontWeight: "700" }}>{handle}</CardText> : null}
-        {handle ? <View style={{ width: 1, height: 16 * scale, backgroundColor: palette.sub, opacity: 0.4 }} /> : null}
-        <ValuIQLogo accent={palette.accent} size={14 * scale} />
-        <Wordmark style={{ fontSize: 13 * scale, fontWeight: "800", letterSpacing: 1 * scale, color: palette.sub }} />
+      {/* FOOTER ZONE - ShareCard's footer-bar treatment: a divided panel
+          (top border, subtly different tint) rather than bare canvas, so
+          Story's reserved bottom safe-zone strip reads as an intentional
+          brand footer, not dead space. Story has enough room here to also
+          carry ShareCard's own tagline; Feed/Square keep just the
+          handle/wordmark row their shorter footer always had. */}
+      <View style={{ position: "absolute", top: zones.footer.y, left: 0, width: W, height: zones.footer.h, alignItems: "center", justifyContent: "center", backgroundColor: palette.chip, borderTopWidth: 1 * scale, borderTopColor: palette.divider }}>
+        {format === "story" ? (
+          <CardText numberOfLines={1} style={{ color: palette.sub, fontSize: 20 * scale, fontWeight: "600", letterSpacing: 0.5 * scale, marginBottom: 14 * scale }}>
+            what resellers actually made
+          </CardText>
+        ) : null}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 * scale }}>
+          {handle ? <CardText numberOfLines={1} style={{ color: palette.sub, fontSize: 22 * scale, fontWeight: "700" }}>{handle}</CardText> : null}
+          {handle ? <View style={{ width: 1, height: 16 * scale, backgroundColor: palette.sub, opacity: 0.4 }} /> : null}
+          <ValuIQLogo accent={palette.accent} size={14 * scale} />
+          <Wordmark style={{ fontSize: 13 * scale, fontWeight: "800", letterSpacing: 1 * scale, color: palette.sub }} />
+        </View>
       </View>
     </View>
   );
@@ -278,6 +357,14 @@ export default function ShareStudio(props: ShareStudioProps) {
   const shareCardRef = useRef<InstanceType<NonNullable<typeof ViewShot>>>(null);
   const openedLoggedFor = useRef<string | null>(null);
 
+  // The crop a format should land on before any touch - defaultCropScale
+  // (contain-biased on Feed/Square for a wider-than-tall photo, cover
+  // otherwise). Falls back to plain cover when imgSize isn't known yet
+  // (e.g. "Reset" tapped mid-load) rather than guessing.
+  function smartDefaultCrop(format: StudioFormat, img: Size | null): CropState {
+    return { scale: img ? defaultCropScale(format, img) : 1, translate: { x: 0, y: 0 } };
+  }
+
   useEffect(() => {
     if (!visible) return;
     loadStudioPrefs(displayName).then(setPrefs);
@@ -321,6 +408,26 @@ export default function ShareStudio(props: ShareStudioProps) {
   const stampText = useMemo(() => stampForHeroVerdict(heroVerdict), [heroVerdict]);
   const winText = useMemo(() => (winData ? buildWinCardText(winData) : undefined), [winData]);
 
+  // Applies the smart (contain-biased where it matters) default crop to
+  // the CURRENT format the first time its real image size is known -
+  // guarded on the crop still being untouched (scale===1, no pan) so a
+  // user's own pinch/pan/zoom is never overwritten. Runs again on every
+  // format switch so a format visited for the first time after imgSize is
+  // already known (the common case - imgSize usually resolves almost
+  // instantly) gets its own smart default too, not just whichever format
+  // happened to be active when imgSize first loaded.
+  useEffect(() => {
+    if (!imgSize) return;
+    setCropByFormat((c) => {
+      const cur = c[prefs.format];
+      if (cur.scale !== 1 || cur.translate.x !== 0 || cur.translate.y !== 0) return c;
+      const next = smartDefaultCrop(prefs.format, imgSize);
+      if (next.scale === cur.scale) return c;
+      return { ...c, [prefs.format]: next };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefs.format, imgSize]);
+
   // ---- pinch / pan / double-tap (PanResponder - no gesture-handler), only
   // live in "Adjust photo" mode. liveRef (MEASURED: stale-closure bug) -
   // PanResponder.create runs ONCE inside useRef's lazy initializer, so its
@@ -361,7 +468,10 @@ export default function ShareStudio(props: ShareStudioProps) {
             pinchStartDist.current = dist;
             pinchStartScale.current = liveCrop.scale;
           }
-          const nextScale = clampZoomScale(pinchStartScale.current * (dist / pinchStartDist.current));
+          // Minimum zoom is "contain" (whole photo visible), not a flat 1
+          // (= cover, forced crop) - see minCropScale's own header comment.
+          const minScale = liveImg ? minCropScale(liveImg, liveFrame) : 1;
+          const nextScale = clampZoomScale(pinchStartScale.current * (dist / pinchStartDist.current), minScale);
           const nextTranslate = liveImg ? clampPanTranslate(liveCrop.translate, nextScale, liveImg, liveFrame) : liveCrop.translate;
           setCropByFormat((c) => ({ ...c, [format]: { scale: nextScale, translate: nextTranslate } }));
         } else if (touches.length === 1) {
@@ -391,8 +501,8 @@ export default function ShareStudio(props: ShareStudioProps) {
           const now = Date.now();
           const prev = lastTap.current;
           if (prev && now - prev.t < DOUBLE_TAP_MS && Math.hypot((t.pageX ?? 0) - prev.x, (t.pageY ?? 0) - prev.y) < 40) {
-            const { format } = liveRef.current;
-            setCropByFormat((c) => ({ ...c, [format]: { ...DEFAULT_CROP } }));
+            const { format, imgSize: liveImg2 } = liveRef.current;
+            setCropByFormat((c) => ({ ...c, [format]: smartDefaultCrop(format, liveImg2) }));
             lastTap.current = null;
           } else {
             lastTap.current = { t: now, x: t.pageX ?? 0, y: t.pageY ?? 0 };
@@ -413,7 +523,8 @@ export default function ShareStudio(props: ShareStudioProps) {
     const format = prefs.format;
     setCropByFormat((c) => {
       const cur = c[format];
-      const nextScale = stepZoomScale(cur.scale, direction);
+      const minScale = imgSize ? minCropScale(imgSize, nativePhoto) : 1;
+      const nextScale = stepZoomScale(cur.scale, direction, undefined, minScale);
       const nextTranslate = imgSize ? clampPanTranslate(cur.translate, nextScale, imgSize, nativePhoto) : cur.translate;
       return { ...c, [format]: { scale: nextScale, translate: nextTranslate } };
     });
@@ -421,7 +532,7 @@ export default function ShareStudio(props: ShareStudioProps) {
 
   function resetCrop() {
     const format = prefs.format;
-    setCropByFormat((c) => ({ ...c, [format]: { ...DEFAULT_CROP } }));
+    setCropByFormat((c) => ({ ...c, [format]: smartDefaultCrop(format, imgSize) }));
   }
 
   async function share() {
@@ -464,7 +575,9 @@ export default function ShareStudio(props: ShareStudioProps) {
 
   function onPreviewLayout(e: LayoutChangeEvent) {
     const { width, height } = e.nativeEvent.layout;
-    if (width > 0 && height > 0) setPreviewBox({ w: width - 16, h: height - 16 });
+    // 12px side margins only (the preview's own flex:1 box already excludes
+    // the top bar, controls row, and Share button above/below it).
+    if (width > 0 && height > 0) setPreviewBox({ w: width - 24, h: height });
   }
   function onAdjustLayout(e: LayoutChangeEvent) {
     const { width, height } = e.nativeEvent.layout;
@@ -528,26 +641,28 @@ export default function ShareStudio(props: ShareStudioProps) {
           </View>
         ) : (
           <View style={st.root}>
+            {/* Top bar: just the close icon + the format segmented control
+                filling the rest - no "Share studio" title eating a row. */}
             <View style={st.topBar}>
               <TouchableOpacity onPress={onClose} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }} style={st.closeHit}>
                 <CloseIcon color={C.text2} size={20} />
               </TouchableOpacity>
-              <Text style={st.topTitle} numberOfLines={1}>Share studio</Text>
-              <View style={st.closeHit} />
+              <View style={st.segmentRow}>
+                {(["story", "feed", "square"] as StudioFormat[]).map((f) => (
+                  <TouchableOpacity
+                    key={f}
+                    style={[st.segment, prefs.format === f && { borderColor: palette.accent, backgroundColor: palette.chip }]}
+                    onPress={() => updatePrefs({ format: f })}
+                  >
+                    <Text style={[st.segmentText, { color: prefs.format === f ? palette.accent : C.text3 }]} numberOfLines={1}>{FORMAT_LABELS[f]}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
 
-            <View style={st.segmentRow}>
-              {(["story", "feed", "square"] as StudioFormat[]).map((f) => (
-                <TouchableOpacity
-                  key={f}
-                  style={[st.segment, prefs.format === f && { borderColor: palette.accent, backgroundColor: palette.chip }]}
-                  onPress={() => updatePrefs({ format: f })}
-                >
-                  <Text style={[st.segmentText, { color: prefs.format === f ? palette.accent : C.text3 }]} numberOfLines={1}>{FORMAT_LABELS[f]}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
+            {/* The preview takes ALL remaining height above the controls
+                row + Share button, scaled to fit with 12px side margins
+                (onPreviewLayout). Tapping it opens Adjust photo. */}
             <View style={{ flex: 1, width: "100%", alignItems: "center", justifyContent: "center" }} onLayout={onPreviewLayout}>
               <TouchableOpacity activeOpacity={0.9} onPress={() => setMode("adjust")} style={[st.cardShadow, { width: previewFrame.w, height: previewFrame.h }]}>
                 <StudioCardContent
@@ -569,24 +684,22 @@ export default function ShareStudio(props: ShareStudioProps) {
               </TouchableOpacity>
             </View>
 
-            <View style={st.lookRow}>
+            {/* ONE controls row: 3 look pills + Adjust + Customize. */}
+            <View style={st.controlsRow}>
               {(["dark", "light", "bold"] as StudioLook[]).map((l) => (
                 <TouchableOpacity
                   key={l}
                   style={[st.lookPill, { backgroundColor: LOOKS[l].card, borderColor: prefs.look === l ? LOOKS[l].accent : C.border }]}
                   onPress={() => updatePrefs({ look: l })}
                 >
-                  <Text style={{ color: LOOKS[l].text, fontSize: 12, fontWeight: "800" }}>{LOOK_LABELS[l]}</Text>
+                  <Text style={{ color: LOOKS[l].text, fontSize: 11, fontWeight: "800" }} numberOfLines={1}>{LOOK_LABELS[l]}</Text>
                 </TouchableOpacity>
               ))}
-            </View>
-
-            <View style={st.actionRow}>
-              <TouchableOpacity style={st.actionBtn} onPress={() => setMode("adjust")}>
-                <Text style={st.actionBtnText}>Adjust photo</Text>
+              <TouchableOpacity style={st.controlBtn} onPress={() => setMode("adjust")}>
+                <Text style={st.controlBtnText} numberOfLines={1}>Adjust</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={st.actionBtn} onPress={() => setCustomizeOpen(true)}>
-                <Text style={st.actionBtnText}>Customize</Text>
+              <TouchableOpacity style={st.controlBtn} onPress={() => setCustomizeOpen(true)}>
+                <Text style={st.controlBtnText} numberOfLines={1}>Customize</Text>
               </TouchableOpacity>
             </View>
 
@@ -703,18 +816,20 @@ const st = StyleSheet.create({
   root: { flex: 1 },
   card: { overflow: "hidden", borderWidth: 1, borderColor: C.border },
   wordmarkPill: { position: "absolute", flexDirection: "row", alignItems: "center", backgroundColor: "rgba(0,0,0,0.45)", borderRadius: 100 },
-  topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
-  closeHit: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+  // Top bar: X icon + the segmented control filling the rest of the row -
+  // no title (TASK 3: a bigger, simpler Studio screen).
+  topBar: { flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
+  closeHit: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
   topTitle: { color: C.text1, fontSize: 16, fontWeight: "800", flexShrink: 1, textAlign: "center" },
-  segmentRow: { flexDirection: "row", gap: 6, width: "100%", paddingHorizontal: 16 },
+  segmentRow: { flex: 1, flexDirection: "row", gap: 6 },
   segment: { flex: 1, paddingVertical: 7, borderRadius: 9, borderWidth: 1.5, borderColor: C.border, alignItems: "center" },
   segmentText: { fontSize: 12, fontWeight: "800" },
   cardShadow: { borderRadius: 18, shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 6 },
-  lookRow: { flexDirection: "row", gap: 8, width: "100%", paddingHorizontal: 16, marginTop: 8 },
-  lookPill: { flex: 1, paddingVertical: 9, borderRadius: 100, borderWidth: 1.5, alignItems: "center" },
-  actionRow: { flexDirection: "row", gap: 8, width: "100%", paddingHorizontal: 16, marginTop: 10 },
-  actionBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: C.border, alignItems: "center" },
-  actionBtnText: { color: C.text1, fontSize: 13, fontWeight: "800" },
+  // ONE controls row: 3 look pills + Adjust + Customize (TASK 3).
+  controlsRow: { flexDirection: "row", gap: 6, width: "100%", paddingHorizontal: 16, marginTop: 8 },
+  lookPill: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 100, borderWidth: 1.5, alignItems: "center" },
+  controlBtn: { flex: 1, paddingVertical: 9, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, alignItems: "center" },
+  controlBtnText: { color: C.text1, fontSize: 12, fontWeight: "800" },
   debugLine: { color: C.text4, fontSize: 10, fontFamily: "monospace" as any, marginTop: 8, textAlign: "center", paddingHorizontal: 16 },
   bottomBar: { paddingHorizontal: 20, paddingBottom: 36, paddingTop: 10, gap: 8 },
   statusText: { color: C.text2, fontSize: 12, textAlign: "center" },
