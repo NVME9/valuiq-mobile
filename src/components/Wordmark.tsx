@@ -7,8 +7,8 @@ import { C } from "../lib/theme";
 // color is overridden, so this drops into any existing logo text style.
 export default function Wordmark({ style }: { style?: StyleProp<TextStyle> }) {
   return (
-    <Text style={style}>
-      Valu<Text style={{ color: C.green }}>IQ</Text>
+    <Text allowFontScaling={false} style={style}>
+      Valu<Text allowFontScaling={false} style={{ color: C.green }}>IQ</Text>
     </Text>
   );
 }
