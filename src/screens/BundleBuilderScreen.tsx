@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import { API_BASE } from "../lib/api";
 
 interface Props {
@@ -55,13 +56,13 @@ export default function BundleBuilderScreen({ token, onBack }: Props) {
         <View style={{ width: 50 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Text style={s.sub}>Add your stuck items — AI groups them into bundles that move fast.</Text>
 
         {items.map((it, i) => (
           <View key={i} style={s.itemRow}>
             <TextInput style={[s.input, { flex: 2 }]} value={it.name} onChangeText={(v) => setItem(i, "name", v)} placeholder={`Item ${i + 1}`} placeholderTextColor={C.text4} />
-            <TextInput style={[s.input, { flex: 1 }]} value={it.price} onChangeText={(v) => setItem(i, "price", v)} placeholder="$" keyboardType="numeric" placeholderTextColor={C.text4} />
+            <TextInput style={[s.input, { flex: 1 }]} value={it.price} onChangeText={(v) => setItem(i, "price", v)} placeholder="$" placeholderTextColor={C.text4} {...numericFieldProps("decimal")} />
             {items.length > 1 && <TouchableOpacity onPress={() => removeRow(i)} style={s.removeBtn}><Text style={s.removeTxt}>✕</Text></TouchableOpacity>}
           </View>
         ))}

@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import { API_BASE } from "../lib/api";
 
 interface Props {
@@ -75,7 +76,7 @@ export default function ListingWriterScreen({ token, onBack }: Props) {
         <View style={{ width: 50 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Text style={s.sub}>Fill in what you know — AI writes a platform-perfect listing you can paste straight in.</Text>
 
         {/* Platform picker */}
@@ -101,7 +102,7 @@ export default function ListingWriterScreen({ token, onBack }: Props) {
         </View>
         <View style={s.row}>
           <View style={s.half}><Text style={s.label}>Color</Text><TextInput style={s.input} value={color} onChangeText={setColor} placeholder="Brown" placeholderTextColor={C.text4} /></View>
-          <View style={s.half}><Text style={s.label}>List price</Text><TextInput style={s.input} value={sellPrice} onChangeText={setSellPrice} placeholder="65" keyboardType="numeric" placeholderTextColor={C.text4} /></View>
+          <View style={s.half}><Text style={s.label}>List price</Text><TextInput style={s.input} value={sellPrice} onChangeText={setSellPrice} placeholder="65" placeholderTextColor={C.text4} {...numericFieldProps("decimal")} /></View>
         </View>
         <Text style={s.label}>Notes (flaws, details)</Text>
         <TextInput style={[s.input, { height: 70 }]} value={notes} onChangeText={setNotes} placeholder="Small stain on left cuff, vintage 90s" placeholderTextColor={C.text4} multiline />

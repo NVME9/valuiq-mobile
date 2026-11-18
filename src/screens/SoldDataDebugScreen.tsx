@@ -35,6 +35,7 @@ import React, { useState } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import { lookupUpcFast, getEbayActiveCount, sendDebugCapture } from "../lib/api";
 import BarcodeScanModal from "../components/BarcodeScanModal";
 import { fetchAndParseSoldListings, FetchScrapeResult, MOBILE_SAFARI_UA, DESKTOP_CHROME_UA } from "../lib/ebaySoldFetch";
@@ -227,7 +228,7 @@ export default function SoldDataDebugScreen({ token, onBack }: Props) {
       <TouchableOpacity style={styles.runAllBtn} onPress={runAll} disabled={runningAll}>
         {runningAll ? <ActivityIndicator color={C.bg} /> : <Text style={styles.runAllTxt}>Run All</Text>}
       </TouchableOpacity>
-      <ScrollView style={styles.scroll} contentContainerStyle={{ paddingBottom: 60 }}>
+      <ScrollView style={styles.scroll} contentContainerStyle={{ paddingBottom: 60 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         {rows.map((row) => (
           <RowCard
             key={row.id}
@@ -267,7 +268,7 @@ function RowCard({ row, onChangeUpc, onChangeTitle, onScan, onRun, onToggleRaw, 
           style={styles.upcInput}
           placeholder="UPC (type, paste, or scan)"
           placeholderTextColor={C.text4}
-          keyboardType="number-pad"
+          {...numericFieldProps("integer")}
           value={row.upc}
           onChangeText={onChangeUpc}
         />

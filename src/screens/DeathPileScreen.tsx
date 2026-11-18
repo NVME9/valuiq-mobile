@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import { API_BASE } from "../lib/api";
 
 interface Props {
@@ -115,7 +116,7 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
 
       {!result ? (
         /* ── INPUT, FORM ── */
-        <ScrollView contentContainerStyle={s.form} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={s.form} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
           <Text style={s.formTitle}>Tell me about your stuck item</Text>
           <Text style={s.formSub}>The more detail you give, the better the rescue plan.</Text>
 
@@ -129,18 +130,18 @@ export default function DeathPileScreen({ token, plan, onNavigate, onBack }: Pro
             <View style={{ flex:1 }}>
               <Text style={s.label}>Listed Price *</Text>
               <TextInput style={s.input} value={currentPrice} onChangeText={setCurrentPrice}
-                placeholder="$0" placeholderTextColor={C.text4} keyboardType="decimal-pad"/>
+                placeholder="$0" placeholderTextColor={C.text4} {...numericFieldProps("decimal")}/>
             </View>
             <View style={{ flex:1 }}>
               <Text style={s.label}>You Paid</Text>
               <TextInput style={s.input} value={paidPrice} onChangeText={setPaidPrice}
-                placeholder="$0" placeholderTextColor={C.text4} keyboardType="decimal-pad"/>
+                placeholder="$0" placeholderTextColor={C.text4} {...numericFieldProps("decimal")}/>
             </View>
           </View>
 
           <Text style={s.label}>Days Listed *</Text>
           <TextInput style={s.input} value={daysListed} onChangeText={setDaysListed}
-            placeholder="e.g. 30" placeholderTextColor={C.text4} keyboardType="number-pad"/>
+            placeholder="e.g. 30" placeholderTextColor={C.text4} {...numericFieldProps("integer")}/>
 
           <Text style={s.label}>Listed On</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom:14 }}>

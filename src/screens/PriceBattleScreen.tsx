@@ -5,6 +5,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import { API_BASE } from "../lib/api";
 
 interface Props {
@@ -51,7 +52,7 @@ export default function PriceBattleScreen({ token, onBack }: Props) {
         <View style={{ width: 50 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Text style={s.sub}>See which platform pays the most for your item after fees. Best net profit wins.</Text>
 
         <Text style={s.label}>Item name *</Text>
@@ -62,7 +63,7 @@ export default function PriceBattleScreen({ token, onBack }: Props) {
         </View>
         <View style={s.row}>
           <View style={s.half}><Text style={s.label}>Condition</Text><TextInput style={s.input} value={condition} onChangeText={setCondition} placeholder="New" placeholderTextColor={C.text4} /></View>
-          <View style={s.half}><Text style={s.label}>You paid</Text><TextInput style={s.input} value={buyPrice} onChangeText={setBuyPrice} placeholder="45" keyboardType="numeric" placeholderTextColor={C.text4} /></View>
+          <View style={s.half}><Text style={s.label}>You paid</Text><TextInput style={s.input} value={buyPrice} onChangeText={setBuyPrice} placeholder="45" placeholderTextColor={C.text4} {...numericFieldProps("decimal")} /></View>
         </View>
 
         <TouchableOpacity style={s.genBtn} onPress={run} disabled={loading}>

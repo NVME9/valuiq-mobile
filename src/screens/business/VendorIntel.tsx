@@ -3,6 +3,7 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar, Activi
 import { SafeAreaView } from "react-native-safe-area-context";
 import { B } from "../../lib/businessTheme";
 import { API_BASE } from "../../lib/api";
+import { numericFieldProps } from "../../components/KeyboardDoneBar";
 
 interface Props { token: string; onBack: () => void; }
 const CATEGORIES = ["electronics", "clothing", "tools", "kitchen", "collectibles", "toys"];
@@ -48,7 +49,7 @@ export default function VendorIntel({ token, onBack }: Props) {
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
           {!res && (
             <View style={s.hero}>
               <Text style={s.heroTitle}>Know if a vendor over-grades before you wire money</Text>
@@ -83,11 +84,11 @@ export default function VendorIntel({ token, onBack }: Props) {
             <View style={s.row}>
               <View style={{ flex: 1, marginRight: 6 }}>
                 <Text style={s.lbl}>Claimed Retail $</Text>
-                <TextInput style={s.input} value={claimedRetailValue} onChangeText={setClaimed} keyboardType="numeric" placeholder="5000" placeholderTextColor={B.text4} />
+                <TextInput style={s.input} value={claimedRetailValue} onChangeText={setClaimed} placeholder="5000" placeholderTextColor={B.text4} {...numericFieldProps("decimal")} />
               </View>
               <View style={{ flex: 1, marginLeft: 6 }}>
                 <Text style={s.lbl}>Asking Price $</Text>
-                <TextInput style={s.input} value={askingPrice} onChangeText={setAsking} keyboardType="numeric" placeholder="1500" placeholderTextColor={B.text4} />
+                <TextInput style={s.input} value={askingPrice} onChangeText={setAsking} placeholder="1500" placeholderTextColor={B.text4} {...numericFieldProps("decimal")} />
               </View>
             </View>
 

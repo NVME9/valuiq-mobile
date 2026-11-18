@@ -5,7 +5,8 @@ import {
 } from "react-native";
 import { C } from "./src/lib/theme";
 import LogoBadge from "./src/components/LogoBadge";
-import ScopeBackground from "./src/components/ScopeBackground";
+import { KeyboardDoneAccessory } from "./src/components/KeyboardDoneBar";
+import { ScanFrameBackground, ScanCorners } from "./src/components/ScanFrameBackground";
 import { Session, loadSession, saveSession, clearSession, getPlan, getScanCount, refreshToken, isTokenNearExpiry, hasProAccess, hydrateAvatarCache, getScanById, invalidateScanHistoryCache, SessionRestoreNetworkError, logClientError, logEvent, reportClientError, flushQueuedClientErrors } from "./src/lib/api";
 import ErrorBoundary from "./src/components/ErrorBoundary";
 import { readScanStage, clearScanStage } from "./src/lib/scanStage";
@@ -73,7 +74,7 @@ export type Screen =
   "profile"|"relist"|"hot-now"|"arbitrage"|"upgrade"|
   "bundle"|"alerts"|"leaderboard"|"inventory"|"profit-tracker"|"deal-hunter"|"ai-coach"|"history"|"faq"|"admin"|"titan"|"import-sales"|"sold-data-debug"|"scan-confirm";
 
-const { height } = Dimensions.get("window");
+const { width, height } = Dimensions.get("window");
 
 // Races any promise against a timeout - used for the expo-updates check on
 // launch (see init()) so a slow/unreachable update service can never hang
@@ -164,7 +165,11 @@ function SplashScreen({ onDone }: { onDone:()=>void }) {
   return (
     <Animated.View style={[ss.splash, { opacity }]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bgDeep} />
-      <ScopeBackground accent={C.green} botInset={70} />
+      {/* ONE shared look with the Share Studio card background - see
+          ScanFrameBackground.tsx's own header comment. Full-screen grid +
+          lens-style corner brackets inset from the screen edges. */}
+      <ScanFrameBackground width={width} height={height} bg={C.bgDeep} accent={C.green} />
+      <ScanCorners x={22} y={60} w={width - 44} h={height - 130} armLength={36} thickness={3} color={C.green} opacity={0.75} />
 
       <View style={ss.content}>
         {/* Logo block */}
@@ -1187,6 +1192,7 @@ export default function App() {
           </View>
         )}
       </Animated.View>
+      <KeyboardDoneAccessory />
     </View>
   </SafeAreaProvider>
   );

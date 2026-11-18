@@ -12,6 +12,7 @@ import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
 import Wordmark from "../components/Wordmark";
 import HeaderLogo from "../components/HeaderLogo";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import { API_BASE, scanImage, shareWin, refineScan, emailFromToken, lookupUpcFast, scanBarcodeFast, updateScan, rerunScan, invalidateScanHistoryCache, logEvent, logClientError, reportClientError, peekProfileData, ScanRequestError } from "../lib/api";
 import { appendFailureLog, readFailureLog } from "../lib/failureLog";
 import { setLastScanResult } from "../lib/lastScanResult";
@@ -1353,7 +1354,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
   // - UPGRADE -
   if (step === "upgrade") return (
     <SafeAreaView style={s.safe} edges={["top","left","right"]}>
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 24, paddingBottom: 60 }}>
+      <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 24, paddingBottom: 60 }}>
         <Text style={{ fontSize: 52, textAlign: "center", marginBottom: 16 }}></Text>
         <Text style={[s.h1, { textAlign: "center" }]}>Free scans used up</Text>
         <Text style={[s.body, { textAlign: "center", marginBottom: 24 }]}>
@@ -2489,7 +2490,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         {/* paddingBottom covers the sticky Share CTA bar below this
             ScrollView (s.shareCtaBar) - without it, the last card in the
             scroll sits partly behind that bar instead of above it. */}
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,paddingBottom:hasVerdictOrNumber?130:60}} showsVerticalScrollIndicator={false}>
+        <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{padding:16,paddingBottom:hasVerdictOrNumber?130:60}} showsVerticalScrollIndicator={false}>
 
           {/* ALWAYS-ANSWER PROOF SCREEN (2026-11-10): there is no "not
               enough data / can't price" dead end any more - a thin/no-data
@@ -2731,7 +2732,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                       onChangeText={(t) => { setBuyPrice(t); setBuyPriceSource("user"); }}
                       placeholder="Tag price"
                       placeholderTextColor={C.text4}
-                      keyboardType="decimal-pad"
+                      {...numericFieldProps("decimal")}
                     />
                   </View>
                   {/* RESULT-FIX item 9 (2026-11-15): exactly two states -
@@ -3413,7 +3414,7 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
         <TouchableOpacity onPress={() => (result ? setStep("result") : reset())} style={s.navBack}><Text style={s.navBackText}>{"\u2039"}</Text></TouchableOpacity>
         <HeaderLogo textStyle={s.logoText}/>
       </View>
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+      <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
         <Text style={[s.h2, { marginBottom: 4 }]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.85}>
           Add any details
         </Text>

@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import { API_BASE } from "../lib/api";
 
 interface Props {
@@ -51,14 +52,14 @@ export default function NegotiateScreen({ token, onBack }: Props) {
         <View style={{ width: 50 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Text style={s.sub}>Get the exact words to talk a seller down — plus your target and walk-away price.</Text>
 
         <Text style={s.label}>Item *</Text>
         <TextInput style={s.input} value={itemName} onChangeText={setItemName} placeholder="Vintage Pyrex set" placeholderTextColor={C.text4} />
         <View style={s.row}>
-          <View style={s.half}><Text style={s.label}>Asking price *</Text><TextInput style={s.input} value={askingPrice} onChangeText={setAskingPrice} placeholder="40" keyboardType="numeric" placeholderTextColor={C.text4} /></View>
-          <View style={s.half}><Text style={s.label}>It sells for</Text><TextInput style={s.input} value={sellPrice} onChangeText={setSellPrice} placeholder="120" keyboardType="numeric" placeholderTextColor={C.text4} /></View>
+          <View style={s.half}><Text style={s.label}>Asking price *</Text><TextInput style={s.input} value={askingPrice} onChangeText={setAskingPrice} placeholder="40" placeholderTextColor={C.text4} {...numericFieldProps("decimal")} /></View>
+          <View style={s.half}><Text style={s.label}>It sells for</Text><TextInput style={s.input} value={sellPrice} onChangeText={setSellPrice} placeholder="120" placeholderTextColor={C.text4} {...numericFieldProps("decimal")} /></View>
         </View>
 
         <TouchableOpacity style={s.genBtn} onPress={run} disabled={loading}>

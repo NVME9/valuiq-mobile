@@ -6,6 +6,7 @@ if (require("react-native").Platform.OS !== "web") { try { const c = require("ex
 import * as ImagePicker from "expo-image-picker";
 import { compressPhoto } from "../lib/image";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import HeaderLogo from "../components/HeaderLogo";
 import ShareButton from "../components/ShareButton";
 import { API_BASE, rerunScan, scanThriftRunItem, reportClientError, ScanRequestError } from "../lib/api";
@@ -353,7 +354,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
         <View style={s.logoRow}><HeaderLogo textStyle={s.logoText}/></View>
         <TouchableOpacity onPress={newRun} style={[s.navBtn,{marginLeft:"auto" as any}]}><Text style={s.navBtnText}>New Run</Text></TouchableOpacity>
       </View>
-      <ScrollView contentContainerStyle={{ padding:20, paddingBottom:60 }}>
+      <ScrollView contentContainerStyle={{ padding:20, paddingBottom:60 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
           <Text style={s.h1}>Run Complete 🏁</Text>
           <ShareButton compact
@@ -452,7 +453,7 @@ export default function ThriftRunScreen({ token, plan, scansLeft, setScansLeft, 
                   onChangeText={setPaidPriceInput}
                   placeholder={selectedItem.buyTarget ? String(selectedItem.buyTarget) : "0"}
                   placeholderTextColor={C.text4}
-                  keyboardType="numeric"
+                  {...numericFieldProps("decimal")}
                 />
                 <TouchableOpacity style={s.applyBtn} onPress={applyPrice}>
                   <Text style={s.applyBtnText}>Apply</Text>

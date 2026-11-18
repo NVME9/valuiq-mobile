@@ -145,9 +145,16 @@ export default function ShareStudio(props: ShareStudioProps) {
   }
 
   async function runFetch() {
-    const resolved = resolveSharePhoto(photoBase64, photoUri ?? null);
     const seq = ++requestSeqRef.current;
     if (abortRef.current) abortRef.current.abort();
+    setLoading(true);
+    setFetchError(null);
+
+    // Downscale happens here too (expo-image-manipulator, async) - a stale
+    // request can still be superseded while this is in flight, same as the
+    // network fetch below.
+    const resolved = await resolveSharePhoto(photoBase64, photoUri ?? null);
+    if (seq !== requestSeqRef.current) return; // superseded while resolving the photo
 
     if ("error" in resolved) {
       setLoading(false);
@@ -158,8 +165,6 @@ export default function ShareStudio(props: ShareStudioProps) {
 
     const controller = new AbortController();
     abortRef.current = controller;
-    setLoading(true);
-    setFetchError(null);
 
     const effectiveHandle = handleEnabled ? handle : null;
     const base = isWin

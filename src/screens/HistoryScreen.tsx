@@ -15,6 +15,7 @@ import WinsDemoCard from "../components/WinsDemoCard";
 import { toPendingScan, SaleLoggedPayload } from "../lib/saleCapture";
 import { fetchFlexStat, cacheFlexStat, readCachedFlexStat, concreteLine, FlexStat } from "../lib/flexReveal";
 import { toneForDecision } from "../lib/shareCardPayload";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty, getWinsSummary, peekProfileData, getScanHistory, peekScanHistory, invalidateScanHistoryCache, getThriftRuns, peekThriftRuns, invalidateThriftRunsCache, emailFromToken } from "../lib/api";
 import { classifyOutcome, OutcomeTierInfo } from "../lib/outcomeTier";
 import ApiDebugPanel from "../components/ApiDebugPanel";
@@ -645,6 +646,8 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
       ) : (
         <ScrollView
           contentContainerStyle={s.scroll}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.green}
             onRefresh={() => { setRefreshing(true); invalidateScanHistoryCache(token); invalidateThriftRunsCache(token); loadData(); }}/>}
         >
@@ -970,7 +973,7 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
                                 <Text style={s.editLabel}>Extra details (optional)</Text>
                                 <TextInput style={s.editInput} value={editDesc} onChangeText={setEditDesc} placeholder="Model, condition notes" placeholderTextColor={C.text4}/>
                                 <Text style={s.editLabel}>What you paid (optional)</Text>
-                                <TextInput style={s.editInput} value={editPrice} onChangeText={setEditPrice} placeholder="0.00" placeholderTextColor={C.text4} keyboardType="decimal-pad"/>
+                                <TextInput style={s.editInput} value={editPrice} onChangeText={setEditPrice} placeholder="0.00" placeholderTextColor={C.text4} {...numericFieldProps("decimal")}/>
                                 {editPhotos.length > 0 && (
                                   <ScrollView horizontal style={{marginTop:8}} showsHorizontalScrollIndicator={false}>
                                     {editPhotos.map((ph, pi) => (<Image key={pi} source={{uri: ph}} style={s.editPhotoThumb}/>))}

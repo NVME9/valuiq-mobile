@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import HeaderLogo from "../components/HeaderLogo";
 import { compressPhoto } from "../lib/image";
 import { rerunScan, updateScan, invalidateScanHistoryCache } from "../lib/api";
@@ -201,7 +202,7 @@ export default function ScanConfirmScreen({ token, onNavigate, onBack, navData }
         </TouchableOpacity>
         <HeaderLogo textStyle={s.logoText}/>
       </View>
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+      <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
         <Text style={s.h2}>Is this what you're looking for?</Text>
         <Text style={s.body}>Confirm or correct the details below, then re-run to update this saved scan.</Text>
 
@@ -232,7 +233,7 @@ export default function ScanConfirmScreen({ token, onNavigate, onBack, navData }
           })}
         </View>
         <Text style={s.label}>Tag price (what you paid, optional)</Text>
-        <TextInput style={s.input} value={price} onChangeText={setPrice} placeholder="0.00" placeholderTextColor={C.text4} keyboardType="decimal-pad"/>
+        <TextInput style={s.input} value={price} onChangeText={setPrice} placeholder="0.00" placeholderTextColor={C.text4} {...numericFieldProps("decimal")}/>
 
         <TouchableOpacity style={[s.confirmBtn, rerunning && { opacity: 0.6 }]} disabled={rerunning} onPress={confirmAndRerun}>
           {rerunning ? <ActivityIndicator color={C.greenDark} /> : <Text style={s.confirmBtnTxt}>Confirm & Re-run</Text>}

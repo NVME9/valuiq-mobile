@@ -8,6 +8,7 @@ import * as FileSystem from "expo-file-system";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { B } from "../../lib/businessTheme";
+import { numericFieldProps } from "../../components/KeyboardDoneBar";
 import { API_BASE } from "../../lib/api";
 
 interface Props { token:string; onBack:()=>void; }
@@ -131,7 +132,7 @@ export default function ManifestBeast({ token, onBack }: Props) {
         <View style={{width:36}}/>
       </View>
 
-      <ScrollView contentContainerStyle={s.scroll}>
+      <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         {/* Hero */}
         <View style={s.hero}>
           <Text style={s.heroTitle}>Any manifest. AI-estimated value. Your max bid.</Text>
@@ -140,7 +141,7 @@ export default function ManifestBeast({ token, onBack }: Props) {
             <Text style={s.costLbl}>What you'll pay for the whole lot (optional)</Text>
             <View style={s.costInputRow}>
               <Text style={s.costDollar}>$</Text>
-              <TextInput style={s.costInput} value={lotCost} onChangeText={setLotCost} keyboardType="numeric" placeholder="e.g. 1800" placeholderTextColor={B.text4} />
+              <TextInput style={s.costInput} value={lotCost} onChangeText={setLotCost} placeholder="e.g. 1800" placeholderTextColor={B.text4} {...numericFieldProps("decimal")} />
             </View>
             <Text style={s.costHint}>Leave blank and we'll estimate cost at 25% of retail.</Text>
           </View>

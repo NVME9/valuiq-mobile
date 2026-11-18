@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, Share } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import HeaderLogo from "../components/HeaderLogo";
 import { API_BASE } from "../lib/api";
 
@@ -60,7 +61,7 @@ export default function RelisterScreen({ token, plan, onNavigate, onBack }: Prop
         {results.length>0 && <TouchableOpacity onPress={()=>setResults([])} style={[s.navBtn,{marginLeft:"auto" as any}]}><Text style={s.navBtnText}>New</Text></TouchableOpacity>}
       </View>
 
-      <ScrollView contentContainerStyle={{ padding:20, paddingBottom:60 }}>
+      <ScrollView contentContainerStyle={{ padding:20, paddingBottom:60 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Text style={s.h1}>✏️ Auto-Relister</Text>
         <Text style={[s.body,{marginBottom:20}]}>AI writes platform-optimized listings ready to copy-paste. No more typing.</Text>
 
@@ -76,7 +77,7 @@ export default function RelisterScreen({ token, plan, onNavigate, onBack }: Prop
               <View style={{flex:1}}><Text style={s.label}>Size</Text><TextInput style={s.input} value={size} onChangeText={setSize} placeholder="e.g. Size 6" placeholderTextColor={C.text4}/></View>
               <View style={{flex:1}}><Text style={s.label}>Color</Text><TextInput style={s.input} value={color} onChangeText={setColor} placeholder="e.g. Black" placeholderTextColor={C.text4}/></View>
             </View>
-            <View><Text style={s.label}>Sell Price ($)</Text><TextInput style={s.input} value={sellPrice} onChangeText={setSellPrice} placeholder="45.00" placeholderTextColor={C.text4} keyboardType="decimal-pad"/></View>
+            <View><Text style={s.label}>Sell Price ($)</Text><TextInput style={s.input} value={sellPrice} onChangeText={setSellPrice} placeholder="45.00" placeholderTextColor={C.text4} {...numericFieldProps("decimal")}/></View>
 
             <View>
               <Text style={s.label}>Condition</Text>

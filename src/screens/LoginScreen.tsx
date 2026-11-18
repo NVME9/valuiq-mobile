@@ -6,6 +6,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { C } from "../lib/theme";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 import HeaderLogo from "../components/HeaderLogo";
 import {
   isBiometricAvailable, isBiometricEnabled, enableBiometric,
@@ -239,7 +240,7 @@ export default function LoginScreen({ onLogin }: Props) {
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.scroll}>
+        <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={s.scroll}>
 
           {/* Logo */}
           <View style={s.logoRow}>
@@ -272,7 +273,7 @@ export default function LoginScreen({ onLogin }: Props) {
                 placeholderTextColor={C.text4}
                 value={resetCode}
                 onChangeText={setResetCode}
-                keyboardType="number-pad"
+                {...numericFieldProps("integer")}
                 maxLength={6}
                 autoCapitalize="none"
                 autoCorrect={false}

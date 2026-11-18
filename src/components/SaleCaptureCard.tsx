@@ -12,6 +12,7 @@ import {
 import { C } from "../lib/theme";
 import { recordSaleOutcome, defaultDaysToSale, buildDisplayTitle, PendingScan, SaleLoggedPayload } from "../lib/saleCapture";
 import { CONDITION_OPTIONS } from "../lib/condition";
+import { numericFieldProps } from "./KeyboardDoneBar";
 
 // Same enum the scraper (valuiq-scraper/scraper.js EXTRACTION_SYSTEM) and
 // the admin log-sale route validate against - keeps every sold_platform
@@ -121,9 +122,9 @@ export default function SaleCaptureCard({ token, scan, onDone, onSold }: Props) 
             style={s.priceInput}
             value={price}
             onChangeText={setPrice}
-            keyboardType="decimal-pad"
             placeholder="0.00"
             placeholderTextColor={C.text4}
+            {...numericFieldProps("decimal")}
           />
         </View>
         <View style={s.daysField}>
@@ -137,9 +138,9 @@ export default function SaleCaptureCard({ token, scan, onDone, onSold }: Props) 
             style={s.daysInput}
             value={days}
             onChangeText={(t) => setDays(t.replace(/[^0-9]/g, ""))}
-            keyboardType="number-pad"
             placeholderTextColor={C.text4}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 4 }}
+            {...numericFieldProps("integer")}
           />
           <Text style={s.daysLabel}>days</Text>
         </View>

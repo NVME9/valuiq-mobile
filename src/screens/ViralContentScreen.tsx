@@ -7,6 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import { C } from "../lib/theme";
 import { API_BASE } from "../lib/api";
+import { numericFieldProps } from "../components/KeyboardDoneBar";
 
 interface Props {
   token: string; plan: string; scansLeft: number | null;
@@ -91,14 +92,14 @@ export default function ViralContentScreen({ token, onBack }: Props) {
         <View style={{ width: 50 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Text style={s.sub}>Turn a flip into ready-to-post content for every platform. Tap, copy, post.</Text>
 
         <Text style={s.label}>What did you flip?</Text>
         <TextInput style={s.input} value={itemName} onChangeText={setItemName} placeholder="Vintage Carhartt jacket" placeholderTextColor={C.text4} />
         <View style={s.row}>
-          <View style={s.third}><Text style={s.label}>Paid</Text><TextInput style={s.input} value={buyPrice} onChangeText={setBuyPrice} placeholder="8" keyboardType="numeric" placeholderTextColor={C.text4} /></View>
-          <View style={s.third}><Text style={s.label}>Sold</Text><TextInput style={s.input} value={sellPrice} onChangeText={setSellPrice} placeholder="145" keyboardType="numeric" placeholderTextColor={C.text4} /></View>
+          <View style={s.third}><Text style={s.label}>Paid</Text><TextInput style={s.input} value={buyPrice} onChangeText={setBuyPrice} placeholder="8" placeholderTextColor={C.text4} {...numericFieldProps("decimal")} /></View>
+          <View style={s.third}><Text style={s.label}>Sold</Text><TextInput style={s.input} value={sellPrice} onChangeText={setSellPrice} placeholder="145" placeholderTextColor={C.text4} {...numericFieldProps("decimal")} /></View>
           <View style={s.third}><Text style={s.label}>Category</Text><TextInput style={s.input} value={category} onChangeText={setCategory} placeholder="Clothing" placeholderTextColor={C.text4} /></View>
         </View>
 
