@@ -5,12 +5,20 @@
 // it?" is the product's default pitch. look/format/crop prefs are gone
 // along with the on-device card drawing they used to configure.
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { DEFAULT_HOOK } from "./shareStudio";
+import { DEFAULT_HOOK, DEFAULT_PHOTO_MODE, PhotoMode } from "./shareStudio";
 
 export interface StudioPrefs {
   handleEnabled: boolean; // must be explicitly turned on - a saved handle string alone never shows it
   handle: string;
   hook: string | null; // last-chosen hook (preset or custom text) - null means the user explicitly picked "None"
+  // Photo mode only - zoom/focus are deliberately session-only (never saved).
+  // Optional (older saved blobs predate this field) - absence means
+  // DEFAULT_PHOTO_MODE, same "missing key = fresh-install default" rule
+  // `hook` already follows above.
+  photoMode?: PhotoMode;
+  // Accent swatch hex, or null/absent for "Auto" (the card's own
+  // verdict-derived color, sending no `accent` field at all) - the default.
+  accent?: string | null;
 }
 
 const STORAGE_KEY = "@valuiq_share_studio_prefs";
@@ -39,10 +47,12 @@ export async function loadStudioPrefs(fallbackDisplayName?: string | null): Prom
         handleEnabled: typeof parsed?.handleEnabled === "boolean" ? parsed.handleEnabled : false,
         handle: typeof parsed?.handle === "string" ? parsed.handle : defaultHandle(fallbackDisplayName),
         hook: hasHook ? (typeof parsed.hook === "string" ? parsed.hook : null) : DEFAULT_HOOK,
+        photoMode: parsed?.photoMode === "fill" ? "fill" : DEFAULT_PHOTO_MODE,
+        accent: typeof parsed?.accent === "string" ? parsed.accent : null,
       };
     }
   } catch {}
-  return { handleEnabled: false, handle: defaultHandle(fallbackDisplayName), hook: DEFAULT_HOOK };
+  return { handleEnabled: false, handle: defaultHandle(fallbackDisplayName), hook: DEFAULT_HOOK, photoMode: DEFAULT_PHOTO_MODE, accent: null };
 }
 
 export async function saveStudioPrefs(prefs: StudioPrefs): Promise<void> {

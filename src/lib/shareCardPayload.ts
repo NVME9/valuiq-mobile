@@ -5,6 +5,7 @@
 // on a loss" rule can all be unit tested independent of the component tree.
 import { formatMoney } from "./money";
 import { HeroVerdict } from "./outcomeTier";
+import { DEFAULT_PHOTO_ADJUST, PhotoAdjust, isValidAccentHex } from "./shareStudio";
 
 export type ShareCardFormat = "story" | "feed" | "square";
 export type ShareCardVariant = "scan" | "win";
@@ -76,6 +77,11 @@ export interface ShareCardPayload {
   handle?: string;
   hook?: string;
   hidePrice?: boolean;
+  // Omitted entirely for "Auto" (the card's own verdict-derived color) -
+  // only ever present when the user picked a swatch/hex, and only when
+  // that value is actually a valid 6-digit hex (see isValidAccentHex).
+  accent?: string;
+  photoAdjust: PhotoAdjust;
 }
 
 interface ControlsInput {
@@ -84,6 +90,8 @@ interface ControlsInput {
   hook?: string | null;
   handle?: string | null; // null/empty = handle not shown
   hidePrice?: boolean;
+  accent?: string | null; // null/undefined/invalid hex = Auto, omitted from the payload
+  photoAdjust?: PhotoAdjust; // defaults to DEFAULT_PHOTO_ADJUST (whole, zoom 1, centered) when omitted
 }
 
 export interface BuildScanCardInput extends ControlsInput {
@@ -114,21 +122,32 @@ export function buildShareCardPayload(input: BuildShareCardInput): ShareCardPayl
   const hook = input.hook && input.hook.trim() ? input.hook.trim().slice(0, MAX_HOOK_CHARS) : undefined;
   const handle = input.handle && input.handle.trim() ? input.handle.trim() : undefined;
   const hidePrice = !!input.hidePrice;
+  const accent = input.accent && isValidAccentHex(input.accent) ? input.accent : undefined;
+  const photoAdjust = input.photoAdjust ?? DEFAULT_PHOTO_ADJUST;
 
   if (input.variant === "win") {
+    // A sale can be logged at a profit, a loss, or dead even - the card
+    // always shows SOLD, but the sign of `profit` decides everything else:
+    // a non-positive result reads as an honest "LOSS AFTER FEES" in red,
+    // never dressed up as a win. formatMoney already puts the "-" before
+    // the "$" for a negative number, so only the profit branch needs its
+    // own leading "+".
+    const isLoss = input.profit <= 0;
     return {
       format: input.format,
       variant: "win",
       paid: formatMoney(input.boughtPrice),
-      hero: `+${formatMoney(input.profit)}`,
+      hero: isLoss ? formatMoney(input.profit) : `+${formatMoney(input.profit)}`,
       sold: formatMoney(input.soldPrice),
-      caption: "PROFIT AFTER FEES",
+      caption: isLoss ? "LOSS AFTER FEES" : "PROFIT AFTER FEES",
       stamp: "SOLD",
-      tone: "lime",
+      tone: isLoss ? "red" : "lime",
       name: input.itemName,
+      photoAdjust,
       ...(handle ? { handle } : {}),
       ...(hook ? { hook } : {}),
       ...(hidePrice ? { hidePrice: true } : {}),
+      ...(accent ? { accent } : {}),
     };
   }
 
@@ -143,10 +162,12 @@ export function buildShareCardPayload(input: BuildShareCardInput): ShareCardPayl
     hero: formatMoney(input.heroSellPrice ?? 0),
     tone,
     name: input.itemName,
+    photoAdjust,
     ...(stamp ? { stamp } : {}),
     ...(input.isEstimate ? { estimate: true, caption: "ESTIMATE" } : {}),
     ...(handle ? { handle } : {}),
     ...(hook ? { hook } : {}),
     ...(hidePrice || paidUnknown ? { hidePrice: true } : {}),
+    ...(accent ? { accent } : {}),
   };
 }

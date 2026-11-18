@@ -15,7 +15,8 @@ import { disableFontScaling } from "./src/lib/disableFontScaling";
 import { supabase } from "./src/lib/supabase";
 import { addSaleCheckInTapListener } from "./src/lib/notifications";
 import LogSaleModal from "./src/components/LogSaleModal";
-import { toPendingScan } from "./src/lib/saleCapture";
+import ShareStudio from "./src/components/ShareStudio";
+import { toPendingScan, SaleLoggedPayload } from "./src/lib/saleCapture";
 import * as Updates from "expo-updates";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { isBiometricEnabled, isBiometricAvailable, authenticateWithBiometrics, saveBiometricRefreshToken } from "./src/lib/biometrics";
@@ -861,6 +862,14 @@ export default function App() {
   // state) since the tapped notification can be up to ~12 days old and the
   // app may have been killed and relaunched since it fired.
   const [tapScan, setTapScan] = useState<any|null>(null);
+  // WIN HAND-OFF for the push-notification tap flow: a logged sale (profit,
+  // loss, or break-even) opens the Share Studio's Win variant here too, same
+  // short-delay-after-close sequencing ScannerScreen/HistoryScreen already
+  // use for their own LogSaleModal -> Studio hand-offs.
+  const [tapSaleWin, setTapSaleWin] = useState<SaleLoggedPayload|null>(null);
+  const [tapSaleStudioOpen, setTapSaleStudioOpen] = useState(false);
+  const tapSaleStudioTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (tapSaleStudioTimer.current) clearTimeout(tapSaleStudioTimer.current); }, []);
   useEffect(() => {
     const sub = addSaleCheckInTapListener(async (scanId) => {
       if (!token) return;
@@ -1188,7 +1197,27 @@ export default function App() {
               scan={tapScan ? toPendingScan(tapScan) : null}
               onClose={() => setTapScan(null)}
               onSaved={() => invalidateScanHistoryCache(token)}
+              onSold={(payload) => {
+                if (tapSaleStudioTimer.current) clearTimeout(tapSaleStudioTimer.current);
+                tapSaleStudioTimer.current = setTimeout(() => {
+                  setTapSaleWin(payload);
+                  setTapSaleStudioOpen(true);
+                }, 350);
+              }}
             />
+            {tapSaleWin ? (
+              <ShareStudio
+                visible={tapSaleStudioOpen}
+                onClose={() => setTapSaleStudioOpen(false)}
+                token={token}
+                scanId={tapSaleWin.scanId}
+                itemName={tapSaleWin.itemName}
+                photoBase64={null}
+                photoUri={tapSaleWin.photoUri}
+                isOwner={isOwner}
+                winData={{ boughtPrice: tapSaleWin.boughtPrice, soldPrice: tapSaleWin.soldPrice, profit: tapSaleWin.profit }}
+              />
+            ) : null}
           </View>
         )}
       </Animated.View>

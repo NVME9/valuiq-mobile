@@ -13,11 +13,16 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Modal, View, Text, StyleSheet, TouchableOpacity, Image, Animated, Easing,
-  Dimensions, TextInput, ScrollView, ActivityIndicator, Switch, Keyboard, Platform,
+  Dimensions, TextInput, ScrollView, ActivityIndicator, Keyboard, Platform,
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { C } from "../lib/theme";
-import { FORMAT_SIZES, FORMAT_LABELS, StudioFormat, StudioConfidence, formatFileSize, HOOK_PRESETS, DEFAULT_HOOK } from "../lib/shareStudio";
+import {
+  FORMAT_SIZES, FORMAT_LABELS, StudioFormat, StudioConfidence, formatFileSize,
+  HOOK_PRESETS, DEFAULT_HOOK, WIN_PROFIT_HOOK,
+  PhotoMode, DEFAULT_PHOTO_ADJUST, ZOOM_MIN, ZOOM_MAX, ZOOM_STEP, FOCUS_STEP, clampZoom, clampFocus,
+  ACCENT_SWATCHES, isValidAccentHex,
+} from "../lib/shareStudio";
 import { buildShareCardPayload, ShareCardTone } from "../lib/shareCardPayload";
 import { resolveSharePhoto, fetchShareCardPng } from "../lib/shareCardApi";
 import { loadStudioPrefs, saveStudioPrefs, StudioPrefs } from "../lib/studioPrefs";
@@ -31,10 +36,11 @@ let Sharing: typeof import("expo-sharing") | null = null;
 try { Sharing = require("expo-sharing"); } catch { Sharing = null; }
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
-// Preview is capped at ~52% of screen height (contain, never cropped) so
-// the controls + pinned Share button are never pushed below the fold on a
-// smaller phone - see this file's AGENTS.md-mandated layout fix.
-const PREVIEW_MAX_H = SCREEN_H * 0.52;
+// Preview is capped at ~40% of screen height (contain, never cropped) so the
+// compact control rows below it always fit an iPhone-13-size screen without
+// needing their own scroll - see this file's "controls area was unusable"
+// layout fix.
+const PREVIEW_MAX_H = SCREEN_H * 0.4;
 const PREVIEW_PAD_H = 16;
 
 // scale:0.5 for every live-preview request (debounced on each control
@@ -126,6 +132,19 @@ export default function ShareStudio(props: ShareStudioProps) {
   const [handleEditOpen, setHandleEditOpen] = useState(false);
   const [hidePrice, setHidePrice] = useState(false);
 
+  // Photo: mode is persisted (studioPrefs.ts); zoom/focus are session-only -
+  // always start back at these defaults on a fresh open, per spec.
+  const [photoMode, setPhotoMode] = useState<PhotoMode>(DEFAULT_PHOTO_ADJUST.mode);
+  const [zoom, setZoom] = useState(DEFAULT_PHOTO_ADJUST.zoom);
+  const [fx, setFx] = useState(DEFAULT_PHOTO_ADJUST.fx);
+  const [fy, setFy] = useState(DEFAULT_PHOTO_ADJUST.fy);
+
+  // Color: null = "Auto" (card's own verdict color, no accent field sent).
+  const [accent, setAccent] = useState<string | null>(null);
+  const [hexOpen, setHexOpen] = useState(false);
+  const [hexText, setHexText] = useState("");
+  const [hexError, setHexError] = useState(false);
+
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [renderMs, setRenderMs] = useState<number | null>(null);
@@ -147,14 +166,28 @@ export default function ShareStudio(props: ShareStudioProps) {
     loadStudioPrefs(displayName).then((p) => {
       setHandleEnabled(p.handleEnabled);
       setHandle(p.handle);
-      setHook(p.hook);
+      // Win variant's hook default is driven by the sale's profit sign
+      // (set synchronously below), never by the generic persisted
+      // preference - a sale-outcome card's default pitch is a different
+      // decision than a fresh-scan share's.
+      if (!isWin) setHook(p.hook);
+      setPhotoMode(p.photoMode ?? DEFAULT_PHOTO_ADJUST.mode);
+      setAccent(p.accent ?? null);
     });
     setFormat("story");
-    setHook(DEFAULT_HOOK);
+    setHook(isWin ? (winData && winData.profit > 0 ? WIN_PROFIT_HOOK : null) : DEFAULT_HOOK);
     setCustomHookOpen(false);
     setCustomHookText("");
     setHandleEditOpen(false);
     setHidePrice(false);
+    // Zoom/focus are session-only - always back to centered/unzoomed on a
+    // fresh open, regardless of what the last session left them at.
+    setZoom(DEFAULT_PHOTO_ADJUST.zoom);
+    setFx(DEFAULT_PHOTO_ADJUST.fx);
+    setFy(DEFAULT_PHOTO_ADJUST.fy);
+    setHexOpen(false);
+    setHexText("");
+    setHexError(false);
     setPreviewUri(null);
     setFetchError(null);
     setShareStatus(null);
@@ -173,7 +206,7 @@ export default function ShareStudio(props: ShareStudioProps) {
   }, [visible]);
 
   function persistPrefs(next: Partial<StudioPrefs>) {
-    const merged = { handleEnabled, handle, hook, ...next };
+    const merged = { handleEnabled, handle, hook, photoMode, accent, ...next };
     saveStudioPrefs(merged);
   }
 
@@ -205,18 +238,19 @@ export default function ShareStudio(props: ShareStudioProps) {
     abortRef.current = controller;
 
     const effectiveHandle = handleEnabled ? handle : null;
+    const photoAdjust = { mode: photoMode, zoom, fx, fy };
     const base = isWin
       ? buildShareCardPayload({
           variant: "win", format, itemName,
           boughtPrice: winData!.boughtPrice, soldPrice: winData!.soldPrice, profit: winData!.profit,
-          hook, handle: effectiveHandle, hidePrice,
+          hook, handle: effectiveHandle, hidePrice, accent, photoAdjust,
         })
       : buildShareCardPayload({
           variant: "scan", format, itemName,
           paidPrice: paidPrice ?? null, heroSellPrice: sellPrice ?? null,
           verdict: heroVerdict ?? null, toneOverride,
           isEstimate: profitConfidence === "estimate",
-          hook, handle: effectiveHandle, hidePrice,
+          hook, handle: effectiveHandle, hidePrice, accent, photoAdjust,
         });
 
     const result = await fetchShareCardPng({ ...base, photo: resolved.photo, scale: requestedScale }, token, controller.signal);
@@ -249,7 +283,7 @@ export default function ShareStudio(props: ShareStudioProps) {
     debounceRef.current = setTimeout(() => { runFetch(); }, 350);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, format, hook, handleEnabled, handle, hidePrice]);
+  }, [visible, format, hook, handleEnabled, handle, hidePrice, photoMode, zoom, fx, fy, accent]);
 
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
 
@@ -280,6 +314,57 @@ export default function ShareStudio(props: ShareStudioProps) {
   function toggleHandleEnabled(next: boolean) {
     setHandleEnabled(next);
     persistPrefs({ handleEnabled: next });
+  }
+
+  function choosePhotoMode(mode: PhotoMode) {
+    setPhotoMode(mode);
+    persistPrefs({ photoMode: mode });
+    // Zoom/focus only mean anything in Fill - switching back to Whole drops
+    // any in-progress crop rather than silently carrying it forward unseen.
+    if (mode === "whole") {
+      setZoom(DEFAULT_PHOTO_ADJUST.zoom);
+      setFx(DEFAULT_PHOTO_ADJUST.fx);
+      setFy(DEFAULT_PHOTO_ADJUST.fy);
+    }
+  }
+
+  function nudgeZoom(delta: number) {
+    setZoom((z) => clampZoom(z + delta));
+  }
+
+  function nudgeFocus(dx: number, dy: number) {
+    if (dx) setFx((f) => clampFocus(f + dx));
+    if (dy) setFy((f) => clampFocus(f + dy));
+  }
+
+  function resetPhotoAdjust() {
+    setZoom(DEFAULT_PHOTO_ADJUST.zoom);
+    setFx(DEFAULT_PHOTO_ADJUST.fx);
+    setFy(DEFAULT_PHOTO_ADJUST.fy);
+  }
+
+  function chooseAccent(hex: string | null) {
+    setAccent(hex);
+    setHexOpen(false);
+    setHexError(false);
+    persistPrefs({ accent: hex });
+  }
+
+  function openHexEditor() {
+    setHexText(accent ?? "");
+    setHexError(false);
+    setHexOpen(true);
+  }
+
+  function commitHex() {
+    let v = hexText.trim();
+    if (v && !v.startsWith("#")) v = `#${v}`;
+    if (isValidAccentHex(v)) {
+      chooseAccent(v.toLowerCase());
+    } else {
+      setHexError(true);
+    }
+    Keyboard.dismiss();
   }
 
   async function copyCaption() {
@@ -387,16 +472,17 @@ export default function ShareStudio(props: ShareStudioProps) {
         </View>
         <Text style={st.renderReadout}>render {renderMs ?? "—"} ms · {renderStatus}</Text>
 
-        {/* Format tabs + hook chips directly under the preview, inside the
-            scroll area - sized/ordered so both are visible without
-            scrolling on an iPhone 13-size screen even though the preview
-            above is now capped at ~52% of the screen height. Handle/hide-
-            price controls follow below, scrollable. */}
+        {/* Compact control ROWS, not a tall stacked form - every row fits an
+            iPhone-13-size screen without scrolling now that the preview
+            above is capped at ~40% of screen height. The outer ScrollView
+            is a fallback only (an accessibility-scaled font or a very short
+            phone), never the normal path. */}
         <ScrollView
           style={st.controlsScroll}
           contentContainerStyle={st.controlsContent}
           keyboardShouldPersistTaps="handled"
         >
+          {/* ROW 1 — format */}
           <View style={st.segmentRow}>
             {(["story", "feed", "square"] as StudioFormat[]).map((f) => (
               <TouchableOpacity
@@ -409,8 +495,10 @@ export default function ShareStudio(props: ShareStudioProps) {
             ))}
           </View>
 
+          {/* ROW 2 — hook, single horizontal scroller (no wrap -> no extra
+              vertical height, however many presets there are). */}
           <Text style={st.sectionLabel}>HOOK</Text>
-          <View style={st.chipRow}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.chipScrollRow}>
             {HOOK_PRESETS.map((h) => {
               const selected = hook === h;
               return (
@@ -429,7 +517,15 @@ export default function ShareStudio(props: ShareStudioProps) {
             >
               <Text style={[st.chipText, hook == null && st.chipTextActive]}>None</Text>
             </TouchableOpacity>
-          </View>
+            <TouchableOpacity
+              style={[st.chip, hook != null && !HOOK_PRESETS.includes(hook) && st.chipActive]}
+              onPress={() => { setCustomHookText(hook && !HOOK_PRESETS.includes(hook) ? hook : ""); setCustomHookOpen(true); }}
+            >
+              <Text style={[st.chipText, hook != null && !HOOK_PRESETS.includes(hook) && st.chipTextActive]} numberOfLines={1}>
+                {hook != null && !HOOK_PRESETS.includes(hook) ? hook : "Custom…"}
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
           {customHookOpen ? (
             <View style={st.inlineInputRow}>
               <TextInput
@@ -448,20 +544,22 @@ export default function ShareStudio(props: ShareStudioProps) {
                 <Text style={st.inlineInputDoneText}>Done</Text>
               </TouchableOpacity>
             </View>
-          ) : (
-            <TouchableOpacity
-              style={[st.chip, st.customHookChip, hook != null && !HOOK_PRESETS.includes(hook) && st.chipActive]}
-              onPress={() => { setCustomHookText(hook && !HOOK_PRESETS.includes(hook) ? hook : ""); setCustomHookOpen(true); }}
-            >
-              <Text style={[st.chipText, hook != null && !HOOK_PRESETS.includes(hook) && st.chipTextActive]} numberOfLines={1}>
-                {hook != null && !HOOK_PRESETS.includes(hook) ? hook : "Custom hook…"}
-              </Text>
-            </TouchableOpacity>
-          )}
+          ) : null}
 
-          <View style={st.toggleRow}>
-            <Text style={st.toggleLabel}>Show handle</Text>
-            <Switch value={handleEnabled} onValueChange={toggleHandleEnabled} trackColor={{ true: C.green }} />
+          {/* ROW 3 — handle / hide-price toggle chips */}
+          <View style={st.toggleChipRow}>
+            <TouchableOpacity
+              style={[st.chip, handleEnabled && st.chipActive]}
+              onPress={() => toggleHandleEnabled(!handleEnabled)}
+            >
+              <Text style={[st.chipText, handleEnabled && st.chipTextActive]} numberOfLines={1}>Handle</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[st.chip, hidePrice && st.chipActive]}
+              onPress={() => setHidePrice((v) => !v)}
+            >
+              <Text style={[st.chipText, hidePrice && st.chipTextActive]} numberOfLines={1}>Hide price</Text>
+            </TouchableOpacity>
           </View>
           {handleEnabled ? (
             handleEditOpen ? (
@@ -491,10 +589,102 @@ export default function ShareStudio(props: ShareStudioProps) {
             )
           ) : null}
 
-          <View style={st.toggleRow}>
-            <Text style={st.toggleLabel}>Hide price</Text>
-            <Switch value={hidePrice} onValueChange={setHidePrice} trackColor={{ true: C.green }} />
+          {/* ROW 4 — photo: Whole/Fill, with zoom/focus/reset only in Fill */}
+          <Text style={st.sectionLabel}>PHOTO</Text>
+          <View style={st.photoModeRow}>
+            {(["whole", "fill"] as PhotoMode[]).map((m) => (
+              <TouchableOpacity
+                key={m}
+                style={[st.photoModeBtn, photoMode === m && st.chipActive]}
+                onPress={() => choosePhotoMode(m)}
+              >
+                <Text style={[st.chipText, photoMode === m && st.chipTextActive]} numberOfLines={1}>
+                  {m === "whole" ? "Whole" : "Fill"}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
+          {photoMode === "fill" ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.photoAdjustRow}>
+              <View style={st.adjustGroup}>
+                <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeZoom(-ZOOM_STEP)} disabled={zoom <= ZOOM_MIN}>
+                  <Text style={st.adjustBtnText}>−</Text>
+                </TouchableOpacity>
+                <Text style={st.zoomValue} numberOfLines={1}>{zoom.toFixed(2)}x</Text>
+                <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeZoom(ZOOM_STEP)} disabled={zoom >= ZOOM_MAX}>
+                  <Text style={st.adjustBtnText}>+</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={st.adjustGroup}>
+                <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(-FOCUS_STEP, 0)}>
+                  <Text style={st.adjustBtnText}>←</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(0, -FOCUS_STEP)}>
+                  <Text style={st.adjustBtnText}>↑</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(0, FOCUS_STEP)}>
+                  <Text style={st.adjustBtnText}>↓</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(FOCUS_STEP, 0)}>
+                  <Text style={st.adjustBtnText}>→</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity style={st.resetBtn} onPress={resetPhotoAdjust}>
+                <Text style={st.resetBtnText}>Reset</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          ) : null}
+
+          {/* ROW 5 — color, single horizontal scroller of round swatches */}
+          <Text style={st.sectionLabel}>COLOR</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.swatchRow}>
+            <TouchableOpacity
+              style={[st.swatch, { backgroundColor: C.surfaceHigh }, accent == null && st.swatchSelected]}
+              onPress={() => chooseAccent(null)}
+            >
+              <Text style={st.swatchAutoText}>Auto</Text>
+            </TouchableOpacity>
+            {ACCENT_SWATCHES.map((sw) => (
+              <TouchableOpacity
+                key={sw.id}
+                style={[st.swatch, { backgroundColor: sw.hex }, accent === sw.hex && st.swatchSelected]}
+                onPress={() => chooseAccent(sw.hex)}
+                accessibilityLabel={sw.label}
+              />
+            ))}
+            <TouchableOpacity
+              style={[
+                st.swatch,
+                { backgroundColor: accent != null && !ACCENT_SWATCHES.some((sw) => sw.hex === accent) ? accent : C.surfaceHigh },
+                accent != null && !ACCENT_SWATCHES.some((sw) => sw.hex === accent) && st.swatchSelected,
+              ]}
+              onPress={openHexEditor}
+            >
+              <Text style={st.swatchAutoText}>#</Text>
+            </TouchableOpacity>
+          </ScrollView>
+          {hexOpen ? (
+            <View style={st.inlineInputRow}>
+              <TextInput
+                style={st.inlineInput}
+                value={hexText}
+                onChangeText={(t) => { setHexText(t.slice(0, 7)); setHexError(false); }}
+                placeholder="#a3e635"
+                placeholderTextColor={C.text4}
+                autoFocus
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={7}
+                returnKeyType="done"
+                blurOnSubmit
+                onSubmitEditing={commitHex}
+              />
+              <TouchableOpacity onPress={commitHex} style={st.inlineInputDone}>
+                <Text style={st.inlineInputDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {hexError ? <Text style={st.hexErrorText}>Enter a 6-digit hex color, like #A3E635.</Text> : null}
 
           {isOwner && debugBytes != null ? (
             <Text style={st.debugLine}>
@@ -542,7 +732,7 @@ const st = StyleSheet.create({
   closeText: { color: C.text3, fontSize: 15, fontWeight: "700", flexShrink: 0 },
   topTitle: { color: C.text1, fontSize: 15, fontWeight: "800", flexShrink: 1, flexGrow: 1, textAlign: "center" },
 
-  // Fixed height (not minHeight) - "at most ~52% of the screen", contain +
+  // Fixed height (not minHeight) - "at most ~40% of the screen", contain +
   // centered. previewBox (computed in JS from the format's aspect ratio)
   // sizes the actual image/placeholder to fit inside this without cropping.
   previewArea: { height: PREVIEW_MAX_H, alignItems: "center", justifyContent: "center", paddingHorizontal: PREVIEW_PAD_H, position: "relative" },
@@ -570,22 +760,42 @@ const st = StyleSheet.create({
   segmentTextActive: { color: C.green },
 
   sectionLabel: { color: C.green, fontSize: 11, fontWeight: "900", letterSpacing: 1.5, marginTop: 12, marginBottom: 8 },
-  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  // Hook/color rows are single horizontal scrollers (not flexWrap) so
+  // however many chips/swatches exist, they add zero extra row height.
+  chipScrollRow: { flexDirection: "row", gap: 8, paddingRight: 8 },
   chip: { minHeight: 40, paddingHorizontal: 14, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface, alignItems: "center", justifyContent: "center" },
   chipActive: { backgroundColor: C.green, borderColor: C.green },
   chipText: { color: C.text2, fontSize: 13, fontWeight: "700" },
   chipTextActive: { color: C.greenDark, fontWeight: "900" },
-  customHookChip: { marginTop: 8, alignSelf: "flex-start" },
 
   inlineInputRow: { flexDirection: "row", alignItems: "center", marginTop: 8, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.green, borderRadius: 100, paddingLeft: 16, paddingRight: 8, minHeight: 44 },
   inlineInput: { flex: 1, color: C.text1, fontSize: 14, fontWeight: "600", paddingVertical: Platform.OS === "ios" ? 10 : 6 },
   inlineInputDone: { paddingHorizontal: 10, paddingVertical: 8 },
   inlineInputDoneText: { color: C.green, fontSize: 13, fontWeight: "800" },
+  hexErrorText: { color: C.red, fontSize: 11, fontWeight: "600", marginTop: 6 },
 
-  toggleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14 },
-  toggleLabel: { color: C.text2, fontSize: 14, fontWeight: "700" },
+  // ROW 3 — handle/hide-price toggle chips, side by side.
+  toggleChipRow: { flexDirection: "row", gap: 8, marginTop: 12 },
   handlePill: { marginTop: 8, minHeight: 44, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, alignSelf: "flex-start" },
   handlePillText: { color: C.text2, fontSize: 14, fontWeight: "700" },
+
+  // ROW 4 — photo mode + (Fill-only) zoom/focus/reset.
+  photoModeRow: { flexDirection: "row", gap: 8 },
+  photoModeBtn: { minHeight: 40, minWidth: 72, paddingHorizontal: 14, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface, alignItems: "center", justifyContent: "center" },
+  photoAdjustRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 10, paddingRight: 8 },
+  adjustGroup: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.border, borderRadius: 100, paddingHorizontal: 4 },
+  adjustBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
+  adjustBtnText: { color: C.text1, fontSize: 16, fontWeight: "800" },
+  zoomValue: { color: C.text2, fontSize: 12, fontWeight: "700", minWidth: 44, textAlign: "center" },
+  resetBtn: { paddingHorizontal: 12, minHeight: 36, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, alignItems: "center", justifyContent: "center" },
+  resetBtnText: { color: C.text3, fontSize: 12, fontWeight: "700" },
+
+  // ROW 5 — color swatches, >=36pt round tap targets, white ring on the
+  // selected one (Auto included).
+  swatchRow: { flexDirection: "row", gap: 10, paddingRight: 8, paddingVertical: 2 },
+  swatch: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: C.border },
+  swatchSelected: { borderWidth: 2, borderColor: C.text1 },
+  swatchAutoText: { color: C.text2, fontSize: 10, fontWeight: "800" },
 
   debugLine: { color: C.text4, fontSize: 10, fontFamily: "monospace" as any, marginTop: 14, textAlign: "center" },
 

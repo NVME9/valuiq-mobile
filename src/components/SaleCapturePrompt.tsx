@@ -10,12 +10,13 @@
 // of ignoring it, and no dismiss. This version only ever shows a collapsed
 // line until tapped, offers a real "not yet" (snoozes, doesn't lie), a real
 // "gave up" (resolves it so it stops asking), and a dismiss.
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator } from "react-native";
 import { C } from "../lib/theme";
 import LogSaleModal from "./LogSaleModal";
+import ShareStudio from "./ShareStudio";
 import { getScanHistory, invalidateScanHistoryCache } from "../lib/api";
-import { toPendingScan, recordSaleOutcome, snoozeCapture, PendingScan } from "../lib/saleCapture";
+import { toPendingScan, recordSaleOutcome, snoozeCapture, PendingScan, SaleLoggedPayload } from "../lib/saleCapture";
 
 interface Props {
   token: string;
@@ -39,6 +40,14 @@ export default function SaleCapturePrompt({ token, onNavigate }: Props) {
   const [dismissed, setDismissed] = useState(false); // session-only - reappears next app open
   const [busyId, setBusyId]       = useState<string | null>(null);
   const [logSaleScan, setLogSaleScan] = useState<PendingScan | null>(null);
+  // WIN HAND-OFF: a sale logged from this banner's "Sold" button opens the
+  // Share Studio's Win variant too, same short-delay-after-close sequencing
+  // every other "Did it sell?" entry point uses (App.tsx's push-tap flow,
+  // ScannerScreen, HistoryScreen).
+  const [saleWin, setSaleWin] = useState<SaleLoggedPayload | null>(null);
+  const [saleStudioOpen, setSaleStudioOpen] = useState(false);
+  const saleStudioTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (saleStudioTimer.current) clearTimeout(saleStudioTimer.current); }, []);
 
   useEffect(() => {
     let alive = true;
@@ -154,7 +163,26 @@ export default function SaleCapturePrompt({ token, onNavigate }: Props) {
         scan={logSaleScan}
         onClose={() => setLogSaleScan(null)}
         onSaved={(scanId) => { removeItem(scanId); invalidateScanHistoryCache(token); }}
+        onSold={(payload) => {
+          if (saleStudioTimer.current) clearTimeout(saleStudioTimer.current);
+          saleStudioTimer.current = setTimeout(() => {
+            setSaleWin(payload);
+            setSaleStudioOpen(true);
+          }, 350);
+        }}
       />
+      {saleWin ? (
+        <ShareStudio
+          visible={saleStudioOpen}
+          onClose={() => setSaleStudioOpen(false)}
+          token={token}
+          scanId={saleWin.scanId}
+          itemName={saleWin.itemName}
+          photoBase64={null}
+          photoUri={saleWin.photoUri}
+          winData={{ boughtPrice: saleWin.boughtPrice, soldPrice: saleWin.soldPrice, profit: saleWin.profit }}
+        />
+      ) : null}
     </View>
   );
 }

@@ -91,6 +91,92 @@ describe("buildShareCardPayload - win variant", () => {
     expect(p.paid).toBe("$20");
     expect(p.sold).toBe("$65");
   });
+
+  test("win with a loss: negative hero, red tone, SOLD stamp, 'LOSS AFTER FEES' caption", () => {
+    const p = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Vintage Jacket",
+      boughtPrice: 65, soldPrice: 20, profit: -45,
+    });
+    expect(p.tone).toBe("red");
+    expect(p.stamp).toBe("SOLD");
+    expect(p.caption).toBe("LOSS AFTER FEES");
+    expect(p.hero).toBe("-$45");
+  });
+
+  test("win break-even (profit exactly zero): red tone, 'LOSS AFTER FEES' caption, unsigned zero hero", () => {
+    const p = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Vintage Jacket",
+      boughtPrice: 20, soldPrice: 20, profit: 0,
+    });
+    expect(p.tone).toBe("red");
+    expect(p.caption).toBe("LOSS AFTER FEES");
+    expect(p.hero).toBe("$0");
+  });
+});
+
+describe("buildShareCardPayload - photoAdjust", () => {
+  test("defaults to whole/zoom 1/centered focus when omitted", () => {
+    const p = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Lamp",
+      boughtPrice: 20, soldPrice: 65, profit: 45,
+    });
+    expect(p.photoAdjust).toEqual({ mode: "whole", zoom: 1, fx: 0.5, fy: 0.5 });
+  });
+
+  test("a supplied photoAdjust passes through as given", () => {
+    const p = buildShareCardPayload({
+      variant: "scan", format: "story", itemName: "Lamp",
+      paidPrice: 10, heroSellPrice: 30, verdict: "SOLID", isEstimate: false,
+      photoAdjust: { mode: "fill", zoom: 2.25, fx: 0.3, fy: 0.7 },
+    });
+    expect(p.photoAdjust).toEqual({ mode: "fill", zoom: 2.25, fx: 0.3, fy: 0.7 });
+  });
+});
+
+describe("buildShareCardPayload - accent", () => {
+  test("Auto (no accent given) omits the field entirely", () => {
+    const p = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Lamp",
+      boughtPrice: 20, soldPrice: 65, profit: 45,
+    });
+    expect(p.accent).toBeUndefined();
+  });
+
+  test("Auto (accent explicitly null) also omits the field", () => {
+    const p = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Lamp",
+      boughtPrice: 20, soldPrice: 65, profit: 45, accent: null,
+    });
+    expect(p.accent).toBeUndefined();
+  });
+
+  test("a valid 6-digit hex is sent as-is", () => {
+    const p = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Lamp",
+      boughtPrice: 20, soldPrice: 65, profit: 45, accent: "#a3e635",
+    });
+    expect(p.accent).toBe("#a3e635");
+  });
+
+  test("an invalid hex (bad length, missing #, non-hex chars) is omitted rather than sent broken", () => {
+    const bad1 = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Lamp",
+      boughtPrice: 20, soldPrice: 65, profit: 45, accent: "a3e635",
+    });
+    expect(bad1.accent).toBeUndefined();
+
+    const bad2 = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Lamp",
+      boughtPrice: 20, soldPrice: 65, profit: 45, accent: "#zzzzzz",
+    });
+    expect(bad2.accent).toBeUndefined();
+
+    const bad3 = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Lamp",
+      boughtPrice: 20, soldPrice: 65, profit: 45, accent: "#abc",
+    });
+    expect(bad3.accent).toBeUndefined();
+  });
 });
 
 describe("canShareWin - the 'no share on loss' rule", () => {
