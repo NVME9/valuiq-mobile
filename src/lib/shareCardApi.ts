@@ -107,7 +107,11 @@ export interface ShareCardFetchResult {
 // text so the caller's error box can show real status/stage/body, never a
 // blank failure.
 export async function fetchShareCardPng(
-  payload: ShareCardPayload & { photo: SharePhoto },
+  // `scale` lets the live-preview loop ask the server for a half-size
+  // render (faster, plenty sharp for the in-app preview) while the actual
+  // Share tap always asks for a fresh scale:1 image - see ShareStudio.tsx's
+  // runFetch/share.
+  payload: ShareCardPayload & { photo: SharePhoto; scale?: number },
   token: string | null,
   signal: AbortSignal
 ): Promise<ShareCardFetchResult> {

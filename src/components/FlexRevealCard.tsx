@@ -394,9 +394,16 @@ export function FlexRevealBody({ stat, itemName, brand, loadingSubStat, eyebrowO
 
   return (
     <View style={s.screen}>
-      <TouchableOpacity style={s.closeBtn} onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-        <Text style={s.closeBtnText}>Done</Text>
-      </TouchableOpacity>
+      {/* Only rendered when the primary button ISN'T also "Done" (the loss
+          case below) - two "Done"s on one screen read as a bug, and the
+          loss branch's big button already closes the screen. The win
+          branch's primary button shares instead of closing, so it still
+          needs this as its only way out. */}
+      {isLoss ? null : (
+        <TouchableOpacity style={s.closeBtn} onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+          <Text style={s.closeBtnText}>Done</Text>
+        </TouchableOpacity>
+      )}
 
       <View style={s.center}>
         <Animated.View style={entranceStyle}>

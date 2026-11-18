@@ -22,6 +22,12 @@ export const FORMAT_LABELS: Record<StudioFormat, string> = {
   square: "Square",
 };
 
+// Hook presets shared between the Studio UI and studioPrefs.ts's default -
+// DEFAULT_HOOK is what a first-ever open (no saved prefs yet) starts with,
+// per the "hook ON by default" product decision.
+export const HOOK_PRESETS = ["Would you flip it?", "Pass or buy?", "Real find, real numbers."];
+export const DEFAULT_HOOK = HOOK_PRESETS[0];
+
 // File-size readout for the owner debug line.
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
