@@ -91,20 +91,27 @@ export function setPhotoMode(state: StudioControlsState, mode: PhotoMode): Studi
   return { ...state, photoMode: mode };
 }
 
-export function nudgeZoom(state: StudioControlsState, delta: number): StudioControlsState {
-  return { ...state, zoom: clampZoom(state.zoom + delta) };
-}
-
-export function nudgeFocus(state: StudioControlsState, dx: number, dy: number): StudioControlsState {
-  return {
-    ...state,
-    fx: dx ? clampFocus(state.fx + dx) : state.fx,
-    fy: dy ? clampFocus(state.fy + dy) : state.fy,
-  };
-}
-
 export function resetPhotoAdjust(state: StudioControlsState): StudioControlsState {
   return { ...state, zoom: DEFAULT_PHOTO_ADJUST.zoom, fx: DEFAULT_PHOTO_ADJUST.fx, fy: DEFAULT_PHOTO_ADJUST.fy };
+}
+
+// DIRECT MANIPULATION COMMIT (v4, replaces nudgeZoom/nudgeFocus's button-tap
+// steps) - applies an absolute gesture result (pan-drag's new fx/fy,
+// pinch's new zoom) on gesture release. Each field is independently
+// optional so a pure pan (zoom untouched) and a pure pinch (fx/fy
+// untouched) can both call this same setter. Values are clamped here too
+// (not just at the gesture-math call site) so this setter can never write
+// an out-of-range value regardless of caller.
+export function setPhotoAdjust(
+  state: StudioControlsState,
+  adjust: { zoom?: number; fx?: number; fy?: number }
+): StudioControlsState {
+  return {
+    ...state,
+    zoom: adjust.zoom != null ? clampZoom(adjust.zoom) : state.zoom,
+    fx: adjust.fx != null ? clampFocus(adjust.fx) : state.fx,
+    fy: adjust.fy != null ? clampFocus(adjust.fy) : state.fy,
+  };
 }
 
 export function setAccent(state: StudioControlsState, hex: string | null): StudioControlsState {

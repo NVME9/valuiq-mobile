@@ -244,13 +244,15 @@ export function FlexRevealContent({ stat, itemName, brand, animate = true, loadi
             An explicit eyebrowOverride (e.g. community-flip's "COMMUNITY
             FLIP") always wins regardless of win/loss. */}
         <Text style={[s.eyebrow, isLoss && s.eyebrowLoss]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{eyebrowOverride ?? (isLoss ? "LOGGED" : (stat ? TIER_LABEL[stat.tier] : "LOGGED"))}</Text>
-        {/* No numberOfLines cap here on purpose: this is the FULL-detail
-            reveal, opened from a short/truncated card - the one place the
-            complete item name has to show, however many lines that takes.
-            A cap + adjustsFontSizeToFit (the old approach) still truncates
-            once a name is long enough to blow past the shrink floor; wrapping
-            with no cap never does. */}
-        {title ? <Text style={s.itemName}>{title}</Text> : null}
+        {/* CAPPED (v4, founder device bug - a 5-line product name blew up
+            this screen's layout): was uncapped on purpose ("the one place
+            the complete item name has to show") but an unbounded title has
+            no floor - a long combined item+brand string pushes the hero
+            number/badge/footer off the bottom of a 390x844 screen entirely.
+            numberOfLines+adjustsFontSizeToFit shrinks long names to fit
+            instead, same guard this sweep applied everywhere else a product
+            name renders (SaleCaptureCard.tsx's own title Text). */}
+        {title ? <Text style={s.itemName} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.75}>{title}</Text> : null}
 
         {stat ? (
           <Text style={[s.hero, isLoss && s.heroLoss]} numberOfLines={1} adjustsFontSizeToFit>{headlineText}</Text>

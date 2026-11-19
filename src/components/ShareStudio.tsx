@@ -27,25 +27,25 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Modal, View, Text, StyleSheet, TouchableOpacity, Image, Animated, Easing,
-  Dimensions, TextInput, ScrollView, ActivityIndicator, Keyboard, Platform,
+  Dimensions, TextInput, ScrollView, ActivityIndicator, Keyboard, Platform, PanResponder,
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { C } from "../lib/theme";
 import {
   FORMAT_SIZES, FORMAT_LABELS, StudioFormat, StudioConfidence, formatFileSize,
   HOOK_PRESETS, DEFAULT_HOOK, WIN_PROFIT_HOOK,
-  PhotoMode, DEFAULT_PHOTO_ADJUST, ZOOM_MIN, ZOOM_MAX, ZOOM_STEP, FOCUS_STEP,
-  ACCENT_SWATCHES, isValidAccentHex,
+  PhotoMode, DEFAULT_PHOTO_ADJUST,
+  ACCENT_SWATCHES, isValidAccentHex, panDeltaToFocus, pinchScaleToZoom,
 } from "../lib/shareStudio";
 import {
   StudioTab, StudioControlsState, initialStudioControls,
   setFormat as csSetFormat, setActiveTab as csSetActiveTab, setHook as csSetHook,
   toggleHandleEnabled as csToggleHandleEnabled, setHandle as csSetHandle,
   setHidePrice as csSetHidePrice, setPhotoMode as csSetPhotoMode,
-  nudgeZoom as csNudgeZoom, nudgeFocus as csNudgeFocus, resetPhotoAdjust as csResetPhotoAdjust,
+  resetPhotoAdjust as csResetPhotoAdjust, setPhotoAdjust as csSetPhotoAdjust,
   setAccent as csSetAccent,
 } from "../lib/shareStudioControls";
-import { buildShareCardPayload, buildShareVideoPayload, ShareCardTone } from "../lib/shareCardPayload";
+import { buildShareCardPayload, buildShareVideoPayload, ShareCardTone, stampForHeroVerdict, toneForHeroVerdict } from "../lib/shareCardPayload";
 import { resolveSharePhoto, fetchShareCardPng } from "../lib/shareCardApi";
 import { fetchShareVideoMp4 } from "../lib/shareVideoApi";
 import { loadStudioPrefs, saveStudioPrefs, StudioPrefs } from "../lib/studioPrefs";
@@ -120,6 +120,15 @@ export interface ShareStudioProps {
   isOwner?: boolean;
   // Win-variant input. Presence alone selects the Win variant.
   winData?: ShareStudioWinData | null;
+  // DEBUG ONLY (owner readout) - which call site opened this Studio
+  // (ScannerScreen / HistoryScreen-share / HistoryScreen-win /
+  // SaleCapturePrompt / App-push), so a future stamp/tone mismatch is
+  // traceable on-screen instead of requiring a repro + source dive.
+  entryPoint?: string;
+  // Small text link in the More tab, shown only when the caller actually
+  // has a leaderboard route to send the user to (community/leaderboard) -
+  // omitted entirely otherwise, never a dead "Coming soon" placeholder.
+  onLeaderboard?: () => void;
 }
 
 interface FetchError {
@@ -154,7 +163,7 @@ export default function ShareStudio(props: ShareStudioProps) {
   const {
     visible, onClose, token, scanId, itemName, photoBase64, photoUri,
     paidPrice, sellPrice, profitConfidence, heroVerdict, toneOverride,
-    displayName, isOwner, winData,
+    displayName, isOwner, winData, entryPoint, onLeaderboard,
   } = props;
   const isWin = !!winData;
 
@@ -188,6 +197,29 @@ export default function ShareStudio(props: ShareStudioProps) {
 
   const [videoState, setVideoState] = useState<VideoState>("idle");
   const [videoError, setVideoError] = useState<FetchError | null>(null);
+
+  // DIRECT-MANIPULATION PHOTO GESTURE (v4, replaces the arrow/+-/zoom button
+  // pad) - livePan/liveScale drive an INSTANT local transform on the preview
+  // image while a finger is down (see the `transform` style below); the
+  // real server re-render only fires on release, once the gesture's result
+  // is committed into fx/fy/zoom (the existing 350ms debounced-fetch effect
+  // already re-requests whenever those change - see its own comment). Plain
+  // Animated.ValueXY/Value with imperative .setValue() in the responder
+  // callbacks, not Animated.event - simpler to reason about for a transform
+  // that's reset to identity on every release rather than driven frame-by-
+  // frame from a single gesture value.
+  const livePan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const liveScale = useRef(new Animated.Value(1)).current;
+  const [previewLayout, setPreviewLayout] = useState({ w: 0, h: 0 });
+  const pinchStartRef = useRef<{ dist: number; zoom: number } | null>(null);
+  // Mirrors whatever liveScale's current value is - read synchronously on
+  // release to compute the committed zoom, since Animated.Value has no
+  // public synchronous getter and the gesture's final touch distance isn't
+  // reliably available by the time onPanResponderRelease fires.
+  const liveScaleRatioRef = useRef(1);
+  const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
+  const DOUBLE_TAP_MS = 300;
+  const DOUBLE_TAP_SLOP = 16;
 
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -314,13 +346,33 @@ export default function ShareStudio(props: ShareStudioProps) {
   // request (runFetch itself aborts the previous one) and keeps showing the
   // last successful preview, dimmed, until the new one lands. Always the
   // fast scale:0.5 preview - see share() for the scale:1 final render.
+  //
+  // STALE-SCAN GUARD (v4, founder device bug audit): this dependency list
+  // used to be JUST the UI control fields - never scanId/heroVerdict/
+  // toneOverride/paidPrice/sellPrice/photoBase64/photoUri/winData. Every
+  // caller that conditionally MOUNTS ShareStudio fresh per share
+  // (SaleCapturePrompt, App.tsx's push-tap flow, HistoryScreen's
+  // `{(studioTarget||loggedWin) ? <ShareStudio.../> : null}`) was safe by
+  // accident - a fresh mount re-runs every effect from scratch regardless.
+  // ScannerScreen.tsx is the one caller that renders <ShareStudio> UNGATED
+  // (always mounted for the screen's whole lifetime, only `visible` toggles)
+  // - if a future edit ever lets `heroVerdict`/`paidPrice`/etc. change while
+  // `visible` stays continuously true (e.g. an async verdict settle while
+  // the Studio is already open), this effect would keep serving the OLD
+  // scan's preview, tone included. Listing the scan-identity fields here
+  // directly closes that gap instead of relying on every future caller
+  // happening to unmount-and-remount.
   useEffect(() => {
     if (!visible) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => { runFetch(); }, 350);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, format, hook, handleEnabled, handle, hidePrice, photoMode, zoom, fx, fy, accent]);
+  }, [
+    visible, format, hook, handleEnabled, handle, hidePrice, photoMode, zoom, fx, fy, accent,
+    scanId, itemName, photoBase64, photoUri, paidPrice, sellPrice, profitConfidence,
+    heroVerdict, toneOverride, winData,
+  ]);
 
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
 
@@ -358,17 +410,86 @@ export default function ShareStudio(props: ShareStudioProps) {
     persistPrefs({ photoMode: mode });
   }
 
-  function nudgeZoom(delta: number) {
-    setControls((prev) => csNudgeZoom(prev, delta));
-  }
-
-  function nudgeFocus(dx: number, dy: number) {
-    setControls((prev) => csNudgeFocus(prev, dx, dy));
-  }
-
   function resetPhotoAdjust() {
     setControls((prev) => csResetPhotoAdjust(prev));
+    livePan.setValue({ x: 0, y: 0 });
+    liveScale.setValue(1);
   }
+
+  // Commits a gesture's result into the real fx/fy/zoom controls (which the
+  // existing debounced-fetch effect picks up and re-requests the server
+  // render for, 350ms after the LAST change - so a quick drag-then-pinch
+  // only ever fires one network request, not one per gesture). Called only
+  // on release, never while the finger is still down - see livePan/
+  // liveScale above for the instant local feedback shown while dragging.
+  function commitPhotoAdjust(adjust: { zoom?: number; fx?: number; fy?: number }) {
+    setControls((prev) => csSetPhotoAdjust(prev, adjust));
+  }
+
+  // DIRECT-MANIPULATION RESPONDER (v4, item 3) - one-finger drag pans
+  // (fx/fy), two-finger pinch zooms (1x-3x), double-tap resets. Built on
+  // PanResponder (no gesture-handler/reanimated - neither is in build 46's
+  // native module allowlist, scripts/native-modules-build46.json, so
+  // adding either would require a new native build before this could ship
+  // OTA). Recreated via useMemo whenever photoMode/zoom/fx/fy/previewLayout
+  // change, so its closures are never stale without needing a parallel set
+  // of refs to mirror every value it reads. Only ever actually grabs the
+  // gesture in Fill mode - Whole mode's preview ignores touches entirely
+  // (onStartShouldSetPanResponder returns false), so it still scrolls/taps
+  // normally underneath.
+  const photoPanResponder = useMemo(() => PanResponder.create({
+    // !fetchError - so the Retry button (rendered inside this same
+    // previewArea on a failed fetch) stays tappable even in Fill mode,
+    // instead of the gesture responder swallowing that tap.
+    onStartShouldSetPanResponder: () => photoMode === "fill" && !fetchError,
+    onMoveShouldSetPanResponder: () => photoMode === "fill" && !fetchError,
+    onPanResponderGrant: (evt) => {
+      pinchStartRef.current = null;
+      const now = Date.now();
+      const { pageX, pageY } = evt.nativeEvent;
+      const last = lastTapRef.current;
+      if (last && now - last.t < DOUBLE_TAP_MS && Math.abs(pageX - last.x) < DOUBLE_TAP_SLOP && Math.abs(pageY - last.y) < DOUBLE_TAP_SLOP) {
+        lastTapRef.current = null;
+        resetPhotoAdjust();
+        return;
+      }
+      lastTapRef.current = { t: now, x: pageX, y: pageY };
+    },
+    onPanResponderMove: (evt, gestureState) => {
+      const touches = evt.nativeEvent.touches;
+      if (touches && touches.length >= 2) {
+        const [t0, t1] = touches;
+        const dist = Math.hypot(t1.pageX - t0.pageX, t1.pageY - t0.pageY);
+        if (!pinchStartRef.current) pinchStartRef.current = { dist, zoom };
+        const scale = dist / pinchStartRef.current.dist;
+        const nextZoom = pinchScaleToZoom(pinchStartRef.current.zoom, scale);
+        liveScaleRatioRef.current = nextZoom / zoom;
+        liveScale.setValue(liveScaleRatioRef.current);
+      } else if (!pinchStartRef.current) {
+        livePan.setValue({ x: gestureState.dx, y: gestureState.dy });
+      }
+    },
+    onPanResponderRelease: (_evt, gestureState) => {
+      if (pinchStartRef.current) {
+        const { zoom: startZoom } = pinchStartRef.current;
+        const committedZoom = pinchScaleToZoom(startZoom, liveScaleRatioRef.current);
+        commitPhotoAdjust({ zoom: committedZoom });
+        pinchStartRef.current = null;
+      } else if (previewLayout.w > 0 && previewLayout.h > 0) {
+        const { fx: nextFx, fy: nextFy } = panDeltaToFocus(fx, fy, gestureState.dx, gestureState.dy, previewLayout.w, previewLayout.h, zoom);
+        commitPhotoAdjust({ fx: nextFx, fy: nextFy });
+      }
+      liveScaleRatioRef.current = 1;
+      livePan.setValue({ x: 0, y: 0 });
+      liveScale.setValue(1);
+    },
+    onPanResponderTerminate: () => {
+      pinchStartRef.current = null;
+      liveScaleRatioRef.current = 1;
+      livePan.setValue({ x: 0, y: 0 });
+      liveScale.setValue(1);
+    },
+  }), [photoMode, zoom, fx, fy, previewLayout.w, previewLayout.h, fetchError]);
 
   function chooseAccent(hexVal: string | null) {
     setControls((prev) => csSetAccent(prev, hexVal));
@@ -496,6 +617,16 @@ export default function ShareStudio(props: ShareStudioProps) {
     return w / h;
   }, [format]);
 
+  // OWNER DEBUG READOUT INPUT (v4, item 4): mirrors EXACTLY what runFetch's
+  // own buildShareCardPayload call will derive for stamp/tone - computed
+  // here only for display, never fed back into the real payload - so any
+  // future client-side mismatch between the two is visible on-screen
+  // instead of requiring a repro.
+  const debugVerdict = isWin ? "SOLD" : (stampForHeroVerdict(heroVerdict ?? null) ?? "—");
+  const debugTone = isWin
+    ? ((winData?.profit ?? 0) > 0 ? "lime" : "red")
+    : (toneOverride ?? toneForHeroVerdict(heroVerdict ?? null));
+
   if (!visible) return null;
 
   const isCustomHookActive = hook != null && !HOOK_PRESETS.includes(hook);
@@ -530,13 +661,23 @@ export default function ShareStudio(props: ShareStudioProps) {
           ))}
         </View>
 
-        {/* PREVIEW — flex:1, contain, floor of 38% of screen height. */}
-        <View style={st.previewArea}>
+        {/* PREVIEW — flex:1, contain, floor of 38% of screen height.
+            onLayout measures the real pixel box the pan-delta math divides
+            by (panDeltaToFocus) - must be the box the user is actually
+            dragging across, not the fixed FORMAT_SIZES export dimensions
+            (those are the server's 1080-wide output, a different scale
+            entirely). {...photoPanResponder.panHandlers} is only ever
+            ACTIVE (onStartShouldSetPanResponder) in Fill mode - Whole
+            mode's preview ignores every touch, same as before this change. */}
+        <View style={st.previewArea} onLayout={(e) => setPreviewLayout({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })} {...photoPanResponder.panHandlers}>
           {previewUri ? (
-            <Image
+            <Animated.Image
               source={{ uri: previewUri }}
               resizeMode="contain"
-              style={[st.previewImg, loading && st.previewImgDimmed]}
+              style={[
+                st.previewImg, loading && st.previewImgDimmed,
+                photoMode === "fill" ? { transform: [{ translateX: livePan.x }, { translateY: livePan.y }, { scale: liveScale }] } : null,
+              ]}
             />
           ) : (
             <View style={st.previewPlaceholder} />
@@ -563,9 +704,10 @@ export default function ShareStudio(props: ShareStudioProps) {
           ) : null}
         </View>
         {isOwner ? (
-          <Text style={st.renderReadout}>
+          <Text style={st.renderReadout} numberOfLines={2}>
             render {renderMs ?? "—"} ms · {renderStatus}
             {debugBytes != null ? ` · export ${FORMAT_SIZES[format].w}×${FORMAT_SIZES[format].h} · ${formatFileSize(debugBytes)}` : ""}
+            {` · verdict=${debugVerdict} tone=${debugTone} src=${entryPoint ?? "unknown"}`}
           </Text>
         ) : null}
 
@@ -645,31 +787,15 @@ export default function ShareStudio(props: ShareStudioProps) {
                   </Text>
                 </TouchableOpacity>
               ))}
+              {/* ARROWS/+-/ZOOM BUTTONS REMOVED (v4, item 3) - replaced by
+                  direct manipulation on the preview itself (pan to move,
+                  pinch to zoom, double-tap to reset - see photoPanResponder
+                  above). Whole|Fill toggle and Reset stay here per spec. */}
               {photoMode === "fill" ? (
                 <>
-                  <View style={st.adjustGroup}>
-                    <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeZoom(-ZOOM_STEP)} disabled={zoom <= ZOOM_MIN}>
-                      <Text style={st.adjustBtnText}>−</Text>
-                    </TouchableOpacity>
-                    <Text style={st.zoomValue} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>{zoom.toFixed(2)}x</Text>
-                    <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeZoom(ZOOM_STEP)} disabled={zoom >= ZOOM_MAX}>
-                      <Text style={st.adjustBtnText}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <View style={st.adjustGroup}>
-                    <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(-FOCUS_STEP, 0)}>
-                      <Text style={st.adjustBtnText}>←</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(0, -FOCUS_STEP)}>
-                      <Text style={st.adjustBtnText}>↑</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(0, FOCUS_STEP)}>
-                      <Text style={st.adjustBtnText}>↓</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(FOCUS_STEP, 0)}>
-                      <Text style={st.adjustBtnText}>→</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <Text style={st.photoHint} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
+                    Drag to move · pinch to zoom
+                  </Text>
                   <TouchableOpacity style={st.resetBtn} onPress={resetPhotoAdjust}>
                     <Text style={st.resetBtnText} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Reset</Text>
                   </TouchableOpacity>
@@ -768,6 +894,17 @@ export default function ShareStudio(props: ShareStudioProps) {
                 >
                   <Text style={[st.chipText, hidePrice && st.chipTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Hide price</Text>
                 </TouchableOpacity>
+                {/* LEADERBOARD LINK (v4, item 2) - only ever shown when the
+                    caller actually passed a real leaderboard route to send
+                    the user to (ScannerScreen/HistoryScreen/SaleCapturePrompt/
+                    App.tsx's win hand-offs, which all have onNavigate on
+                    hand); omitted entirely for any caller that didn't, never
+                    a dead "Coming soon" link. */}
+                {onLeaderboard ? (
+                  <TouchableOpacity style={st.leaderboardLink} onPress={onLeaderboard}>
+                    <Text style={st.leaderboardLinkText} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>See the leaderboard →</Text>
+                  </TouchableOpacity>
+                ) : null}
               </ScrollView>
             )
           ) : null}
@@ -862,7 +999,13 @@ const st = StyleSheet.create({
   retryBtnText: { color: C.red, fontSize: 13, fontWeight: "800" },
   // Owner-only debug readout - never shown to real users (was unconditional
   // before, a stray internal readout on every user's screen).
-  renderReadout: { color: C.text4, fontSize: 10, fontFamily: "monospace" as any, textAlign: "center", paddingVertical: 4 },
+  // CLIPPED-AT-THE-EDGES FIX (v4, item 4): was fontSize:10 with no
+  // horizontal padding - on a 390px-wide screen the fully-expanded line
+  // (render ms · status · export WxH · size · verdict/tone/src) ran past
+  // both screen edges. paddingHorizontal keeps it inside the safe width;
+  // numberOfLines={2} (set at the JSX call site) lets it wrap instead of
+  // clipping once the verdict/tone/src suffix pushes it past one line.
+  renderReadout: { color: C.text4, fontSize: 11, fontFamily: "monospace" as any, textAlign: "center", paddingVertical: 4, paddingHorizontal: 12 },
 
   // TAB STRIP — four equal tabs, each >=44pt tall.
   tabStrip: { flexDirection: "row", borderTopWidth: 1, borderTopColor: C.border, paddingHorizontal: 16 },
@@ -889,13 +1032,15 @@ const st = StyleSheet.create({
 
   handlePill: { minHeight: 44, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 },
   handlePillText: { color: C.text2, fontSize: 14, fontWeight: "700" },
+  leaderboardLink: { minHeight: 44, paddingHorizontal: 10, alignItems: "center", justifyContent: "center" },
+  leaderboardLinkText: { color: C.text3, fontSize: 13, fontWeight: "700" },
 
-  adjustGroup: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.border, borderRadius: 100, paddingHorizontal: 6, minHeight: 44 },
-  adjustBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
-  adjustBtnText: { color: C.text1, fontSize: 16, fontWeight: "800" },
-  zoomValue: { color: C.text2, fontSize: 12, fontWeight: "700", minWidth: 48, textAlign: "center" },
   resetBtn: { paddingHorizontal: 14, minHeight: 44, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, alignItems: "center", justifyContent: "center" },
   resetBtnText: { color: C.text3, fontSize: 12, fontWeight: "700" },
+  // Hint shown only while Fill is selected (v4, item 3) - the direct-
+  // manipulation gesture has no visible controls of its own, so this is the
+  // only on-screen cue a user gets that the preview itself is interactive.
+  photoHint: { color: C.text4, fontSize: 12, fontWeight: "600", paddingHorizontal: 4 },
 
   // COLOR — Auto is a wide pill so the full word "Auto" always fits (never
   // the old truncated-to-"Aut" circle); the 12 presets + hex stay 44pt

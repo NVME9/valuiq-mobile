@@ -181,6 +181,8 @@ export default function SaleCapturePrompt({ token, onNavigate }: Props) {
           photoBase64={null}
           photoUri={saleWin.photoUri}
           winData={{ boughtPrice: saleWin.boughtPrice, soldPrice: saleWin.soldPrice, profit: saleWin.profit }}
+          entryPoint="SaleCapturePrompt"
+          onLeaderboard={() => { setSaleStudioOpen(false); onNavigate("community", { tab: "leaderboard" }); }}
         />
       ) : null}
     </View>

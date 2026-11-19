@@ -1216,6 +1216,8 @@ export default function App() {
                 photoUri={tapSaleWin.photoUri}
                 isOwner={isOwner}
                 winData={{ boughtPrice: tapSaleWin.boughtPrice, soldPrice: tapSaleWin.soldPrice, profit: tapSaleWin.profit }}
+                entryPoint="App-push"
+                onLeaderboard={() => { setTapSaleStudioOpen(false); navigate("community", { tab: "leaderboard" }); }}
               />
             ) : null}
           </View>

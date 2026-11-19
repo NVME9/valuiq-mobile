@@ -60,6 +60,66 @@ export function canShareWin(profit: number | null | undefined): boolean {
   return typeof profit === "number" && Number.isFinite(profit) && profit > 0;
 }
 
+// HERO LABEL (v4, founder device bug): the scan-variant hero number used to
+// always render under a hardcoded "SELLS FOR" label, on every verdict alike
+// - a PASS/THIN/CHECK ITEM card (the server's own number the user should NOT
+// buy at) read as a recommendation ("SELLS FOR $16") exactly as strongly as
+// a real BUY. "WORTH ABOUT" is the honest, non-recommending label for any
+// card that isn't backed by real sold comps AND isn't a confident buy
+// signal; "SELLS FOR" is reserved for a verdict that actually clears the
+// buy bar (WORTH A LOOK/SOLID) AND is backed by real sold data (sold-backed,
+// profitConfidence !== "estimate") - the one combination strong enough to
+// read as a claim rather than a guess.
+export function heroLabelForShareCard(verdict: HeroVerdict, isEstimate: boolean): "WORTH ABOUT" | "SELLS FOR" {
+  if (verdict === "PASS" || verdict === "THIN" || verdict === "CHECK ITEM") return "WORTH ABOUT";
+  if (isEstimate) return "WORTH ABOUT";
+  return "SELLS FOR";
+}
+
+// HISTORY ENTRY POINT (v4 tone-bug audit, moved from HistoryScreen.tsx so
+// it's pure/dependency-free and independently unit testable - see that
+// screen's own comment at the old definition site). A re-shared row's real
+// stored heroVerdict ALWAYS wins when present (same field ScannerScreen's
+// result banner and HistoryScreen's own on-card badge already read) -
+// toneForDecision's coarse BUY/WATCH/PASS mapping is now only a fallback
+// for a row saved before heroVerdict existed at all. MEASURED (founder
+// screenshot, 2026-11-19): a PASS-headline scan whose stale `decision`
+// column still said "BUY" used to share a lime/green card purely because
+// the re-share path read `decision` instead of the real stored verdict.
+export function resolveStoredHeroVerdict(specialtyDataRaw: string | null | undefined): HeroVerdict {
+  if (!specialtyDataRaw) return null;
+  let full: any = null;
+  try { full = JSON.parse(specialtyDataRaw); } catch { return null; }
+  const headline = full?.heroVerdict?.headline;
+  const validHeadlines: HeroVerdict[] = ["PASS", "THIN", "SOLID", "WORTH A LOOK", "CHECK ITEM"];
+  return headline && (validHeadlines as string[]).includes(headline) ? headline : null;
+}
+
+// ONE HELPER PER ENTRY POINT: heroVerdict and toneOverride for History's
+// re-share flow come from this SAME call, so a future edit can't update one
+// without the other and silently reintroduce the stamp/tone mismatch above.
+export function resolveHistoryShareInput(opts: {
+  specialtyDataRaw: string | null | undefined;
+  decision: string | null | undefined;
+  isLoggedWin: boolean;
+}): { heroVerdict: HeroVerdict; toneOverride?: ShareCardTone } {
+  if (opts.isLoggedWin) return { heroVerdict: null, toneOverride: undefined };
+  const stored = resolveStoredHeroVerdict(opts.specialtyDataRaw);
+  if (stored) return { heroVerdict: stored, toneOverride: undefined };
+  return { heroVerdict: null, toneOverride: toneForDecision(opts.decision) };
+}
+
+// SCANNER ENTRY POINT (v4 tone-bug audit): ScannerScreen.tsx's result screen
+// used to inline this exact ternary (`maxBuyLocked ? null : finalHeadline`)
+// directly in the ShareStudio JSX prop - correct, but with nothing stopping
+// a future edit to that screen from passing finalHeadline on its own (or a
+// re-derived local verdict) and silently reintroducing a stamp/tone
+// mismatch. Named and exported so ScannerScreen.tsx calls THIS, and so this
+// exact gate has its own unit test independent of the component tree.
+export function resolveScanShareVerdict(finalHeadline: HeroVerdict, maxBuyLocked: boolean): HeroVerdict {
+  return maxBuyLocked ? null : finalHeadline;
+}
+
 const MAX_HOOK_CHARS = 40;
 
 export interface ShareCardPayload {
@@ -72,6 +132,10 @@ export interface ShareCardPayload {
   caption?: string;
   stamp?: string;
   tone: ShareCardTone;
+  // Scan variant only - see heroLabelForShareCard's own comment. Omitted
+  // for the win variant, which has its own hero semantics (signed profit/
+  // loss, never a "sells for"/"worth about" claim).
+  heroLabel?: "WORTH ABOUT" | "SELLS FOR";
   name: string;
   handle?: string;
   hook?: string;
@@ -151,8 +215,14 @@ export function buildShareCardPayload(input: BuildShareCardInput): ShareCardPayl
   }
 
   const paidUnknown = input.paidPrice == null || input.paidPrice <= 0;
+  // ONE HELPER, ONE INPUT (v4 tone-bug audit): stamp, tone, AND heroLabel
+  // are all derived from this SAME `input.verdict` right here - no entry
+  // point builds any of the three independently, so a scan card's text and
+  // color can never disagree the way HistoryScreen's old toneForDecision
+  // path once let them (see that screen's resolveStoredHeroVerdict comment).
   const tone = input.toneOverride ?? toneForHeroVerdict(input.verdict);
   const stamp = stampForHeroVerdict(input.verdict);
+  const heroLabel = heroLabelForShareCard(input.verdict, input.isEstimate);
 
   return {
     format: input.format,
@@ -160,6 +230,7 @@ export function buildShareCardPayload(input: BuildShareCardInput): ShareCardPayl
     paid: formatMoney(paidUnknown ? 0 : (input.paidPrice as number)),
     hero: formatMoney(input.heroSellPrice ?? 0),
     tone,
+    heroLabel,
     name: input.itemName,
     photoAdjust,
     ...(stamp ? { stamp } : {}),

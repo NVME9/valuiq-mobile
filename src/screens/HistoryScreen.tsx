@@ -14,7 +14,7 @@ import ShareStudio from "../components/ShareStudio";
 import WinsDemoCard from "../components/WinsDemoCard";
 import { toPendingScan, SaleLoggedPayload } from "../lib/saleCapture";
 import { fetchFlexStat, cacheFlexStat, readCachedFlexStat, concreteLine, FlexStat } from "../lib/flexReveal";
-import { toneForDecision } from "../lib/shareCardPayload";
+import { resolveHistoryShareInput } from "../lib/shareCardPayload";
 import { numericFieldProps } from "../components/KeyboardDoneBar";
 import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty, getWinsSummary, peekProfileData, getScanHistory, peekScanHistory, invalidateScanHistoryCache, getThriftRuns, peekThriftRuns, invalidateThriftRunsCache, emailFromToken } from "../lib/api";
 import { classifyOutcome, OutcomeTierInfo } from "../lib/outcomeTier";
@@ -108,13 +108,11 @@ const VERDICT_META: Record<string, { tier: OutcomeTierInfo["tier"]; emoji: strin
 // stampForHeroVerdict/toneForHeroVerdict - never the legacy decision field.
 // toneForDecision is now only a fallback for rows saved before heroVerdict
 // existed at all (same fallback scanTier already has).
-function resolveStoredHeroVerdict(row: any): import("../lib/outcomeTier").HeroVerdict {
-  if (!row) return null;
-  let full: any = null;
-  try { full = row.specialty_data ? JSON.parse(row.specialty_data) : null; } catch { full = null; }
-  const headline = full?.heroVerdict?.headline;
-  return headline && VERDICT_META[headline] ? headline : null;
-}
+// resolveStoredHeroVerdict/resolveHistoryShareInput MOVED (v4 tone-bug
+// audit) to lib/shareCardPayload.ts - pure, dependency-free there, so they
+// have their own fast unit tests independent of this screen's heavy module
+// graph (camera/image-picker/etc. - see that file's own comment). Imported
+// at the top of this file; used directly at the ShareStudio call site below.
 
 // ONE VERDICT ENGINE (BEASTMODE FIX 1, 2026-09-13; superseded by the stored
 // heroVerdict above for any scan saved after 2026-10-08 - this recompute is
@@ -1287,13 +1285,18 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
           paidPrice={loggedWin ? null : (Number(studioTarget.buy_price ?? studioTarget.buyPrice) || null)}
           sellPrice={loggedWin ? null : (toShareResult(studioTarget).sellPrice ?? null)}
           profitConfidence="estimate"
-          // Real stored verdict wins (see resolveStoredHeroVerdict's own
-          // comment); toneOverride is only consulted when there's no stored
-          // heroVerdict to resolve (pre-heroVerdict legacy rows).
-          heroVerdict={loggedWin ? null : resolveStoredHeroVerdict(studioTarget)}
-          toneOverride={loggedWin || resolveStoredHeroVerdict(studioTarget) ? undefined : toneForDecision(toShareResult(studioTarget).decision)}
+          // ONE HELPER (lib/shareCardPayload.ts's resolveHistoryShareInput) -
+          // heroVerdict and toneOverride come from the SAME call, so they
+          // can never drift out of agreement with each other.
+          {...resolveHistoryShareInput({
+            specialtyDataRaw: studioTarget?.specialty_data ?? null,
+            decision: studioTarget ? toShareResult(studioTarget).decision : null,
+            isLoggedWin: !!loggedWin,
+          })}
           isOwner={isOwner}
           winData={loggedWin ? { boughtPrice: loggedWin.boughtPrice, soldPrice: loggedWin.soldPrice, profit: loggedWin.profit } : null}
+          entryPoint={loggedWin ? "HistoryScreen-win" : "HistoryScreen-share"}
+          onLeaderboard={() => { setStudioOpen(false); onNavigate("community", { tab: "leaderboard" }); }}
         />
       ) : null}
       <ApiDebugPanel isOwner={isOwner} winsStats={effWinsSummary} />

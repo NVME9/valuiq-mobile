@@ -40,6 +40,7 @@ import { buildCheckItemRerunPayload } from "../lib/checkItemConfirm";
 import { deriveCheckItemCard } from "../lib/checkItemCard";
 import { evaluateReview, requestReviewIfEligible, REVIEW_PROMPT_DELAY_MS, ReviewDebugState } from "../lib/storeReview";
 import ShareStudio, { ShareStudioWinData } from "../components/ShareStudio";
+import { resolveScanShareVerdict } from "../lib/shareCardPayload";
 
 const { width } = Dimensions.get("window");
 const FRAME = width * 0.72;
@@ -2460,10 +2461,12 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
           paidPrice={enteredBp > 0 ? enteredBp : null}
           sellPrice={sellPriceForProfit > 0 ? sellPriceForProfit : null}
           profitConfidence={profitConfidence}
-          heroVerdict={maxBuyLocked ? null : finalHeadline}
+          heroVerdict={resolveScanShareVerdict(finalHeadline, maxBuyLocked)}
           displayName={studioDisplayName}
           isOwner={isOwner}
           winData={loggedWin || studioWinData}
+          entryPoint="ScannerScreen"
+          onLeaderboard={() => { setStudioOpen(false); onNavigate("community", { tab: "leaderboard" }); }}
         />
         {/* Nav */}
         <View style={s.nav}>

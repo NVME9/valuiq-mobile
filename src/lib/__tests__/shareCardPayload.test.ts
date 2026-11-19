@@ -1,7 +1,7 @@
 // shareCardPayload.test.ts — coverage for the server-share-card payload
 // builder and the "no share on a loss" rule (see shareCardPayload.ts's own
 // header comment - everything here is pure, no network/file I/O).
-import { buildShareCardPayload, buildShareVideoPayload, canShareWin, stampForHeroVerdict, toneForHeroVerdict } from "../shareCardPayload";
+import { buildShareCardPayload, buildShareVideoPayload, canShareWin, stampForHeroVerdict, toneForHeroVerdict, heroLabelForShareCard } from "../shareCardPayload";
 import { HeroVerdict } from "../outcomeTier";
 
 describe("buildShareCardPayload - scan variant", () => {
@@ -242,6 +242,49 @@ describe("buildShareCardPayload - accent", () => {
       boughtPrice: 20, soldPrice: 65, profit: 45, accent: "#abc",
     });
     expect(bad3.accent).toBeUndefined();
+  });
+});
+
+// HERO LABEL (v4, founder device bug: a PASS card read "SELLS FOR $16" -
+// a recommendation-sounding label on a verdict that says don't buy it).
+describe("heroLabelForShareCard / buildShareCardPayload's heroLabel field", () => {
+  test("PASS/THIN/CHECK ITEM always read 'WORTH ABOUT', even when sold-backed", () => {
+    for (const verdict of ["PASS", "THIN", "CHECK ITEM"] as HeroVerdict[]) {
+      expect(heroLabelForShareCard(verdict, false)).toBe("WORTH ABOUT");
+      expect(heroLabelForShareCard(verdict, true)).toBe("WORTH ABOUT");
+    }
+  });
+
+  test("WORTH A LOOK/SOLID read 'SELLS FOR' only when sold-backed (not an estimate)", () => {
+    expect(heroLabelForShareCard("WORTH A LOOK", false)).toBe("SELLS FOR");
+    expect(heroLabelForShareCard("SOLID", false)).toBe("SELLS FOR");
+    expect(heroLabelForShareCard("WORTH A LOOK", true)).toBe("WORTH ABOUT");
+    expect(heroLabelForShareCard("SOLID", true)).toBe("WORTH ABOUT");
+  });
+
+  test("no verdict (null) is never a recommendation claim", () => {
+    expect(heroLabelForShareCard(null, false)).toBe("SELLS FOR");
+    expect(heroLabelForShareCard(null, true)).toBe("WORTH ABOUT");
+  });
+
+  test("buildShareCardPayload's scan variant carries heroLabel; win variant never does", () => {
+    const pass = buildShareCardPayload({
+      variant: "scan", format: "story", itemName: "Columbia Hat",
+      paidPrice: 10, heroSellPrice: 16, verdict: "PASS", isEstimate: false,
+    });
+    expect(pass.heroLabel).toBe("WORTH ABOUT");
+
+    const soldBackedBuy = buildShareCardPayload({
+      variant: "scan", format: "story", itemName: "Vintage Jacket",
+      paidPrice: 20, heroSellPrice: 65, verdict: "SOLID", isEstimate: false,
+    });
+    expect(soldBackedBuy.heroLabel).toBe("SELLS FOR");
+
+    const win = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Vintage Jacket",
+      boughtPrice: 20, soldPrice: 65, profit: 45,
+    });
+    expect(win.heroLabel).toBeUndefined();
   });
 });
 

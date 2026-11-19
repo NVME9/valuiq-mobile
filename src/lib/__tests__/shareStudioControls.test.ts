@@ -6,7 +6,7 @@
 // user just wanted to look at a different tab or format.
 import {
   initialStudioControls, setFormat, setActiveTab, setHook, setPhotoMode,
-  nudgeZoom, nudgeFocus, resetPhotoAdjust, setAccent, toggleHandleEnabled,
+  setPhotoAdjust, resetPhotoAdjust, setAccent, toggleHandleEnabled,
   setHandle, setHidePrice,
 } from "../shareStudioControls";
 
@@ -33,7 +33,7 @@ describe("switching format never resets other controls", () => {
     let s = baseState();
     s = setHook(s, "Pass or buy?");
     s = setPhotoMode(s, "fill");
-    s = nudgeZoom(s, 0.5);
+    s = setPhotoAdjust(s, { zoom: 1.5 });
     s = setAccent(s, "#a3e635");
 
     const afterFeed = setFormat(s, "feed");
@@ -78,8 +78,7 @@ describe("setPhotoMode", () => {
   test("switching to Fill keeps a previously-set zoom/focus untouched", () => {
     let s = baseState();
     s = setPhotoMode(s, "fill");
-    s = nudgeZoom(s, 1);
-    s = nudgeFocus(s, 0.1, -0.1);
+    s = setPhotoAdjust(s, { zoom: 2, fx: 0.6, fy: 0.4 });
     s = setPhotoMode(s, "fill"); // re-selecting the already-active mode is a no-op
     expect(s.zoom).toBe(2);
     expect(s.fx).toBeCloseTo(0.6);
@@ -89,8 +88,7 @@ describe("setPhotoMode", () => {
   test("switching back to Whole drops any in-progress Fill crop", () => {
     let s = baseState();
     s = setPhotoMode(s, "fill");
-    s = nudgeZoom(s, 1);
-    s = nudgeFocus(s, 0.1, 0.1);
+    s = setPhotoAdjust(s, { zoom: 2, fx: 0.6, fy: 0.6 });
     s = setPhotoMode(s, "whole");
     expect(s.zoom).toBe(1);
     expect(s.fx).toBe(0.5);
@@ -98,22 +96,31 @@ describe("setPhotoMode", () => {
   });
 });
 
-describe("nudgeZoom / nudgeFocus clamping", () => {
+describe("setPhotoAdjust - direct-manipulation commit", () => {
   test("zoom clamps to [1, 3]", () => {
     let s = baseState();
-    s = nudgeZoom(s, -5);
+    s = setPhotoAdjust(s, { zoom: -5 });
     expect(s.zoom).toBe(1);
-    s = nudgeZoom(s, 10);
+    s = setPhotoAdjust(s, { zoom: 10 });
     expect(s.zoom).toBe(3);
   });
 
   test("focus clamps to [0, 1] per axis, independently", () => {
     let s = baseState();
-    s = nudgeFocus(s, -5, 0);
+    s = setPhotoAdjust(s, { fx: -5 });
     expect(s.fx).toBe(0);
     expect(s.fy).toBe(0.5);
-    s = nudgeFocus(s, 0, 5);
+    s = setPhotoAdjust(s, { fy: 5 });
     expect(s.fy).toBe(1);
+  });
+
+  test("an omitted field leaves that control exactly as it was - a pure pan never touches zoom, a pure pinch never touches fx/fy", () => {
+    let s = baseState();
+    s = setPhotoAdjust(s, { zoom: 2.5 });
+    s = setPhotoAdjust(s, { fx: 0.2, fy: 0.8 });
+    expect(s.zoom).toBe(2.5);
+    expect(s.fx).toBe(0.2);
+    expect(s.fy).toBe(0.8);
   });
 });
 
@@ -121,8 +128,7 @@ describe("resetPhotoAdjust", () => {
   test("restores centered zoom/focus without touching photoMode itself", () => {
     let s = baseState();
     s = setPhotoMode(s, "fill");
-    s = nudgeZoom(s, 1);
-    s = nudgeFocus(s, 0.2, 0.2);
+    s = setPhotoAdjust(s, { zoom: 2, fx: 0.7, fy: 0.7 });
     s = resetPhotoAdjust(s);
     expect(s.zoom).toBe(1);
     expect(s.fx).toBe(0.5);

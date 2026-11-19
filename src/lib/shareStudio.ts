@@ -56,8 +56,6 @@ export interface PhotoAdjust {
 
 export const ZOOM_MIN = 1;
 export const ZOOM_MAX = 3;
-export const ZOOM_STEP = 0.25;
-export const FOCUS_STEP = 0.1;
 
 export const DEFAULT_PHOTO_ADJUST: PhotoAdjust = { mode: DEFAULT_PHOTO_MODE, zoom: 1, fx: 0.5, fy: 0.5 };
 
@@ -77,6 +75,36 @@ export function clampZoom(z: number): number {
 
 export function clampFocus(f: number): number {
   return round2(clamp(f, 0, 1));
+}
+
+// DIRECT-MANIPULATION GESTURE MATH (v4, replaces the arrow/+-/zoom button
+// pad) - pure, no React/PanResponder here, so the pan-delta-to-focus and
+// pinch-scale-to-zoom conversions are unit testable independent of the
+// gesture plumbing in ShareStudio.tsx. `zoom` divides the pan delta because
+// at higher zoom the same finger-pixel distance covers a SMALLER fraction
+// of the full photo - panning should feel equally fast under the finger at
+// any zoom level, not slower the further in you are. `dx` is SUBTRACTED
+// (not added) so dragging the photo right (positive dx) feels like dragging
+// the PHOTO itself, not the viewport over it - the focus point it's
+// centered on moves left.
+export function panDeltaToFocus(
+  fx: number, fy: number, dx: number, dy: number,
+  viewW: number, viewH: number, zoom: number
+): { fx: number; fy: number } {
+  if (!(viewW > 0) || !(viewH > 0) || !(zoom > 0)) return { fx: clampFocus(fx), fy: clampFocus(fy) };
+  return {
+    fx: clampFocus(fx - dx / (viewW * zoom)),
+    fy: clampFocus(fy - dy / (viewH * zoom)),
+  };
+}
+
+// Pinch scale is ALWAYS relative to the zoom the gesture started at (not
+// multiplied cumulatively frame-over-frame) - baseZoom * scale, where scale
+// is current-touch-distance / distance-at-gesture-start, same convention
+// every native pinch-to-zoom implementation uses.
+export function pinchScaleToZoom(baseZoom: number, scale: number): number {
+  if (!(scale > 0) || !Number.isFinite(scale)) return clampZoom(baseZoom);
+  return clampZoom(baseZoom * scale);
 }
 
 // COLOR (accent) — "Auto" (null) means the card uses its own verdict-derived
