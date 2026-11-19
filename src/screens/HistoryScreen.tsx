@@ -9,12 +9,10 @@ import { C } from "../lib/theme";
 import LogSaleModal from "../components/LogSaleModal";
 import PhotoLightbox from "../components/PhotoLightbox";
 import FlipActionsRow from "../components/FlipActionsRow";
-import FlexRevealCard from "../components/FlexRevealCard";
 import ShareStudio from "../components/ShareStudio";
 import WinsDemoCard from "../components/WinsDemoCard";
 import { toPendingScan, SaleLoggedPayload } from "../lib/saleCapture";
-import { fetchFlexStat, cacheFlexStat, readCachedFlexStat, concreteLine, FlexStat } from "../lib/flexReveal";
-import { resolveHistoryShareInput } from "../lib/shareCardPayload";
+import { resolveHistoryShareInput, resolveHistoryWinData } from "../lib/shareCardPayload";
 import { numericFieldProps } from "../components/KeyboardDoneBar";
 import { API_BASE, rerunScan, updateScan, updateThriftItem, analyzeSpecialty, getWinsSummary, peekProfileData, getScanHistory, peekScanHistory, invalidateScanHistoryCache, getThriftRuns, peekThriftRuns, invalidateThriftRunsCache, emailFromToken } from "../lib/api";
 import { classifyOutcome, OutcomeTierInfo } from "../lib/outcomeTier";
@@ -236,14 +234,16 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   const [rerunning, setRerunning]   = useState(false);
   const [logSaleScan, setLogSaleScan] = useState<any|null>(null);
   const [viewingPhoto, setViewingPhoto] = useState<string|null>(null);
-  const [viewingReveal, setViewingReveal] = useState<{ stat: FlexStat | null; itemName: string; brand: string|null; loadingSubStat?: string; netProfit: number | null } | null>(null);
 
-  // Per-item Share (not-sold rows - sold rows re-view their win via
-  // viewingReveal's FlexRevealCard instead). The one Share Studio instance
-  // for this screen, populated on demand from whichever row's Share pill
-  // was tapped, rather than mounting one per visible row - same
-  // single-target pattern as viewingReveal/logSaleScan above.
+  // Per-item Share (not-sold rows) AND per-item "View reveal" (sold rows) -
+  // both now open the SAME one Share Studio instance for this screen,
+  // populated on demand from whichever row's pill was tapped, rather than
+  // mounting one per visible row. studioTargetIsWin distinguishes the two:
+  // false -> Share Studio's scan variant (openShareStudio), true -> its win
+  // variant built from the row's own real sold numbers (openReveal) - see
+  // the ShareStudio call site below.
   const [studioTarget, setStudioTarget] = useState<any|null>(null);
+  const [studioTargetIsWin, setStudioTargetIsWin] = useState(false);
   const [studioOpen, setStudioOpen] = useState(false);
   // WIN HAND-OFF (replaces the old in-modal FlexRevealBody reveal): the
   // just-logged sale's real numbers, held here only long enough to open the
@@ -255,56 +255,24 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
   function openShareStudio(item: any) {
     setLoggedWin(null);
     setStudioTarget(item);
+    setStudioTargetIsWin(false);
     setStudioOpen(true);
   }
 
-  // Lets a win be revisited from History instead of only ever seeing the
-  // Flex Reveal once, at log time - and does it WITHOUT the 1-2s dead-button
-  // lag a live re-fetch used to cause. If the stat that won at log time was
-  // cached onto the row (see cacheFlexStat in flexReveal.ts), this is a pure
-  // client-side read: zero network, identical stat/tier every time. Only a
-  // pre-cache row (sold before this cache existed, or a cache-write that
-  // failed) falls through to a live fetch - and even then, the modal opens
-  // INSTANTLY with the real profit/days already on the row, never blocking
-  // on network before showing something.
+  // WIN-REVEAL FIX (Share Studio v6, item B; MEASURED founder bug: "when I
+  // pull up the win card from my old wins it reverts to the old card"):
+  // "View reveal" on an already-sold row now reopens the SAME Share Studio
+  // every other win hand-off uses (ScannerScreen/LogSaleModal/App.tsx's
+  // push-tap flow), with this row's real stored buy/sold/profit numbers
+  // (resolveHistoryWinData, lib/shareCardPayload.ts) - never the retired
+  // FlexRevealCard, whose crowd-comparison stat and rounded copy ("-$4
+  // profit after fees" for a loss the Studio shows as -$4.33) could drift
+  // from what the Studio itself shows for the identical sale.
   function openReveal(item: any) {
-    const brand = item.brand && item.brand !== "Unknown" ? item.brand : null;
-    const itemName = item.item_name || "Item";
-    // The row's own known profit sign, available with zero network call -
-    // passed through as knownNetProfit so a loss renders honestly even
-    // while (or if) fetchFlexStat below is still in flight. See
-    // FlexRevealCard.tsx's knownNetProfit comment for the full incident.
-    const netProfit = item.net_profit ?? item.profit ?? null;
-
-    // netProfit passed through so a cached stat's isLoss gets re-derived
-    // from the real number rather than trusted from the (possibly stale,
-    // pre-isLoss-field) cached blob - see readCachedFlexStat's comment.
-    const cached = readCachedFlexStat(item.specialty_data, netProfit);
-    if (cached) {
-      setViewingReveal({ stat: cached, itemName, brand, netProfit });
-      return;
-    }
-
-    const loadingSubStat = concreteLine({
-      netProfit,
-      daysToSale: item.days_to_sale ?? null,
-    });
-    setViewingReveal({ stat: null, itemName, brand, loadingSubStat, netProfit });
-
-    fetchFlexStat(token, item.id).then(async (stat) => {
-      if (!stat) {
-        Alert.alert("Couldn't load", "Could not load this flip's stats right now.");
-        setViewingReveal(null);
-        return;
-      }
-      setViewingReveal((v) => (v ? { ...v, stat } : v));
-      const merged = await cacheFlexStat(token, item.id, item.specialty_data, stat);
-      if (merged) {
-        const patch = (list: any[]) => list.map((s) => (s.id === item.id ? { ...s, specialty_data: merged } : s));
-        setScans(patch);
-        setSpecialtyScans(patch);
-      }
-    });
+    setLoggedWin(null);
+    setStudioTarget(item);
+    setStudioTargetIsWin(true);
+    setStudioOpen(true);
   }
 
   function openEditor(scan: any) {
@@ -1256,23 +1224,13 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
         }}
       />
 
-      <FlexRevealCard
-        visible={!!viewingReveal}
-        stat={viewingReveal?.stat ?? null}
-        itemName={viewingReveal?.itemName}
-        brand={viewingReveal?.brand}
-        loadingSubStat={viewingReveal?.loadingSubStat}
-        knownNetProfit={viewingReveal?.netProfit ?? null}
-        onClose={() => setViewingReveal(null)}
-        onLeaderboard={() => { setViewingReveal(null); onNavigate("community", { tab: "leaderboard" }); }}
-      />
-
       <PhotoLightbox uri={viewingPhoto} onClose={() => setViewingPhoto(null)} />
 
       {/* ONE Share Studio for every per-row action on this screen - the
-          not-sold row "Share" action (openShareStudio, scan variant) and
-          the win hand-off from LogSaleModal above (loggedWin, Win variant)
-          alike. Mounted only while one of those is actually set. */}
+          not-sold row "Share" action (openShareStudio, scan variant), the
+          sold row "View reveal" action (openReveal, win variant, v6 item B),
+          and the win hand-off from LogSaleModal above (loggedWin, win
+          variant) alike. Mounted only while one of those is actually set. */}
       {(studioTarget || loggedWin) ? (
         <ShareStudio
           visible={studioOpen}
@@ -1282,8 +1240,8 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
           itemName={loggedWin ? loggedWin.itemName : toShareResult(studioTarget).itemName}
           photoBase64={null}
           photoUri={loggedWin ? loggedWin.photoUri : (shareRowPhotoUri(studioTarget) || null)}
-          paidPrice={loggedWin ? null : (Number(studioTarget.buy_price ?? studioTarget.buyPrice) || null)}
-          sellPrice={loggedWin ? null : (toShareResult(studioTarget).sellPrice ?? null)}
+          paidPrice={(loggedWin || studioTargetIsWin) ? null : (Number(studioTarget.buy_price ?? studioTarget.buyPrice) || null)}
+          sellPrice={(loggedWin || studioTargetIsWin) ? null : (toShareResult(studioTarget).sellPrice ?? null)}
           profitConfidence="estimate"
           // ONE HELPER (lib/shareCardPayload.ts's resolveHistoryShareInput) -
           // heroVerdict and toneOverride come from the SAME call, so they
@@ -1291,11 +1249,15 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
           {...resolveHistoryShareInput({
             specialtyDataRaw: studioTarget?.specialty_data ?? null,
             decision: studioTarget ? toShareResult(studioTarget).decision : null,
-            isLoggedWin: !!loggedWin,
+            isLoggedWin: !!loggedWin || studioTargetIsWin,
           })}
           isOwner={isOwner}
-          winData={loggedWin ? { boughtPrice: loggedWin.boughtPrice, soldPrice: loggedWin.soldPrice, profit: loggedWin.profit } : null}
-          entryPoint={loggedWin ? "HistoryScreen-win" : "HistoryScreen-share"}
+          winData={
+            loggedWin ? { boughtPrice: loggedWin.boughtPrice, soldPrice: loggedWin.soldPrice, profit: loggedWin.profit }
+            : studioTargetIsWin ? resolveHistoryWinData(studioTarget)
+            : null
+          }
+          entryPoint={loggedWin ? "HistoryScreen-win" : studioTargetIsWin ? "HistoryScreen-view-reveal" : "HistoryScreen-share"}
           onLeaderboard={() => { setStudioOpen(false); onNavigate("community", { tab: "leaderboard" }); }}
         />
       ) : null}

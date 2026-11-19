@@ -1,7 +1,7 @@
 // shareCardPayload.test.ts — coverage for the server-share-card payload
 // builder and the "no share on a loss" rule (see shareCardPayload.ts's own
 // header comment - everything here is pure, no network/file I/O).
-import { buildShareCardPayload, buildShareVideoPayload, canShareWin, stampForHeroVerdict, toneForHeroVerdict, heroLabelForShareCard } from "../shareCardPayload";
+import { buildShareCardPayload, buildShareVideoPayload, canShareWin, stampForHeroVerdict, toneForHeroVerdict, heroLabelForShareCard, resolveHistoryWinData } from "../shareCardPayload";
 import { HeroVerdict } from "../outcomeTier";
 
 describe("buildShareCardPayload - scan variant", () => {
@@ -390,5 +390,36 @@ describe("canShareWin - the 'no share on loss' rule", () => {
     expect(canShareWin(null)).toBe(false);
     expect(canShareWin(undefined)).toBe(false);
     expect(canShareWin(NaN)).toBe(false);
+  });
+});
+
+// HISTORY WIN-REVEAL ENTRY POINT (v6, item B) - the extraction History's
+// "View reveal" action (HistoryScreen.tsx's openReveal) uses to build the
+// Share Studio's win variant for an already-sold row, covering both row
+// shapes that screen renders.
+describe("resolveHistoryWinData - both History row shapes", () => {
+  test("DB row shape (scans/specialty): snake_case buy_price/actual_sold_price/net_profit", () => {
+    const row = { buy_price: 19.62, actual_sold_price: 5, net_profit: -15.28 };
+    expect(resolveHistoryWinData(row)).toEqual({ boughtPrice: 19.62, soldPrice: 5, profit: -15.28 });
+  });
+
+  test("DB row shape falls back to sell_price when actual_sold_price is absent", () => {
+    const row = { buy_price: 10, sell_price: 25, net_profit: 15 };
+    expect(resolveHistoryWinData(row)).toEqual({ boughtPrice: 10, soldPrice: 25, profit: 15 });
+  });
+
+  test("thrift-item shape: camelCase buyPrice/sellPrice/profit", () => {
+    const row = { buyPrice: 8, sellPrice: 22, profit: 14 };
+    expect(resolveHistoryWinData(row)).toEqual({ boughtPrice: 8, soldPrice: 22, profit: 14 });
+  });
+
+  test("a break-even sale resolves profit:0, never null/NaN", () => {
+    const row = { buy_price: 20, actual_sold_price: 20, net_profit: 0 };
+    expect(resolveHistoryWinData(row)).toEqual({ boughtPrice: 20, soldPrice: 20, profit: 0 });
+  });
+
+  test("missing fields degrade to 0, never NaN/undefined", () => {
+    expect(resolveHistoryWinData({})).toEqual({ boughtPrice: 0, soldPrice: 0, profit: 0 });
+    expect(resolveHistoryWinData(null)).toEqual({ boughtPrice: 0, soldPrice: 0, profit: 0 });
   });
 });

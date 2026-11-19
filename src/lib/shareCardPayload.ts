@@ -109,6 +109,23 @@ export function resolveHistoryShareInput(opts: {
   return { heroVerdict: null, toneOverride: toneForDecision(opts.decision) };
 }
 
+// HISTORY WIN-REVEAL ENTRY POINT (v6, item B): "View reveal" on an already-
+// sold History row now reopens THIS SAME win payload builder (above),
+// never the retired FlexRevealCard (whose stat-fallback copy could drift
+// from the Studio's own honest label/stamp - see buildShareCardPayload's
+// win-variant comment). Extracts the win-variant numbers from whichever row
+// shape History hands it - the DB row shape (scans/specialty, snake_case:
+// buy_price/actual_sold_price/net_profit) or the thrift-item shape
+// (camelCase: buyPrice/sellPrice/profit) - same fallback-chain convention
+// HistoryScreen.tsx's own toShareResult() uses for every other field off
+// these two row shapes.
+export function resolveHistoryWinData(row: any): { boughtPrice: number; soldPrice: number; profit: number } {
+  const profit = Number(row?.net_profit ?? row?.profit ?? 0) || 0;
+  const boughtPrice = Number(row?.buy_price ?? row?.buyPrice ?? 0) || 0;
+  const soldPrice = Number(row?.actual_sold_price ?? row?.sell_price ?? row?.sellPrice ?? 0) || 0;
+  return { boughtPrice, soldPrice, profit };
+}
+
 // SCANNER ENTRY POINT (v4 tone-bug audit): ScannerScreen.tsx's result screen
 // used to inline this exact ternary (`maxBuyLocked ? null : finalHeadline`)
 // directly in the ShareStudio JSX prop - correct, but with nothing stopping
