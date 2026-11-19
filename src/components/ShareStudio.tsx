@@ -10,6 +10,20 @@
 // ONE screen for BOTH variants: a fresh/re-shared scan ("scan") and a
 // logged sale ("win", only ever opened when profit > 0 - see
 // shareCardPayload.ts's canShareWin and LogSaleModal.tsx).
+//
+// LAYOUT v3 (2026-11-19, founder screenshot fixes): the old layout was a
+// single tall ScrollView of stacked rows - "Pass or buy?" cut off, the
+// "Auto" swatch label truncated to "Aut", the whole controls area read as a
+// tiny scrolling window on anything shorter than an iPhone 14. Replaced with
+// a fully DETERMINISTIC layout that never scrolls vertically: header / format
+// segmented control / flexible preview (min 38% of screen) / a 4-tab strip
+// (Hook, Photo, Color, More) / ONE fixed-height content row for whichever
+// tab is selected (horizontal scroll only, so however many chips/swatches
+// exist never add vertical height) / a pinned footer (Copy caption link,
+// then Share + Make video side by side). Hook/photo-mode/color/handle/
+// hide-price state lives in lib/shareStudioControls.ts's pure setters so
+// "switching format or tabs never resets another control" is unit-testable
+// independent of this component tree.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Modal, View, Text, StyleSheet, TouchableOpacity, Image, Animated, Easing,
@@ -20,11 +34,20 @@ import { C } from "../lib/theme";
 import {
   FORMAT_SIZES, FORMAT_LABELS, StudioFormat, StudioConfidence, formatFileSize,
   HOOK_PRESETS, DEFAULT_HOOK, WIN_PROFIT_HOOK,
-  PhotoMode, DEFAULT_PHOTO_ADJUST, ZOOM_MIN, ZOOM_MAX, ZOOM_STEP, FOCUS_STEP, clampZoom, clampFocus,
+  PhotoMode, DEFAULT_PHOTO_ADJUST, ZOOM_MIN, ZOOM_MAX, ZOOM_STEP, FOCUS_STEP,
   ACCENT_SWATCHES, isValidAccentHex,
 } from "../lib/shareStudio";
-import { buildShareCardPayload, ShareCardTone } from "../lib/shareCardPayload";
+import {
+  StudioTab, StudioControlsState, initialStudioControls,
+  setFormat as csSetFormat, setActiveTab as csSetActiveTab, setHook as csSetHook,
+  toggleHandleEnabled as csToggleHandleEnabled, setHandle as csSetHandle,
+  setHidePrice as csSetHidePrice, setPhotoMode as csSetPhotoMode,
+  nudgeZoom as csNudgeZoom, nudgeFocus as csNudgeFocus, resetPhotoAdjust as csResetPhotoAdjust,
+  setAccent as csSetAccent,
+} from "../lib/shareStudioControls";
+import { buildShareCardPayload, buildShareVideoPayload, ShareCardTone } from "../lib/shareCardPayload";
 import { resolveSharePhoto, fetchShareCardPng } from "../lib/shareCardApi";
+import { fetchShareVideoMp4 } from "../lib/shareVideoApi";
 import { loadStudioPrefs, saveStudioPrefs, StudioPrefs } from "../lib/studioPrefs";
 import { logEvent } from "../lib/api";
 import { HeroVerdict } from "../lib/outcomeTier";
@@ -35,13 +58,20 @@ import { HeroVerdict } from "../lib/outcomeTier";
 let Sharing: typeof import("expo-sharing") | null = null;
 try { Sharing = require("expo-sharing"); } catch { Sharing = null; }
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
-// Preview is capped at ~40% of screen height (contain, never cropped) so the
-// compact control rows below it always fit an iPhone-13-size screen without
-// needing their own scroll - see this file's "controls area was unusable"
-// layout fix.
-const PREVIEW_MAX_H = SCREEN_H * 0.4;
+const { height: SCREEN_H } = Dimensions.get("window");
+// Preview is a FLEXIBLE box (flex:1, contain) with a floor of 38% of screen
+// height - it grows to fill whatever room the fixed-height rows below it
+// don't need, but never shrinks past this, on any screen.
+const PREVIEW_MIN_H = SCREEN_H * 0.38;
 const PREVIEW_PAD_H = 16;
+// The ONE fixed-height content row every tab's controls render into -
+// however many chips/swatches/buttons a tab has, they scroll horizontally
+// inside this row rather than ever adding vertical height.
+const TAB_CONTENT_H = 68;
+// Controls are capped at 1.3x system font scale (not the full accessibility
+// range) so a maxed-out system font still fits this row's fixed height
+// without truncating or forcing a second line.
+const CONTROL_FONT_SCALE = 1.3;
 
 // scale:0.5 for every live-preview request (debounced on each control
 // change) - fast enough to feel instant. The actual Share tap always
@@ -52,6 +82,13 @@ const FINAL_SCALE = 1;
 
 const CUSTOM_HOOK_MAX = 40;
 const CAPTION_TAGLINE = "Search ValuIQ — free resale scanner · iOS + Android";
+
+const TABS: { key: StudioTab; label: string }[] = [
+  { key: "hook", label: "Hook" },
+  { key: "photo", label: "Photo" },
+  { key: "color", label: "Color" },
+  { key: "more", label: "More" },
+];
 
 export interface ShareStudioWinData {
   boughtPrice: number;
@@ -93,6 +130,8 @@ interface FetchError {
   message: string;
 }
 
+type VideoState = "idle" | "making" | "failed";
+
 // Thin pulsing bar across the top of the preview while a render is in
 // flight - a lighter-weight loading signal than the centered spinner alone,
 // visible even once a previous preview is already showing (dimmed) behind it.
@@ -119,28 +158,19 @@ export default function ShareStudio(props: ShareStudioProps) {
   } = props;
   const isWin = !!winData;
 
-  const [format, setFormat] = useState<StudioFormat>("story");
-  // Hook defaults ON ("Would you flip it?") rather than null/off - see
-  // studioPrefs.ts's DEFAULT_HOOK. The effect below overwrites this with
-  // whatever AsyncStorage actually remembers the instant it resolves, but
-  // starting here (not null) avoids a flash of "no hook selected" on open.
-  const [hook, setHook] = useState<string | null>(DEFAULT_HOOK);
+  const [controls, setControls] = useState<StudioControlsState>(() => initialStudioControls({
+    hook: isWin ? (winData && winData.profit > 0 ? WIN_PROFIT_HOOK : null) : DEFAULT_HOOK,
+    handleEnabled: false, handle: "", photoMode: DEFAULT_PHOTO_ADJUST.mode, accent: null,
+  }));
+  const {
+    format, activeTab, hook, handleEnabled, handle, hidePrice, photoMode, zoom, fx, fy, accent,
+  } = controls;
+
+  // Ephemeral inline-editor UI state only - not part of the persisted/
+  // testable controls state above.
   const [customHookOpen, setCustomHookOpen] = useState(false);
   const [customHookText, setCustomHookText] = useState("");
-  const [handleEnabled, setHandleEnabled] = useState(false);
-  const [handle, setHandle] = useState("");
   const [handleEditOpen, setHandleEditOpen] = useState(false);
-  const [hidePrice, setHidePrice] = useState(false);
-
-  // Photo: mode is persisted (studioPrefs.ts); zoom/focus are session-only -
-  // always start back at these defaults on a fresh open, per spec.
-  const [photoMode, setPhotoMode] = useState<PhotoMode>(DEFAULT_PHOTO_ADJUST.mode);
-  const [zoom, setZoom] = useState(DEFAULT_PHOTO_ADJUST.zoom);
-  const [fx, setFx] = useState(DEFAULT_PHOTO_ADJUST.fx);
-  const [fy, setFy] = useState(DEFAULT_PHOTO_ADJUST.fy);
-
-  // Color: null = "Auto" (card's own verdict color, no accent field sent).
-  const [accent, setAccent] = useState<string | null>(null);
   const [hexOpen, setHexOpen] = useState(false);
   const [hexText, setHexText] = useState("");
   const [hexError, setHexError] = useState(false);
@@ -156,6 +186,9 @@ export default function ShareStudio(props: ShareStudioProps) {
   const [shareStatus, setShareStatus] = useState<{ kind: "ok" | "fail"; text: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const [videoState, setVideoState] = useState<VideoState>("idle");
+  const [videoError, setVideoError] = useState<FetchError | null>(null);
+
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeqRef = useRef(0);
@@ -163,28 +196,30 @@ export default function ShareStudio(props: ShareStudioProps) {
 
   useEffect(() => {
     if (!visible) return;
+    // First paint (the synchronous reset below) lands before any saved
+    // prefs can possibly resolve, so there's never a gap showing stale
+    // controls from whatever scan the Studio last had open.
+    setControls(initialStudioControls({
+      hook: isWin ? (winData && winData.profit > 0 ? WIN_PROFIT_HOOK : null) : DEFAULT_HOOK,
+      handleEnabled: false, handle: "", photoMode: DEFAULT_PHOTO_ADJUST.mode, accent: null,
+    }));
     loadStudioPrefs(displayName).then((p) => {
-      setHandleEnabled(p.handleEnabled);
-      setHandle(p.handle);
-      // Win variant's hook default is driven by the sale's profit sign
-      // (set synchronously below), never by the generic persisted
-      // preference - a sale-outcome card's default pitch is a different
-      // decision than a fresh-scan share's.
-      if (!isWin) setHook(p.hook);
-      setPhotoMode(p.photoMode ?? DEFAULT_PHOTO_ADJUST.mode);
-      setAccent(p.accent ?? null);
+      setControls((prev) => ({
+        ...prev,
+        handleEnabled: p.handleEnabled,
+        handle: p.handle,
+        // Win variant's hook default is driven by the sale's profit sign
+        // (set synchronously above), never by the generic persisted
+        // preference - a sale-outcome card's default pitch is a different
+        // decision than a fresh-scan share's.
+        hook: isWin ? prev.hook : p.hook,
+        photoMode: p.photoMode ?? DEFAULT_PHOTO_ADJUST.mode,
+        accent: p.accent ?? null,
+      }));
     });
-    setFormat("story");
-    setHook(isWin ? (winData && winData.profit > 0 ? WIN_PROFIT_HOOK : null) : DEFAULT_HOOK);
     setCustomHookOpen(false);
     setCustomHookText("");
     setHandleEditOpen(false);
-    setHidePrice(false);
-    // Zoom/focus are session-only - always back to centered/unzoomed on a
-    // fresh open, regardless of what the last session left them at.
-    setZoom(DEFAULT_PHOTO_ADJUST.zoom);
-    setFx(DEFAULT_PHOTO_ADJUST.fx);
-    setFy(DEFAULT_PHOTO_ADJUST.fy);
     setHexOpen(false);
     setHexText("");
     setHexError(false);
@@ -193,6 +228,8 @@ export default function ShareStudio(props: ShareStudioProps) {
     setShareStatus(null);
     setRenderStatus("idle");
     setRenderMs(null);
+    setVideoState("idle");
+    setVideoError(null);
     // First paint shows a spinner on a dark box immediately - the debounced
     // fetch below doesn't fire for another 350ms, but there's never a gap
     // where this screen shows nothing at all.
@@ -288,10 +325,10 @@ export default function ShareStudio(props: ShareStudioProps) {
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
 
   function openPreset(h: string) {
-    setHook((cur) => {
-      const next = cur === h ? null : h;
+    setControls((prev) => {
+      const next = prev.hook === h ? null : h;
       persistPrefs({ hook: next });
-      return next;
+      return csSetHook(prev, next);
     });
     setCustomHookOpen(false);
   }
@@ -299,7 +336,7 @@ export default function ShareStudio(props: ShareStudioProps) {
   function commitCustomHook() {
     const t = customHookText.trim();
     const next = t ? t : null;
-    setHook(next);
+    setControls((prev) => csSetHook(prev, next));
     setCustomHookOpen(false);
     persistPrefs({ hook: next });
     Keyboard.dismiss();
@@ -312,42 +349,32 @@ export default function ShareStudio(props: ShareStudioProps) {
   }
 
   function toggleHandleEnabled(next: boolean) {
-    setHandleEnabled(next);
+    setControls((prev) => csToggleHandleEnabled(prev, next));
     persistPrefs({ handleEnabled: next });
   }
 
   function choosePhotoMode(mode: PhotoMode) {
-    setPhotoMode(mode);
+    setControls((prev) => csSetPhotoMode(prev, mode));
     persistPrefs({ photoMode: mode });
-    // Zoom/focus only mean anything in Fill - switching back to Whole drops
-    // any in-progress crop rather than silently carrying it forward unseen.
-    if (mode === "whole") {
-      setZoom(DEFAULT_PHOTO_ADJUST.zoom);
-      setFx(DEFAULT_PHOTO_ADJUST.fx);
-      setFy(DEFAULT_PHOTO_ADJUST.fy);
-    }
   }
 
   function nudgeZoom(delta: number) {
-    setZoom((z) => clampZoom(z + delta));
+    setControls((prev) => csNudgeZoom(prev, delta));
   }
 
   function nudgeFocus(dx: number, dy: number) {
-    if (dx) setFx((f) => clampFocus(f + dx));
-    if (dy) setFy((f) => clampFocus(f + dy));
+    setControls((prev) => csNudgeFocus(prev, dx, dy));
   }
 
   function resetPhotoAdjust() {
-    setZoom(DEFAULT_PHOTO_ADJUST.zoom);
-    setFx(DEFAULT_PHOTO_ADJUST.fx);
-    setFy(DEFAULT_PHOTO_ADJUST.fy);
+    setControls((prev) => csResetPhotoAdjust(prev));
   }
 
-  function chooseAccent(hex: string | null) {
-    setAccent(hex);
+  function chooseAccent(hexVal: string | null) {
+    setControls((prev) => csSetAccent(prev, hexVal));
     setHexOpen(false);
     setHexError(false);
-    persistPrefs({ accent: hex });
+    persistPrefs({ accent: hexVal });
   }
 
   function openHexEditor() {
@@ -405,24 +432,73 @@ export default function ShareStudio(props: ShareStudioProps) {
     }
   }
 
+  // MAKE VIDEO (Story only) - same payload shape as the image call (format
+  // forced to "story" by buildShareVideoPayload regardless of the format
+  // tab currently selected), downloaded via the SDK 54 File class and
+  // handed to expo-sharing as an MP4. Independent of the image preview's
+  // loading/error state - a failed video attempt never disturbs the image
+  // preview already on screen.
+  async function makeVideo() {
+    if (videoState === "making" || format !== "story") return;
+    setVideoState("making");
+    setVideoError(null);
+    try {
+      const resolved = await resolveSharePhoto(photoBase64, photoUri ?? null);
+      if ("error" in resolved) {
+        setVideoState("failed");
+        setVideoError({ ms: 0, message: resolved.error });
+        return;
+      }
+      const effectiveHandle = handleEnabled ? handle : null;
+      const photoAdjust = { mode: photoMode, zoom, fx, fy };
+      const base = isWin
+        ? buildShareVideoPayload({
+            variant: "win", format, itemName,
+            boughtPrice: winData!.boughtPrice, soldPrice: winData!.soldPrice, profit: winData!.profit,
+            hook, handle: effectiveHandle, hidePrice, accent, photoAdjust,
+          })
+        : buildShareVideoPayload({
+            variant: "scan", format, itemName,
+            paidPrice: paidPrice ?? null, heroSellPrice: sellPrice ?? null,
+            verdict: heroVerdict ?? null, toneOverride,
+            isEstimate: profitConfidence === "estimate",
+            hook, handle: effectiveHandle, hidePrice, accent, photoAdjust,
+          });
+      const controller = new AbortController();
+      const result = await fetchShareVideoMp4({ ...base, photo: resolved.photo }, token, controller.signal);
+      if (result.ok && result.uri) {
+        const available = Sharing ? await Sharing.isAvailableAsync() : false;
+        if (!available || !Sharing) {
+          setVideoState("failed");
+          setVideoError({ ms: result.ms, message: "Sharing isn't available on this device." });
+          return;
+        }
+        await Sharing.shareAsync(result.uri, {
+          mimeType: "video/mp4", UTI: "public.mpeg-4", dialogTitle: "Share your ValuIQ video",
+        });
+        logEvent(token, "share_studio_shared", { scanId, format: "story", isWin, kind: "video" }).catch(() => {});
+        setVideoState("idle");
+      } else {
+        setVideoState("failed");
+        setVideoError({
+          status: result.status, stage: result.stage, ms: result.ms,
+          bodyPreview: result.bodyPreview, message: "Couldn't make the video.",
+        });
+      }
+    } catch {
+      setVideoState("failed");
+      setVideoError({ ms: 0, message: "Couldn't make the video." });
+    }
+  }
+
   const aspect = useMemo(() => {
     const { w, h } = FORMAT_SIZES[format];
     return w / h;
   }, [format]);
 
-  // The exact box the preview image renders at - computed in JS (not pure
-  // CSS aspectRatio+maxHeight, which can't reliably pick "shrink by width
-  // vs shrink by height" for every format) so every format (tall Story,
-  // square, wide-ish Feed) is guaranteed to fit inside the ~52%-height cap
-  // AND the screen width, centered, with nothing ever cropped.
-  const previewBox = useMemo(() => {
-    const availW = SCREEN_W - PREVIEW_PAD_H * 2;
-    const byWidth = { width: availW, height: availW / aspect };
-    if (byWidth.height <= PREVIEW_MAX_H) return byWidth;
-    return { width: PREVIEW_MAX_H * aspect, height: PREVIEW_MAX_H };
-  }, [aspect]);
-
   if (!visible) return null;
+
+  const isCustomHookActive = hook != null && !HOOK_PRESETS.includes(hook);
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
@@ -439,15 +515,31 @@ export default function ShareStudio(props: ShareStudioProps) {
           <View style={st.closeHit} />
         </View>
 
+        {/* ROW — format segmented control. */}
+        <View style={st.segmentRow}>
+          {(["story", "feed", "square"] as StudioFormat[]).map((f) => (
+            <TouchableOpacity
+              key={f}
+              style={[st.segment, format === f && st.segmentActive]}
+              onPress={() => setControls((prev) => csSetFormat(prev, f))}
+            >
+              <Text style={[st.segmentText, format === f && st.segmentTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
+                {FORMAT_LABELS[f]}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* PREVIEW — flex:1, contain, floor of 38% of screen height. */}
         <View style={st.previewArea}>
           {previewUri ? (
             <Image
               source={{ uri: previewUri }}
               resizeMode="contain"
-              style={[st.previewImg, previewBox, loading && st.previewImgDimmed]}
+              style={[st.previewImg, loading && st.previewImgDimmed]}
             />
           ) : (
-            <View style={[st.previewPlaceholder, previewBox]} />
+            <View style={st.previewPlaceholder} />
           )}
           {loading ? (
             <>
@@ -470,104 +562,181 @@ export default function ShareStudio(props: ShareStudioProps) {
             </View>
           ) : null}
         </View>
-        <Text style={st.renderReadout}>render {renderMs ?? "—"} ms · {renderStatus}</Text>
+        {isOwner ? (
+          <Text style={st.renderReadout}>
+            render {renderMs ?? "—"} ms · {renderStatus}
+            {debugBytes != null ? ` · export ${FORMAT_SIZES[format].w}×${FORMAT_SIZES[format].h} · ${formatFileSize(debugBytes)}` : ""}
+          </Text>
+        ) : null}
 
-        {/* Compact control ROWS, not a tall stacked form - every row fits an
-            iPhone-13-size screen without scrolling now that the preview
-            above is capped at ~40% of screen height. The outer ScrollView
-            is a fallback only (an accessibility-scaled font or a very short
-            phone), never the normal path. */}
-        <ScrollView
-          style={st.controlsScroll}
-          contentContainerStyle={st.controlsContent}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* ROW 1 — format */}
-          <View style={st.segmentRow}>
-            {(["story", "feed", "square"] as StudioFormat[]).map((f) => (
-              <TouchableOpacity
-                key={f}
-                style={[st.segment, format === f && st.segmentActive]}
-                onPress={() => setFormat(f)}
-              >
-                <Text style={[st.segmentText, format === f && st.segmentTextActive]} numberOfLines={1}>{FORMAT_LABELS[f]}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* ROW 2 — hook, single horizontal scroller (no wrap -> no extra
-              vertical height, however many presets there are). */}
-          <Text style={st.sectionLabel}>HOOK</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.chipScrollRow}>
-            {HOOK_PRESETS.map((h) => {
-              const selected = hook === h;
-              return (
-                <TouchableOpacity
-                  key={h}
-                  style={[st.chip, selected && st.chipActive]}
-                  onPress={() => openPreset(h)}
-                >
-                  <Text style={[st.chipText, selected && st.chipTextActive]} numberOfLines={1}>{h}</Text>
-                </TouchableOpacity>
-              );
-            })}
+        {/* TAB STRIP — Hook / Photo / Color / More. */}
+        <View style={st.tabStrip}>
+          {TABS.map((t) => (
             <TouchableOpacity
-              style={[st.chip, hook == null && st.chipActive]}
-              onPress={() => { setHook(null); setCustomHookOpen(false); persistPrefs({ hook: null }); }}
+              key={t.key}
+              style={[st.tabBtn, activeTab === t.key && st.tabBtnActive]}
+              onPress={() => setControls((prev) => csSetActiveTab(prev, t.key))}
             >
-              <Text style={[st.chipText, hook == null && st.chipTextActive]}>None</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[st.chip, hook != null && !HOOK_PRESETS.includes(hook) && st.chipActive]}
-              onPress={() => { setCustomHookText(hook && !HOOK_PRESETS.includes(hook) ? hook : ""); setCustomHookOpen(true); }}
-            >
-              <Text style={[st.chipText, hook != null && !HOOK_PRESETS.includes(hook) && st.chipTextActive]} numberOfLines={1}>
-                {hook != null && !HOOK_PRESETS.includes(hook) ? hook : "Custom…"}
+              <Text style={[st.tabBtnText, activeTab === t.key && st.tabBtnTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
+                {t.label}
               </Text>
             </TouchableOpacity>
-          </ScrollView>
-          {customHookOpen ? (
-            <View style={st.inlineInputRow}>
-              <TextInput
-                style={st.inlineInput}
-                value={customHookText}
-                onChangeText={(t) => setCustomHookText(t.slice(0, CUSTOM_HOOK_MAX))}
-                placeholder="Your own hook…"
-                placeholderTextColor={C.text4}
-                autoFocus
-                maxLength={CUSTOM_HOOK_MAX}
-                returnKeyType="done"
-                blurOnSubmit
-                onSubmitEditing={commitCustomHook}
-              />
-              <TouchableOpacity onPress={commitCustomHook} style={st.inlineInputDone}>
-                <Text style={st.inlineInputDoneText}>Done</Text>
-              </TouchableOpacity>
-            </View>
+          ))}
+        </View>
+
+        {/* ONE fixed-height content row for whichever tab is selected -
+            horizontal scroll only, so however many chips/swatches/buttons a
+            tab has, the screen's overall layout never changes height. */}
+        <View style={st.tabContent}>
+          {activeTab === "hook" ? (
+            customHookOpen ? (
+              <View style={st.inlineInputRow}>
+                <TextInput
+                  style={st.inlineInput}
+                  value={customHookText}
+                  onChangeText={(t) => setCustomHookText(t.slice(0, CUSTOM_HOOK_MAX))}
+                  placeholder="Your own hook…"
+                  placeholderTextColor={C.text4}
+                  autoFocus
+                  maxLength={CUSTOM_HOOK_MAX}
+                  returnKeyType="done"
+                  blurOnSubmit
+                  onSubmitEditing={commitCustomHook}
+                  maxFontSizeMultiplier={CONTROL_FONT_SCALE}
+                />
+                <TouchableOpacity onPress={commitCustomHook} style={st.inlineInputDone}>
+                  <Text style={st.inlineInputDoneText} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.rowScrollContent}>
+                {HOOK_PRESETS.map((h) => {
+                  const selected = hook === h;
+                  return (
+                    <TouchableOpacity key={h} style={[st.chip, selected && st.chipActive]} onPress={() => openPreset(h)}>
+                      <Text style={[st.chipText, selected && st.chipTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>{h}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                <TouchableOpacity
+                  style={[st.chip, hook == null && st.chipActive]}
+                  onPress={() => { setControls((prev) => csSetHook(prev, null)); setCustomHookOpen(false); persistPrefs({ hook: null }); }}
+                >
+                  <Text style={[st.chipText, hook == null && st.chipTextActive]} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>None</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[st.chip, isCustomHookActive && st.chipActive]}
+                  onPress={() => { setCustomHookText(isCustomHookActive ? (hook as string) : ""); setCustomHookOpen(true); }}
+                >
+                  <Text style={[st.chipText, isCustomHookActive && st.chipTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
+                    {isCustomHookActive ? hook : "Custom…"}
+                  </Text>
+                </TouchableOpacity>
+              </ScrollView>
+            )
           ) : null}
 
-          {/* ROW 3 — handle / hide-price toggle chips */}
-          <View style={st.toggleChipRow}>
-            <TouchableOpacity
-              style={[st.chip, handleEnabled && st.chipActive]}
-              onPress={() => toggleHandleEnabled(!handleEnabled)}
-            >
-              <Text style={[st.chipText, handleEnabled && st.chipTextActive]} numberOfLines={1}>Handle</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[st.chip, hidePrice && st.chipActive]}
-              onPress={() => setHidePrice((v) => !v)}
-            >
-              <Text style={[st.chipText, hidePrice && st.chipTextActive]} numberOfLines={1}>Hide price</Text>
-            </TouchableOpacity>
-          </View>
-          {handleEnabled ? (
+          {activeTab === "photo" ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.rowScrollContent}>
+              {(["whole", "fill"] as PhotoMode[]).map((m) => (
+                <TouchableOpacity key={m} style={[st.chip, photoMode === m && st.chipActive]} onPress={() => choosePhotoMode(m)}>
+                  <Text style={[st.chipText, photoMode === m && st.chipTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
+                    {m === "whole" ? "Whole" : "Fill"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              {photoMode === "fill" ? (
+                <>
+                  <View style={st.adjustGroup}>
+                    <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeZoom(-ZOOM_STEP)} disabled={zoom <= ZOOM_MIN}>
+                      <Text style={st.adjustBtnText}>−</Text>
+                    </TouchableOpacity>
+                    <Text style={st.zoomValue} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>{zoom.toFixed(2)}x</Text>
+                    <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeZoom(ZOOM_STEP)} disabled={zoom >= ZOOM_MAX}>
+                      <Text style={st.adjustBtnText}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={st.adjustGroup}>
+                    <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(-FOCUS_STEP, 0)}>
+                      <Text style={st.adjustBtnText}>←</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(0, -FOCUS_STEP)}>
+                      <Text style={st.adjustBtnText}>↑</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(0, FOCUS_STEP)}>
+                      <Text style={st.adjustBtnText}>↓</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(FOCUS_STEP, 0)}>
+                      <Text style={st.adjustBtnText}>→</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity style={st.resetBtn} onPress={resetPhotoAdjust}>
+                    <Text style={st.resetBtnText} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Reset</Text>
+                  </TouchableOpacity>
+                </>
+              ) : null}
+            </ScrollView>
+          ) : null}
+
+          {activeTab === "color" ? (
+            hexOpen ? (
+              <View style={st.inlineInputRow}>
+                <TextInput
+                  style={st.inlineInput}
+                  value={hexText}
+                  onChangeText={(t) => { setHexText(t.slice(0, 7)); setHexError(false); }}
+                  placeholder="#a3e635"
+                  placeholderTextColor={C.text4}
+                  autoFocus
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  maxLength={7}
+                  returnKeyType="done"
+                  blurOnSubmit
+                  onSubmitEditing={commitHex}
+                  maxFontSizeMultiplier={CONTROL_FONT_SCALE}
+                />
+                <TouchableOpacity onPress={commitHex} style={st.inlineInputDone}>
+                  <Text style={st.inlineInputDoneText} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.rowScrollContent}>
+                <TouchableOpacity
+                  style={[st.autoPill, accent == null && st.swatchSelected]}
+                  onPress={() => chooseAccent(null)}
+                >
+                  <Text style={st.autoPillText} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Auto</Text>
+                </TouchableOpacity>
+                {ACCENT_SWATCHES.map((sw) => (
+                  <TouchableOpacity
+                    key={sw.id}
+                    style={[st.swatch, { backgroundColor: sw.hex }, accent === sw.hex && st.swatchSelected]}
+                    onPress={() => chooseAccent(sw.hex)}
+                    accessibilityLabel={sw.label}
+                  />
+                ))}
+                <TouchableOpacity
+                  style={[
+                    st.swatch,
+                    { backgroundColor: accent != null && !ACCENT_SWATCHES.some((sw) => sw.hex === accent) ? accent : C.surfaceHigh },
+                    accent != null && !ACCENT_SWATCHES.some((sw) => sw.hex === accent) && st.swatchSelected,
+                  ]}
+                  onPress={openHexEditor}
+                >
+                  <Text style={st.swatchAutoText}>#</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            )
+          ) : null}
+
+          {activeTab === "more" ? (
             handleEditOpen ? (
               <View style={st.inlineInputRow}>
                 <TextInput
                   style={st.inlineInput}
                   value={handle}
-                  onChangeText={setHandle}
+                  onChangeText={(t) => setControls((prev) => csSetHandle(prev, t))}
                   placeholder="@yourname"
                   placeholderTextColor={C.text4}
                   autoFocus
@@ -577,145 +746,83 @@ export default function ShareStudio(props: ShareStudioProps) {
                   returnKeyType="done"
                   blurOnSubmit
                   onSubmitEditing={commitHandle}
+                  maxFontSizeMultiplier={CONTROL_FONT_SCALE}
                 />
                 <TouchableOpacity onPress={commitHandle} style={st.inlineInputDone}>
-                  <Text style={st.inlineInputDoneText}>Done</Text>
+                  <Text style={st.inlineInputDoneText} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Done</Text>
                 </TouchableOpacity>
               </View>
             ) : (
-              <TouchableOpacity style={st.handlePill} onPress={() => setHandleEditOpen(true)}>
-                <Text style={st.handlePillText} numberOfLines={1}>{handle || "+ Add your @handle"}</Text>
-              </TouchableOpacity>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.rowScrollContent}>
+                <TouchableOpacity style={[st.chip, handleEnabled && st.chipActive]} onPress={() => toggleHandleEnabled(!handleEnabled)}>
+                  <Text style={[st.chipText, handleEnabled && st.chipTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Handle</Text>
+                </TouchableOpacity>
+                {handleEnabled ? (
+                  <TouchableOpacity style={st.handlePill} onPress={() => setHandleEditOpen(true)}>
+                    <Text style={st.handlePillText} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>{handle || "+ Add your @handle"}</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  style={[st.chip, hidePrice && st.chipActive]}
+                  onPress={() => setControls((prev) => csSetHidePrice(prev, !prev.hidePrice))}
+                >
+                  <Text style={[st.chipText, hidePrice && st.chipTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Hide price</Text>
+                </TouchableOpacity>
+              </ScrollView>
             )
           ) : null}
-
-          {/* ROW 4 — photo: Whole/Fill, with zoom/focus/reset only in Fill */}
-          <Text style={st.sectionLabel}>PHOTO</Text>
-          <View style={st.photoModeRow}>
-            {(["whole", "fill"] as PhotoMode[]).map((m) => (
-              <TouchableOpacity
-                key={m}
-                style={[st.photoModeBtn, photoMode === m && st.chipActive]}
-                onPress={() => choosePhotoMode(m)}
-              >
-                <Text style={[st.chipText, photoMode === m && st.chipTextActive]} numberOfLines={1}>
-                  {m === "whole" ? "Whole" : "Fill"}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {photoMode === "fill" ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.photoAdjustRow}>
-              <View style={st.adjustGroup}>
-                <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeZoom(-ZOOM_STEP)} disabled={zoom <= ZOOM_MIN}>
-                  <Text style={st.adjustBtnText}>−</Text>
-                </TouchableOpacity>
-                <Text style={st.zoomValue} numberOfLines={1}>{zoom.toFixed(2)}x</Text>
-                <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeZoom(ZOOM_STEP)} disabled={zoom >= ZOOM_MAX}>
-                  <Text style={st.adjustBtnText}>+</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={st.adjustGroup}>
-                <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(-FOCUS_STEP, 0)}>
-                  <Text style={st.adjustBtnText}>←</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(0, -FOCUS_STEP)}>
-                  <Text style={st.adjustBtnText}>↑</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(0, FOCUS_STEP)}>
-                  <Text style={st.adjustBtnText}>↓</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={st.adjustBtn} onPress={() => nudgeFocus(FOCUS_STEP, 0)}>
-                  <Text style={st.adjustBtnText}>→</Text>
-                </TouchableOpacity>
-              </View>
-              <TouchableOpacity style={st.resetBtn} onPress={resetPhotoAdjust}>
-                <Text style={st.resetBtnText}>Reset</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          ) : null}
-
-          {/* ROW 5 — color, single horizontal scroller of round swatches */}
-          <Text style={st.sectionLabel}>COLOR</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.swatchRow}>
-            <TouchableOpacity
-              style={[st.swatch, { backgroundColor: C.surfaceHigh }, accent == null && st.swatchSelected]}
-              onPress={() => chooseAccent(null)}
-            >
-              <Text style={st.swatchAutoText}>Auto</Text>
-            </TouchableOpacity>
-            {ACCENT_SWATCHES.map((sw) => (
-              <TouchableOpacity
-                key={sw.id}
-                style={[st.swatch, { backgroundColor: sw.hex }, accent === sw.hex && st.swatchSelected]}
-                onPress={() => chooseAccent(sw.hex)}
-                accessibilityLabel={sw.label}
-              />
-            ))}
-            <TouchableOpacity
-              style={[
-                st.swatch,
-                { backgroundColor: accent != null && !ACCENT_SWATCHES.some((sw) => sw.hex === accent) ? accent : C.surfaceHigh },
-                accent != null && !ACCENT_SWATCHES.some((sw) => sw.hex === accent) && st.swatchSelected,
-              ]}
-              onPress={openHexEditor}
-            >
-              <Text style={st.swatchAutoText}>#</Text>
-            </TouchableOpacity>
-          </ScrollView>
-          {hexOpen ? (
-            <View style={st.inlineInputRow}>
-              <TextInput
-                style={st.inlineInput}
-                value={hexText}
-                onChangeText={(t) => { setHexText(t.slice(0, 7)); setHexError(false); }}
-                placeholder="#a3e635"
-                placeholderTextColor={C.text4}
-                autoFocus
-                autoCapitalize="none"
-                autoCorrect={false}
-                maxLength={7}
-                returnKeyType="done"
-                blurOnSubmit
-                onSubmitEditing={commitHex}
-              />
-              <TouchableOpacity onPress={commitHex} style={st.inlineInputDone}>
-                <Text style={st.inlineInputDoneText}>Done</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
           {hexError ? <Text style={st.hexErrorText}>Enter a 6-digit hex color, like #A3E635.</Text> : null}
+        </View>
 
-          {isOwner && debugBytes != null ? (
-            <Text style={st.debugLine}>
-              export {FORMAT_SIZES[format].w}×{FORMAT_SIZES[format].h} · {formatFileSize(debugBytes)}
-            </Text>
-          ) : null}
-        </ScrollView>
-
-        {/* Pinned footer, OUTSIDE the ScrollView - Share is always visible,
-            full width, above the home indicator, never pushed below the
-            fold regardless of how much the controls above grow. */}
+        {/* Pinned footer, OUTSIDE any scroll view - Copy caption link, then
+            Share + Make video side by side, always visible above the home
+            indicator regardless of which tab/content is showing above. */}
         <View style={st.footer}>
           {shareStatus ? (
             <Text style={[st.statusText, shareStatus.kind === "fail" && st.statusTextFail]} numberOfLines={2}>{shareStatus.text}</Text>
           ) : null}
+          {videoError ? (
+            <View style={st.videoErrorBox}>
+              <Text style={st.errorTitle} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>{videoError.message}</Text>
+              <Text style={st.errorDetail} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
+                {videoError.status ? `HTTP ${videoError.status}` : "network error"} · {videoError.stage || "—"} · {videoError.ms}ms
+              </Text>
+            </View>
+          ) : null}
           <TouchableOpacity style={st.copyBtn} onPress={copyCaption}>
-            <Text style={st.copyBtnText}>{copied ? "Copied!" : "Copy caption"}</Text>
+            <Text style={st.copyBtnText} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>{copied ? "Copied!" : "Copy caption"}</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[st.shareBtn, (!previewUri || sharing) && st.shareBtnDisabled]}
-            onPress={share}
-            disabled={!previewUri || sharing}
-            activeOpacity={0.85}
-          >
-            {sharing ? (
-              <View style={st.shareBtnPreparing}>
-                <ActivityIndicator color={C.greenDark} />
-                <Text style={st.shareBtnText}>Preparing…</Text>
-              </View>
-            ) : <Text style={st.shareBtnText}>Share</Text>}
-          </TouchableOpacity>
+          <View style={st.footerBtnRow}>
+            <TouchableOpacity
+              style={[st.shareBtn, (!previewUri || sharing) && st.shareBtnDisabled]}
+              onPress={share}
+              disabled={!previewUri || sharing}
+              activeOpacity={0.85}
+            >
+              {sharing ? (
+                <View style={st.shareBtnPreparing}>
+                  <ActivityIndicator color={C.greenDark} />
+                  <Text style={st.shareBtnText} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Preparing…</Text>
+                </View>
+              ) : <Text style={st.shareBtnText} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Share</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[st.videoBtn, (format !== "story" || videoState === "making") && st.videoBtnDisabled]}
+              onPress={makeVideo}
+              disabled={format !== "story" || videoState === "making"}
+              activeOpacity={0.85}
+            >
+              {videoState === "making" ? (
+                <View style={st.shareBtnPreparing}>
+                  <ActivityIndicator color={C.green} />
+                  <Text style={st.videoBtnText} numberOfLines={2} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Making your video… up to 20 s</Text>
+                </View>
+              ) : <Text style={st.videoBtnText} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Make video</Text>}
+            </TouchableOpacity>
+          </View>
+          {format !== "story" ? (
+            <Text style={st.videoHint} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Video is Story only</Text>
+          ) : null}
         </View>
       </View>
     </Modal>
@@ -732,13 +839,19 @@ const st = StyleSheet.create({
   closeText: { color: C.text3, fontSize: 15, fontWeight: "700", flexShrink: 0 },
   topTitle: { color: C.text1, fontSize: 15, fontWeight: "800", flexShrink: 1, flexGrow: 1, textAlign: "center" },
 
-  // Fixed height (not minHeight) - "at most ~40% of the screen", contain +
-  // centered. previewBox (computed in JS from the format's aspect ratio)
-  // sizes the actual image/placeholder to fit inside this without cropping.
-  previewArea: { height: PREVIEW_MAX_H, alignItems: "center", justifyContent: "center", paddingHorizontal: PREVIEW_PAD_H, position: "relative" },
-  previewImg: { borderRadius: 12 },
+  segmentRow: { flexDirection: "row", gap: 8, width: "100%", paddingHorizontal: 16, paddingBottom: 10 },
+  segment: { flex: 1, minHeight: 44, paddingVertical: 9, borderRadius: 10, borderWidth: 1.5, borderColor: C.border, alignItems: "center", justifyContent: "center" },
+  segmentActive: { borderColor: C.green, backgroundColor: C.greenBg },
+  segmentText: { color: C.text3, fontSize: 13, fontWeight: "800" },
+  segmentTextActive: { color: C.green },
+
+  // PREVIEW — flex:1 so it absorbs whatever room the fixed-height rows below
+  // it don't need, floored at 38% of screen height so a short device never
+  // squeezes it away to nothing.
+  previewArea: { flex: 1, minHeight: PREVIEW_MIN_H, alignItems: "center", justifyContent: "center", paddingHorizontal: PREVIEW_PAD_H, position: "relative" },
+  previewImg: { width: "100%", height: "100%", borderRadius: 12 },
   previewImgDimmed: { opacity: 0.45 },
-  previewPlaceholder: { borderRadius: 12, backgroundColor: C.surfaceHigh },
+  previewPlaceholder: { width: "100%", height: "100%", borderRadius: 12, backgroundColor: C.surfaceHigh },
   previewSpinner: { position: "absolute" },
   previewShimmer: { position: "absolute", top: 8, left: PREVIEW_PAD_H + 8, right: PREVIEW_PAD_H + 8, height: 3, borderRadius: 2, backgroundColor: C.green },
   errorBox: { position: "absolute", left: 16, right: 16, bottom: 10, backgroundColor: C.surface, borderWidth: 1, borderColor: C.red + "50", borderRadius: 12, padding: 14 },
@@ -747,67 +860,67 @@ const st = StyleSheet.create({
   errorBody: { color: C.text4, fontSize: 10, fontFamily: "monospace" as any, marginBottom: 10 },
   retryBtn: { alignSelf: "flex-start", backgroundColor: C.red + "20", borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
   retryBtnText: { color: C.red, fontSize: 13, fontWeight: "800" },
+  // Owner-only debug readout - never shown to real users (was unconditional
+  // before, a stray internal readout on every user's screen).
   renderReadout: { color: C.text4, fontSize: 10, fontFamily: "monospace" as any, textAlign: "center", paddingVertical: 4 },
 
-  controlsScroll: { flex: 1 },
-  // No bottom padding needed for the Share button anymore - it's pinned in
-  // its own footer below the ScrollView, not scrolled content.
-  controlsContent: { paddingHorizontal: 16, paddingBottom: 16, paddingTop: 4 },
-  segmentRow: { flexDirection: "row", gap: 8, width: "100%" },
-  segment: { flex: 1, paddingVertical: 9, borderRadius: 10, borderWidth: 1.5, borderColor: C.border, alignItems: "center" },
-  segmentActive: { borderColor: C.green, backgroundColor: C.greenBg },
-  segmentText: { color: C.text3, fontSize: 13, fontWeight: "800" },
-  segmentTextActive: { color: C.green },
+  // TAB STRIP — four equal tabs, each >=44pt tall.
+  tabStrip: { flexDirection: "row", borderTopWidth: 1, borderTopColor: C.border, paddingHorizontal: 16 },
+  tabBtn: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", borderBottomWidth: 2, borderBottomColor: "transparent" },
+  tabBtnActive: { borderBottomColor: C.green },
+  tabBtnText: { color: C.text3, fontSize: 13, fontWeight: "700" },
+  tabBtnTextActive: { color: C.green, fontWeight: "900" },
 
-  sectionLabel: { color: C.green, fontSize: 11, fontWeight: "900", letterSpacing: 1.5, marginTop: 12, marginBottom: 8 },
-  // Hook/color rows are single horizontal scrollers (not flexWrap) so
-  // however many chips/swatches exist, they add zero extra row height.
-  chipScrollRow: { flexDirection: "row", gap: 8, paddingRight: 8 },
-  chip: { minHeight: 40, paddingHorizontal: 14, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface, alignItems: "center", justifyContent: "center" },
+  // ONE fixed-height content row (64-72pt) for whichever tab is active -
+  // horizontal scroll only, so this never grows the screen's overall layout.
+  tabContent: { height: TAB_CONTENT_H, paddingHorizontal: 16, justifyContent: "center" },
+  rowScrollContent: { flexDirection: "row", alignItems: "center", gap: 8, paddingRight: 8 },
+
+  chip: { minHeight: 44, paddingHorizontal: 14, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface, alignItems: "center", justifyContent: "center" },
   chipActive: { backgroundColor: C.green, borderColor: C.green },
   chipText: { color: C.text2, fontSize: 13, fontWeight: "700" },
   chipTextActive: { color: C.greenDark, fontWeight: "900" },
 
-  inlineInputRow: { flexDirection: "row", alignItems: "center", marginTop: 8, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.green, borderRadius: 100, paddingLeft: 16, paddingRight: 8, minHeight: 44 },
+  inlineInputRow: { flexDirection: "row", alignItems: "center", backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.green, borderRadius: 100, paddingLeft: 16, paddingRight: 8, minHeight: 44, height: 44 },
   inlineInput: { flex: 1, color: C.text1, fontSize: 14, fontWeight: "600", paddingVertical: Platform.OS === "ios" ? 10 : 6 },
-  inlineInputDone: { paddingHorizontal: 10, paddingVertical: 8 },
+  inlineInputDone: { minHeight: 44, minWidth: 44, paddingHorizontal: 10, alignItems: "center", justifyContent: "center" },
   inlineInputDoneText: { color: C.green, fontSize: 13, fontWeight: "800" },
-  hexErrorText: { color: C.red, fontSize: 11, fontWeight: "600", marginTop: 6 },
+  hexErrorText: { color: C.red, fontSize: 11, fontWeight: "600", position: "absolute", bottom: -2, left: 16 },
 
-  // ROW 3 — handle/hide-price toggle chips, side by side.
-  toggleChipRow: { flexDirection: "row", gap: 8, marginTop: 12 },
-  handlePill: { marginTop: 8, minHeight: 44, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, alignSelf: "flex-start" },
+  handlePill: { minHeight: 44, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 },
   handlePillText: { color: C.text2, fontSize: 14, fontWeight: "700" },
 
-  // ROW 4 — photo mode + (Fill-only) zoom/focus/reset.
-  photoModeRow: { flexDirection: "row", gap: 8 },
-  photoModeBtn: { minHeight: 40, minWidth: 72, paddingHorizontal: 14, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface, alignItems: "center", justifyContent: "center" },
-  photoAdjustRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 10, paddingRight: 8 },
-  adjustGroup: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.border, borderRadius: 100, paddingHorizontal: 4 },
-  adjustBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
+  adjustGroup: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.border, borderRadius: 100, paddingHorizontal: 6, minHeight: 44 },
+  adjustBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   adjustBtnText: { color: C.text1, fontSize: 16, fontWeight: "800" },
-  zoomValue: { color: C.text2, fontSize: 12, fontWeight: "700", minWidth: 44, textAlign: "center" },
-  resetBtn: { paddingHorizontal: 12, minHeight: 36, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, alignItems: "center", justifyContent: "center" },
+  zoomValue: { color: C.text2, fontSize: 12, fontWeight: "700", minWidth: 48, textAlign: "center" },
+  resetBtn: { paddingHorizontal: 14, minHeight: 44, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, alignItems: "center", justifyContent: "center" },
   resetBtnText: { color: C.text3, fontSize: 12, fontWeight: "700" },
 
-  // ROW 5 — color swatches, >=36pt round tap targets, white ring on the
-  // selected one (Auto included).
-  swatchRow: { flexDirection: "row", gap: 10, paddingRight: 8, paddingVertical: 2 },
-  swatch: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: C.border },
+  // COLOR — Auto is a wide pill so the full word "Auto" always fits (never
+  // the old truncated-to-"Aut" circle); the 12 presets + hex stay 44pt
+  // circles, >=44pt tap target.
+  autoPill: { minHeight: 44, minWidth: 64, paddingHorizontal: 16, borderRadius: 100, backgroundColor: C.surfaceHigh, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: C.border },
+  autoPillText: { color: C.text2, fontSize: 13, fontWeight: "800" },
+  swatch: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: C.border },
   swatchSelected: { borderWidth: 2, borderColor: C.text1 },
-  swatchAutoText: { color: C.text2, fontSize: 10, fontWeight: "800" },
+  swatchAutoText: { color: C.text2, fontSize: 12, fontWeight: "800" },
 
-  debugLine: { color: C.text4, fontSize: 10, fontFamily: "monospace" as any, marginTop: 14, textAlign: "center" },
-
-  // Pinned footer - outside the ScrollView, above the home indicator, Share
-  // always full-width and visible regardless of scroll position above.
+  // Pinned footer - outside any scroll view, above the home indicator,
+  // always visible regardless of which tab/content is showing above.
   footer: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: Platform.OS === "ios" ? 30 : 18, backgroundColor: C.bg, borderTopWidth: 1, borderTopColor: C.border },
   statusText: { color: C.text2, fontSize: 12, textAlign: "center", marginBottom: 8 },
   statusTextFail: { color: C.red },
-  shareBtn: { backgroundColor: C.green, borderRadius: 14, paddingVertical: 17, alignItems: "center" },
+  videoErrorBox: { backgroundColor: C.surface, borderWidth: 1, borderColor: C.red + "50", borderRadius: 10, padding: 10, marginBottom: 8 },
+  footerBtnRow: { flexDirection: "row", gap: 10 },
+  shareBtn: { flex: 1, backgroundColor: C.green, borderRadius: 14, paddingVertical: 16, minHeight: 50, alignItems: "center", justifyContent: "center" },
   shareBtnDisabled: { opacity: 0.5 },
   shareBtnPreparing: { flexDirection: "row", alignItems: "center", gap: 8 },
   shareBtnText: { color: C.greenDark, fontSize: 16, fontWeight: "900" },
+  videoBtn: { flex: 1, backgroundColor: "transparent", borderWidth: 1.5, borderColor: C.green, borderRadius: 14, paddingVertical: 16, paddingHorizontal: 6, minHeight: 50, alignItems: "center", justifyContent: "center" },
+  videoBtnDisabled: { opacity: 0.4, borderColor: C.border },
+  videoBtnText: { color: C.green, fontSize: 14, fontWeight: "900", textAlign: "center" },
+  videoHint: { color: C.text4, fontSize: 11, fontWeight: "600", textAlign: "center", marginTop: 6 },
   copyBtn: { alignItems: "center", paddingVertical: 8, marginBottom: 2 },
   copyBtnText: { color: C.text3, fontSize: 13, fontWeight: "700" },
 });

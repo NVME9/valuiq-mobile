@@ -1,7 +1,8 @@
 // shareCardPayload.test.ts — coverage for the server-share-card payload
 // builder and the "no share on a loss" rule (see shareCardPayload.ts's own
 // header comment - everything here is pure, no network/file I/O).
-import { buildShareCardPayload, canShareWin } from "../shareCardPayload";
+import { buildShareCardPayload, buildShareVideoPayload, canShareWin, stampForHeroVerdict, toneForHeroVerdict } from "../shareCardPayload";
+import { HeroVerdict } from "../outcomeTier";
 
 describe("buildShareCardPayload - scan variant", () => {
   test("estimate: sets estimate:true and caption 'ESTIMATE'", () => {
@@ -74,6 +75,71 @@ describe("buildShareCardPayload - scan variant", () => {
       variant: "scan", format: "story", itemName: "Lamp",
       paidPrice: 10, heroSellPrice: 30, verdict: null, toneOverride: "lime", isEstimate: false,
     });
+    expect(p.tone).toBe("lime");
+  });
+});
+
+// EVERY TIER THE RESULT SCREEN CAN SHOW (founder screenshot fix, 2026-11-19):
+// a SOLID scan used to stamp "GOOD FLIP" and a PASS scan could show up lime/
+// green via a disconnected tone source (see HistoryScreen.tsx's
+// resolveStoredHeroVerdict comment) - the card's stamp and tone must now be
+// exactly the verdict label and tier ScannerScreen.tsx's result banner shows
+// (lib/outcomeTier.ts's `label: headline` - the tier IS the verdict), one
+// source of truth, for every real HeroVerdict value.
+describe("stampForHeroVerdict / toneForHeroVerdict - every result-screen tier", () => {
+  const TABLE: { verdict: HeroVerdict; stamp: string | null; tone: "red" | "yellow" | "lime" }[] = [
+    { verdict: "PASS", stamp: "PASS", tone: "red" },
+    { verdict: "THIN", stamp: "THIN", tone: "yellow" },
+    { verdict: "CHECK ITEM", stamp: "CHECK ITEM", tone: "yellow" },
+    { verdict: "WORTH A LOOK", stamp: "WORTH A LOOK", tone: "lime" },
+    { verdict: "SOLID", stamp: "SOLID", tone: "lime" },
+    { verdict: null, stamp: null, tone: "yellow" },
+  ];
+
+  test.each(TABLE)("$verdict -> stamp $stamp, tone $tone", ({ verdict, stamp, tone }) => {
+    expect(stampForHeroVerdict(verdict)).toBe(stamp);
+    expect(toneForHeroVerdict(verdict)).toBe(tone);
+  });
+
+  test("buildShareCardPayload's stamp/tone match the table for every tier", () => {
+    for (const { verdict, stamp, tone } of TABLE) {
+      const p = buildShareCardPayload({
+        variant: "scan", format: "story", itemName: "Item",
+        paidPrice: 10, heroSellPrice: 30, verdict, isEstimate: false,
+      });
+      expect(p.stamp).toBe(stamp ?? undefined);
+      expect(p.tone).toBe(tone);
+    }
+  });
+});
+
+describe("buildShareVideoPayload - Make video", () => {
+  test("forces format to 'story' regardless of the currently-selected format tab", () => {
+    const p = buildShareVideoPayload({
+      variant: "scan", format: "square", itemName: "Lamp",
+      paidPrice: 10, heroSellPrice: 30, verdict: "SOLID", isEstimate: false,
+    });
+    expect(p.format).toBe("story");
+  });
+
+  test("every other field matches what the same inputs would build for the image call", () => {
+    const input = {
+      variant: "scan" as const, format: "feed" as const, itemName: "Vintage Jacket",
+      paidPrice: 20, heroSellPrice: 65, verdict: "WORTH A LOOK" as const, isEstimate: false,
+      hook: "Would you flip it?", handle: "@thriftflips", hidePrice: false, accent: "#a3e635",
+    };
+    const imagePayload = buildShareCardPayload(input);
+    const videoPayload = buildShareVideoPayload(input);
+    expect(videoPayload).toEqual({ ...imagePayload, format: "story" });
+  });
+
+  test("win variant: same body shape as the image call, format forced to story", () => {
+    const p = buildShareVideoPayload({
+      variant: "win", format: "story", itemName: "Vintage Jacket",
+      boughtPrice: 20, soldPrice: 65, profit: 45,
+    });
+    expect(p.format).toBe("story");
+    expect(p.stamp).toBe("SOLD");
     expect(p.tone).toBe("lime");
   });
 });

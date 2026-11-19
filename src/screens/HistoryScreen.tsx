@@ -93,6 +93,29 @@ const VERDICT_META: Record<string, { tier: OutcomeTierInfo["tier"]; emoji: strin
   "CHECK ITEM": { tier: "thin", emoji: "👀", label: "CHECK ITEM", accentKey: "yellow" },
 };
 
+// SHARE STUDIO VERDICT (founder screenshot fix, 2026-11-19): the re-share
+// flow used to compute its stamp/tone from `row.decision` (toShareResult's
+// `row.decision || row.verdict || "PASS"` - the OLD coarse BUY/WATCH/PASS
+// enum, saved independently of the real verdict engine) via toneForDecision,
+// completely disconnected from the SAME row's own stored heroVerdict.headline
+// that scanTier above already uses for the on-screen badge. MEASURED: a
+// PASS-headline scan (Bentgo lunch box) whose stale `decision` column still
+// said "BUY" shared a lime/green card for a verdict the result screen itself
+// called PASS. One source of truth: resolve the real stored HeroVerdict the
+// same way scanTier does (full.heroVerdict.headline) and pass THAT to
+// ShareStudio's heroVerdict prop, so its stamp/tone both derive from
+// lib/outcomeTier.ts's HeroVerdict via shareCardPayload.ts's
+// stampForHeroVerdict/toneForHeroVerdict - never the legacy decision field.
+// toneForDecision is now only a fallback for rows saved before heroVerdict
+// existed at all (same fallback scanTier already has).
+function resolveStoredHeroVerdict(row: any): import("../lib/outcomeTier").HeroVerdict {
+  if (!row) return null;
+  let full: any = null;
+  try { full = row.specialty_data ? JSON.parse(row.specialty_data) : null; } catch { full = null; }
+  const headline = full?.heroVerdict?.headline;
+  return headline && VERDICT_META[headline] ? headline : null;
+}
+
 // ONE VERDICT ENGINE (BEASTMODE FIX 1, 2026-09-13; superseded by the stored
 // heroVerdict above for any scan saved after 2026-10-08 - this recompute is
 // now ONLY the fallback for OLDER rows that predate that field). This card
@@ -1264,7 +1287,11 @@ export default function HistoryScreen({ token, plan, onNavigate, onBack, preview
           paidPrice={loggedWin ? null : (Number(studioTarget.buy_price ?? studioTarget.buyPrice) || null)}
           sellPrice={loggedWin ? null : (toShareResult(studioTarget).sellPrice ?? null)}
           profitConfidence="estimate"
-          toneOverride={loggedWin ? undefined : toneForDecision(toShareResult(studioTarget).decision)}
+          // Real stored verdict wins (see resolveStoredHeroVerdict's own
+          // comment); toneOverride is only consulted when there's no stored
+          // heroVerdict to resolve (pre-heroVerdict legacy rows).
+          heroVerdict={loggedWin ? null : resolveStoredHeroVerdict(studioTarget)}
+          toneOverride={loggedWin || resolveStoredHeroVerdict(studioTarget) ? undefined : toneForDecision(toShareResult(studioTarget).decision)}
           isOwner={isOwner}
           winData={loggedWin ? { boughtPrice: loggedWin.boughtPrice, soldPrice: loggedWin.soldPrice, profit: loggedWin.profit } : null}
         />

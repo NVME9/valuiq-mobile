@@ -11,20 +11,19 @@ export type ShareCardFormat = "story" | "feed" | "square";
 export type ShareCardVariant = "scan" | "win";
 export type ShareCardTone = "lime" | "yellow" | "red";
 
-// VERDICT STAMP: the real 5-value HeroVerdict mapped to the friendly word(s)
-// stamped on the card - CHECK ITEM (and null/any future value) deliberately
-// falls through to "no stamp" rather than a hedge word, same "degrade to
-// nothing, never fabricate" rule this app already uses elsewhere.
-const STAMP_WORDS: Partial<Record<Exclude<HeroVerdict, null>, string>> = {
-  SOLID: "GOOD FLIP",
-  "WORTH A LOOK": "GOOD FLIP",
-  THIN: "THIN MARGIN",
-  PASS: "PASS",
-};
-
+// VERDICT STAMP (FIXED, founder screenshot bug): the stamp is now the EXACT
+// same string the result screen's banner shows (ScannerScreen.tsx's
+// `label: headline` - see lib/outcomeTier.ts's header comment: the tier IS
+// the verdict), never a separate friendly phrase of its own. MEASURED: a
+// SOLID scan's card used to stamp "GOOD FLIP" - a word the result screen
+// never shows anywhere - so the card and the screen it was shared from could
+// read as two different verdicts for the identical scan. One source of
+// truth: this function returns `verdict` itself, verbatim, for every real
+// HeroVerdict value (PASS/THIN/"WORTH A LOOK"/SOLID/"CHECK ITEM"). Only
+// null (no verdict at all) still degrades to "no stamp" rather than
+// fabricating one.
 export function stampForHeroVerdict(verdict: HeroVerdict): string | null {
-  if (verdict == null) return null;
-  return STAMP_WORDS[verdict] ?? null;
+  return verdict;
 }
 
 // TONE: PASS -> red; THIN/CHECK ITEM -> yellow; WORTH A LOOK/SOLID -> lime.
@@ -170,4 +169,15 @@ export function buildShareCardPayload(input: BuildShareCardInput): ShareCardPayl
     ...(hidePrice || paidUnknown ? { hidePrice: true } : {}),
     ...(accent ? { accent } : {}),
   };
+}
+
+// MAKE VIDEO (2026-11-19): POST /api/share-video takes the EXACT same body
+// shape as /api/share-card - every control (hook/handle/hidePrice/accent/
+// photoAdjust) carries over unchanged - except format is always forced to
+// "story" (the only format the video renderer supports), regardless of
+// whichever format tab the user currently has selected in the image
+// preview. Pure passthrough + override, so it's testable independent of the
+// network call (lib/shareVideoApi.ts) and the component.
+export function buildShareVideoPayload(input: BuildShareCardInput): ShareCardPayload {
+  return buildShareCardPayload({ ...input, format: "story" });
 }
