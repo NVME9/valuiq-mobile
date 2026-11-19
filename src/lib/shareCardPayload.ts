@@ -189,21 +189,27 @@ export function buildShareCardPayload(input: BuildShareCardInput): ShareCardPayl
   const photoAdjust = input.photoAdjust ?? DEFAULT_PHOTO_ADJUST;
 
   if (input.variant === "win") {
-    // A sale can be logged at a profit, a loss, or dead even - the card
-    // always shows SOLD, but the sign of `profit` decides everything else:
-    // a non-positive result reads as an honest "LOSS AFTER FEES" in red,
-    // never dressed up as a win. formatMoney already puts the "-" before
-    // the "$" for a negative number, so only the profit branch needs its
-    // own leading "+".
-    const isLoss = input.profit <= 0;
+    // A sale can be logged at a profit, a loss, or dead even - the sign of
+    // `profit` decides everything (v5, founder device bug: a real LOSS
+    // - Mainstays canner, paid 19.62/sold 5/profit -15.28 - still stamped
+    // "SOLD" and read as a win). Three-way, not a loss/non-loss binary:
+    //   profit > 0  -> stamp "SOLD",  tone lime, caption "PROFIT AFTER FEES"
+    //   profit === 0 -> stamp "SOLD", tone lime, caption "BREAK EVEN"
+    //                   (a wash is neutral, not a failure - never red/LOSS)
+    //   profit < 0  -> stamp "LOSS",  tone red,  caption "LOSS AFTER FEES"
+    // formatMoney already puts the "-" before the "$" for a negative
+    // number and leaves an exact-zero amount unsigned ("$0") - only the
+    // real-profit branch needs its own leading "+".
+    const isLoss = input.profit < 0;
+    const isBreakEven = input.profit === 0;
     return {
       format: input.format,
       variant: "win",
       paid: formatMoney(input.boughtPrice),
-      hero: isLoss ? formatMoney(input.profit) : `+${formatMoney(input.profit)}`,
+      hero: input.profit > 0 ? `+${formatMoney(input.profit)}` : formatMoney(input.profit),
       sold: formatMoney(input.soldPrice),
-      caption: isLoss ? "LOSS AFTER FEES" : "PROFIT AFTER FEES",
-      stamp: "SOLD",
+      caption: isLoss ? "LOSS AFTER FEES" : isBreakEven ? "BREAK EVEN" : "PROFIT AFTER FEES",
+      stamp: isLoss ? "LOSS" : "SOLD",
       tone: isLoss ? "red" : "lime",
       name: input.itemName,
       photoAdjust,
@@ -224,6 +230,21 @@ export function buildShareCardPayload(input: BuildShareCardInput): ShareCardPayl
   const stamp = stampForHeroVerdict(input.verdict);
   const heroLabel = heroLabelForShareCard(input.verdict, input.isEstimate);
 
+  // SERVER ROOT CAUSE (v5, founder device bug: a PASS Columbia-hat card
+  // still read "SELLS FOR $20"): the server NEVER reads `heroLabel` at all
+  // - deal-ai-pro/lib/shareCard/renderCard.ts:326's labelNode computes its
+  // own tail text from the boolean `estimate` field alone
+  // (`d.estimate ? "WORTH ABOUT" : "SELLS FOR"`), which app/api/share-card/
+  // route.ts:72 reads as `body?.estimate === true` - `heroLabel` isn't in
+  // either file's vocabulary, so sending it (as v4 did) was a no-op. Fixed
+  // without touching the server (out of scope for this change) by sending
+  // the EXISTING `estimate` field whenever heroLabel resolves to "WORTH
+  // ABOUT" - not just when isEstimate is true - so a sold-backed PASS/THIN/
+  // CHECK ITEM still renders the honest tail. `caption:"ESTIMATE"` is a
+  // separate, independently-sent field (only ever true isEstimate), so this
+  // never mislabels a real sold-backed card as an "ESTIMATE".
+  const sendEstimateFlagForLabel = heroLabel === "WORTH ABOUT";
+
   return {
     format: input.format,
     variant: "scan",
@@ -234,7 +255,9 @@ export function buildShareCardPayload(input: BuildShareCardInput): ShareCardPayl
     name: input.itemName,
     photoAdjust,
     ...(stamp ? { stamp } : {}),
-    ...(input.isEstimate ? { estimate: true, caption: "ESTIMATE" } : {}),
+    ...(input.isEstimate
+      ? { estimate: true, caption: "ESTIMATE" }
+      : (sendEstimateFlagForLabel ? { estimate: true } : {})),
     ...(handle ? { handle } : {}),
     ...(hook ? { hook } : {}),
     ...(hidePrice || paidUnknown ? { hidePrice: true } : {}),

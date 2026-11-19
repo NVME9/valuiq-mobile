@@ -35,7 +35,8 @@ import {
   FORMAT_SIZES, FORMAT_LABELS, StudioFormat, StudioConfidence, formatFileSize,
   HOOK_PRESETS, DEFAULT_HOOK, WIN_PROFIT_HOOK,
   PhotoMode, DEFAULT_PHOTO_ADJUST,
-  ACCENT_SWATCHES, isValidAccentHex, panDeltaToFocus, pinchScaleToZoom,
+  ACCENT_SWATCHES, isValidAccentHex,
+  initPhotoGestureState, photoGestureReducer, PhotoGestureState,
 } from "../lib/shareStudio";
 import {
   StudioTab, StudioControlsState, initialStudioControls,
@@ -198,28 +199,68 @@ export default function ShareStudio(props: ShareStudioProps) {
   const [videoState, setVideoState] = useState<VideoState>("idle");
   const [videoError, setVideoError] = useState<FetchError | null>(null);
 
-  // DIRECT-MANIPULATION PHOTO GESTURE (v4, replaces the arrow/+-/zoom button
-  // pad) - livePan/liveScale drive an INSTANT local transform on the preview
-  // image while a finger is down (see the `transform` style below); the
-  // real server re-render only fires on release, once the gesture's result
-  // is committed into fx/fy/zoom (the existing 350ms debounced-fetch effect
-  // already re-requests whenever those change - see its own comment). Plain
-  // Animated.ValueXY/Value with imperative .setValue() in the responder
-  // callbacks, not Animated.event - simpler to reason about for a transform
-  // that's reset to identity on every release rather than driven frame-by-
-  // frame from a single gesture value.
+  // DIRECT-MANIPULATION PHOTO GESTURE (v5, item 4 - founder device bug:
+  // pinch/drag did NOTHING VISIBLE on his iPhone). livePan/liveScale drive
+  // an INSTANT local transform on the preview image while a finger is down
+  // (see the `transform` style below); the real server re-render only
+  // fires on release, once the gesture's result is committed into fx/fy/
+  // zoom (the existing 350ms debounced-fetch effect already re-requests
+  // whenever those change - see its own comment). Plain Animated.ValueXY/
+  // Value with imperative .setValue() in the responder callbacks, not
+  // Animated.event - simpler to reason about for a transform that's reset
+  // to identity on every release rather than driven frame-by-frame from a
+  // single gesture value.
   const livePan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const liveScale = useRef(new Animated.Value(1)).current;
   const [previewLayout, setPreviewLayout] = useState({ w: 0, h: 0 });
-  const pinchStartRef = useRef<{ dist: number; zoom: number } | null>(null);
-  // Mirrors whatever liveScale's current value is - read synchronously on
-  // release to compute the committed zoom, since Animated.Value has no
-  // public synchronous getter and the gesture's final touch distance isn't
-  // reliably available by the time onPanResponderRelease fires.
-  const liveScaleRatioRef = useRef(1);
   const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
   const DOUBLE_TAP_MS = 300;
   const DOUBLE_TAP_SLOP = 16;
+
+  // STALE-CLOSURE FIX (v5, leading suspect for why v4's touches did
+  // nothing): the PanResponder below is built EXACTLY ONCE via useRef, so
+  // its callbacks are the same functions for the Studio's whole lifetime -
+  // they can never be torn down and rebuilt mid-gesture by a React
+  // re-render (which the old useMemo([photoMode, zoom, fx, fy, ...]) build
+  // could do: any of those deps changing while a finger was down would
+  // swap the PanResponder instance out from under an in-progress native
+  // gesture). Everything the callbacks need that CAN change over time is
+  // read through a plain ref instead of closed-over state, mirrored every
+  // render (not just in an effect) so it's never one render behind.
+  const modeRef = useRef(photoMode);
+  modeRef.current = photoMode;
+  const fetchErrorRef = useRef(fetchError);
+  fetchErrorRef.current = fetchError;
+  const previewLayoutRef = useRef(previewLayout);
+  previewLayoutRef.current = previewLayout;
+
+  // The gesture STATE MACHINE itself (lib/shareStudio.ts's photoGestureReducer)
+  // lives in a ref, not React state - every touch-move dispatches into it,
+  // and NONE of those dispatches re-render this component (only the Animated
+  // values do, imperatively, via .setValue() below) - re-rendering on every
+  // touch-move is exactly the kind of churn that could itself interfere
+  // with an in-progress native responder. Re-synced to the real committed
+  // fx/fy/zoom (below) whenever those actually change - i.e. right after a
+  // gesture commits, or the Studio opens/resets - so the NEXT gesture's
+  // "start" always snapshots the true current baseline.
+  const gestureStateRef = useRef<PhotoGestureState>(initPhotoGestureState(fx, fy, zoom));
+  useEffect(() => {
+    gestureStateRef.current = initPhotoGestureState(fx, fy, zoom);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fx, fy, zoom]);
+
+  // OWNER-ONLY ON-SCREEN GESTURE READOUT (v5, item 4b) - proves on a
+  // screenshot whether touches are even arriving, independent of whether
+  // the visual transform/server re-render look right. Safe to update on
+  // every move (small Text re-render only - never rebuilds the
+  // PanResponder, which is stable via the ref above).
+  const [gestureDebug, setGestureDebug] = useState({
+    phase: "idle" as PhotoGestureState["phase"], touches: 0, dx: 0, dy: 0, scale: 1, fx, fy, zoom,
+  });
+  function syncGestureDebug() {
+    const s = gestureStateRef.current;
+    setGestureDebug({ phase: s.phase, touches: s.touches, dx: s.dx, dy: s.dy, scale: s.scale, fx: s.fx, fy: s.fy, zoom: s.zoom });
+  }
 
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -246,7 +287,9 @@ export default function ShareStudio(props: ShareStudioProps) {
         // decision than a fresh-scan share's.
         hook: isWin ? prev.hook : p.hook,
         photoMode: p.photoMode ?? DEFAULT_PHOTO_ADJUST.mode,
-        accent: p.accent ?? null,
+        // accent is NEVER restored from prefs (v5, founder device bug) -
+        // every open starts at Auto regardless of what StudioPrefs loads,
+        // which no longer even carries an accent field - see studioPrefs.ts.
       }));
     });
     setCustomHookOpen(false);
@@ -274,8 +317,12 @@ export default function ShareStudio(props: ShareStudioProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
+  // Accent is deliberately excluded from this merge - it must never reach
+  // AsyncStorage (see studioPrefs.ts's header comment). chooseAccent below
+  // does not call this at all, so a picked swatch only ever lives in this
+  // screen's own React state for the current open.
   function persistPrefs(next: Partial<StudioPrefs>) {
-    const merged = { handleEnabled, handle, hook, photoMode, accent, ...next };
+    const merged = { handleEnabled, handle, hook, photoMode, ...next };
     saveStudioPrefs(merged);
   }
 
@@ -410,6 +457,10 @@ export default function ShareStudio(props: ShareStudioProps) {
     persistPrefs({ photoMode: mode });
   }
 
+  // Both of these use the functional setState form (prev => ...) and only
+  // close over stable identifiers (livePan/liveScale refs, the setControls
+  // setter) - safe to capture ONCE inside the PanResponder config below and
+  // call forever after, same reasoning as modeRef/fetchErrorRef above.
   function resetPhotoAdjust() {
     setControls((prev) => csResetPhotoAdjust(prev));
     livePan.setValue({ x: 0, y: 0 });
@@ -422,80 +473,95 @@ export default function ShareStudio(props: ShareStudioProps) {
   // only ever fires one network request, not one per gesture). Called only
   // on release, never while the finger is still down - see livePan/
   // liveScale above for the instant local feedback shown while dragging.
-  function commitPhotoAdjust(adjust: { zoom?: number; fx?: number; fy?: number }) {
-    setControls((prev) => csSetPhotoAdjust(prev, adjust));
+  function commitPhotoAdjust(nextFx: number, nextFy: number, nextZoom: number) {
+    setControls((prev) => csSetPhotoAdjust(prev, { fx: nextFx, fy: nextFy, zoom: nextZoom }));
   }
 
-  // DIRECT-MANIPULATION RESPONDER (v4, item 3) - one-finger drag pans
-  // (fx/fy), two-finger pinch zooms (1x-3x), double-tap resets. Built on
-  // PanResponder (no gesture-handler/reanimated - neither is in build 46's
-  // native module allowlist, scripts/native-modules-build46.json, so
-  // adding either would require a new native build before this could ship
-  // OTA). Recreated via useMemo whenever photoMode/zoom/fx/fy/previewLayout
-  // change, so its closures are never stale without needing a parallel set
-  // of refs to mirror every value it reads. Only ever actually grabs the
-  // gesture in Fill mode - Whole mode's preview ignores touches entirely
-  // (onStartShouldSetPanResponder returns false), so it still scrolls/taps
-  // normally underneath.
-  const photoPanResponder = useMemo(() => PanResponder.create({
-    // !fetchError - so the Retry button (rendered inside this same
-    // previewArea on a failed fetch) stays tappable even in Fill mode,
-    // instead of the gesture responder swallowing that tap.
-    onStartShouldSetPanResponder: () => photoMode === "fill" && !fetchError,
-    onMoveShouldSetPanResponder: () => photoMode === "fill" && !fetchError,
-    onPanResponderGrant: (evt) => {
-      pinchStartRef.current = null;
-      const now = Date.now();
-      const { pageX, pageY } = evt.nativeEvent;
-      const last = lastTapRef.current;
-      if (last && now - last.t < DOUBLE_TAP_MS && Math.abs(pageX - last.x) < DOUBLE_TAP_SLOP && Math.abs(pageY - last.y) < DOUBLE_TAP_SLOP) {
-        lastTapRef.current = null;
-        resetPhotoAdjust();
-        return;
-      }
-      lastTapRef.current = { t: now, x: pageX, y: pageY };
-    },
-    onPanResponderMove: (evt, gestureState) => {
-      const touches = evt.nativeEvent.touches;
-      if (touches && touches.length >= 2) {
-        const [t0, t1] = touches;
-        const dist = Math.hypot(t1.pageX - t0.pageX, t1.pageY - t0.pageY);
-        if (!pinchStartRef.current) pinchStartRef.current = { dist, zoom };
-        const scale = dist / pinchStartRef.current.dist;
-        const nextZoom = pinchScaleToZoom(pinchStartRef.current.zoom, scale);
-        liveScaleRatioRef.current = nextZoom / zoom;
-        liveScale.setValue(liveScaleRatioRef.current);
-      } else if (!pinchStartRef.current) {
-        livePan.setValue({ x: gestureState.dx, y: gestureState.dy });
-      }
-    },
-    onPanResponderRelease: (_evt, gestureState) => {
-      if (pinchStartRef.current) {
-        const { zoom: startZoom } = pinchStartRef.current;
-        const committedZoom = pinchScaleToZoom(startZoom, liveScaleRatioRef.current);
-        commitPhotoAdjust({ zoom: committedZoom });
-        pinchStartRef.current = null;
-      } else if (previewLayout.w > 0 && previewLayout.h > 0) {
-        const { fx: nextFx, fy: nextFy } = panDeltaToFocus(fx, fy, gestureState.dx, gestureState.dy, previewLayout.w, previewLayout.h, zoom);
-        commitPhotoAdjust({ fx: nextFx, fy: nextFy });
-      }
-      liveScaleRatioRef.current = 1;
-      livePan.setValue({ x: 0, y: 0 });
-      liveScale.setValue(1);
-    },
-    onPanResponderTerminate: () => {
-      pinchStartRef.current = null;
-      liveScaleRatioRef.current = 1;
-      livePan.setValue({ x: 0, y: 0 });
-      liveScale.setValue(1);
-    },
-  }), [photoMode, zoom, fx, fy, previewLayout.w, previewLayout.h, fetchError]);
+  // DIRECT-MANIPULATION RESPONDER (v5, item 4 rewrite - founder device bug:
+  // pinch/drag did nothing visible). Built ONCE via useRef (not useMemo, not
+  // recreated on any dep change - see modeRef/fetchErrorRef/gestureStateRef
+  // above for why a rebuild mid-gesture was the leading stale-closure
+  // suspect). No gesture-handler/reanimated (neither is in build 46's native
+  // module allowlist, scripts/native-modules-build46.json, so adding either
+  // would require a new native build before this could ship OTA) - still
+  // plain PanResponder, just read through refs instead of closed-over state.
+  // onStartShouldSetPanResponder/onMoveShouldSetPanResponder (PanResponder's
+  // names for the raw responder system's onStartShouldSetResponder/
+  // onMoveShouldSetResponder) gate on modeRef, not the `photoMode` that was
+  // in scope when this config object was built - so Whole mode truly never
+  // grabs the gesture, Fill mode always does, regardless of which render
+  // happened to be current when the finger went down. !fetchErrorRef.current
+  // - so the Retry button (rendered inside the same previewArea on a failed
+  // fetch) stays tappable even in Fill mode, instead of the gesture overlay
+  // swallowing that tap. onPanResponderTerminationRequest returns false so
+  // nothing else (a parent ScrollView/Modal gesture, if one ever gets added
+  // above this) can steal an in-progress drag/pinch out from under the user.
+  const panResponderRef = useRef<ReturnType<typeof PanResponder.create> | null>(null);
+  if (!panResponderRef.current) {
+    panResponderRef.current = PanResponder.create({
+      onStartShouldSetPanResponder: () => modeRef.current === "fill" && !fetchErrorRef.current,
+      onMoveShouldSetPanResponder: () => modeRef.current === "fill" && !fetchErrorRef.current,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (evt) => {
+        const now = Date.now();
+        const { pageX, pageY } = evt.nativeEvent;
+        const last = lastTapRef.current;
+        if (last && now - last.t < DOUBLE_TAP_MS && Math.abs(pageX - last.x) < DOUBLE_TAP_SLOP && Math.abs(pageY - last.y) < DOUBLE_TAP_SLOP) {
+          lastTapRef.current = null;
+          resetPhotoAdjust();
+          gestureStateRef.current = initPhotoGestureState(DEFAULT_PHOTO_ADJUST.fx, DEFAULT_PHOTO_ADJUST.fy, DEFAULT_PHOTO_ADJUST.zoom);
+          syncGestureDebug();
+          return;
+        }
+        lastTapRef.current = { t: now, x: pageX, y: pageY };
+        gestureStateRef.current = photoGestureReducer(gestureStateRef.current, { type: "start" });
+        syncGestureDebug();
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        const touches = evt.nativeEvent.touches;
+        const n = touches ? touches.length : 1;
+        let pinchDist: number | undefined;
+        if (touches && touches.length >= 2) {
+          const [t0, t1] = touches;
+          pinchDist = Math.hypot(t1.pageX - t0.pageX, t1.pageY - t0.pageY);
+        }
+        const { w: viewW, h: viewH } = previewLayoutRef.current;
+        gestureStateRef.current = photoGestureReducer(gestureStateRef.current, {
+          type: "move", touches: n, dx: gestureState.dx, dy: gestureState.dy, pinchDist, viewW, viewH,
+        });
+        const s = gestureStateRef.current;
+        if (pinchDist != null) {
+          liveScale.setValue(s.baseZoom > 0 ? s.zoom / s.baseZoom : 1);
+        } else {
+          livePan.setValue({ x: s.dx, y: s.dy });
+        }
+        syncGestureDebug();
+      },
+      onPanResponderRelease: () => {
+        gestureStateRef.current = photoGestureReducer(gestureStateRef.current, { type: "end" });
+        const s = gestureStateRef.current;
+        commitPhotoAdjust(s.fx, s.fy, s.zoom);
+        livePan.setValue({ x: 0, y: 0 });
+        liveScale.setValue(1);
+        syncGestureDebug();
+      },
+      onPanResponderTerminate: () => {
+        gestureStateRef.current = photoGestureReducer(gestureStateRef.current, { type: "end" });
+        livePan.setValue({ x: 0, y: 0 });
+        liveScale.setValue(1);
+        syncGestureDebug();
+      },
+    });
+  }
+  const photoPanResponder = panResponderRef.current;
 
+  // SESSION-ONLY (v5, founder device bug: a restored accent silently
+  // overrode the verdict color) - a picked swatch applies to hero+stamp
+  // only until the Studio closes, never written to AsyncStorage.
   function chooseAccent(hexVal: string | null) {
     setControls((prev) => csSetAccent(prev, hexVal));
     setHexOpen(false);
     setHexError(false);
-    persistPrefs({ accent: hexVal });
   }
 
   function openHexEditor() {
@@ -663,13 +729,13 @@ export default function ShareStudio(props: ShareStudioProps) {
 
         {/* PREVIEW — flex:1, contain, floor of 38% of screen height.
             onLayout measures the real pixel box the pan-delta math divides
-            by (panDeltaToFocus) - must be the box the user is actually
-            dragging across, not the fixed FORMAT_SIZES export dimensions
-            (those are the server's 1080-wide output, a different scale
-            entirely). {...photoPanResponder.panHandlers} is only ever
-            ACTIVE (onStartShouldSetPanResponder) in Fill mode - Whole
-            mode's preview ignores every touch, same as before this change. */}
-        <View style={st.previewArea} onLayout={(e) => setPreviewLayout({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })} {...photoPanResponder.panHandlers}>
+            by - must be the box the user is actually dragging across, not
+            the fixed FORMAT_SIZES export dimensions (those are the
+            server's 1080-wide output, a different scale entirely). A thin
+            lime frame (st.previewFillFrame) shows only while Fill is
+            active, so there's always a visible cue the mode is on (v5,
+            item 4c), independent of whether a gesture is in progress. */}
+        <View style={st.previewArea} onLayout={(e) => setPreviewLayout({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
           {previewUri ? (
             <Animated.Image
               source={{ uri: previewUri }}
@@ -682,6 +748,7 @@ export default function ShareStudio(props: ShareStudioProps) {
           ) : (
             <View style={st.previewPlaceholder} />
           )}
+          {photoMode === "fill" ? <View style={st.previewFillFrame} pointerEvents="none" /> : null}
           {loading ? (
             <>
               <PreviewShimmer />
@@ -702,12 +769,32 @@ export default function ShareStudio(props: ShareStudioProps) {
               </TouchableOpacity>
             </View>
           ) : null}
+          {/* GESTURE OVERLAY (v5, item 4a) — an absolutely-positioned,
+              full-size, transparent View ABOVE the preview image/placeholder
+              (zIndex high) is the ONLY thing that ever claims this touch -
+              a plain sibling, never nested inside a ScrollView/Pressable/
+              TouchableWithoutFeedback that could steal it first. pointerEvents
+              is "box-only" (this view is hit-testable, no children to skip)
+              ONLY while Fill is active AND there's no fetch error - "none"
+              otherwise, so Whole mode's preview ignores touches entirely
+              (item 4d: "the layer is inactive") and a failed-fetch's Retry
+              button (rendered in the errorBox above, visually under this
+              overlay) stays tappable instead of the gesture layer
+              swallowing that tap. */}
+          <View
+            style={st.gestureOverlay}
+            pointerEvents={photoMode === "fill" && !fetchError ? "box-only" : "none"}
+            {...photoPanResponder.panHandlers}
+          />
         </View>
         {isOwner ? (
-          <Text style={st.renderReadout} numberOfLines={2}>
+          <Text style={st.renderReadout} numberOfLines={3}>
             render {renderMs ?? "—"} ms · {renderStatus}
             {debugBytes != null ? ` · export ${FORMAT_SIZES[format].w}×${FORMAT_SIZES[format].h} · ${formatFileSize(debugBytes)}` : ""}
-            {` · verdict=${debugVerdict} tone=${debugTone} src=${entryPoint ?? "unknown"}`}
+            {` · verdict=${debugVerdict} tone=${debugTone} accent=${accent ?? "auto"} src=${entryPoint ?? "unknown"}`}
+            {photoMode === "fill"
+              ? ` · gesture: ${gestureDebug.phase} touches=${gestureDebug.touches} dx=${gestureDebug.dx.toFixed(0)} dy=${gestureDebug.dy.toFixed(0)} scale=${gestureDebug.scale.toFixed(2)} fx=${gestureDebug.fx.toFixed(2)} fy=${gestureDebug.fy.toFixed(2)} zoom=${gestureDebug.zoom.toFixed(2)}`
+              : ""}
           </Text>
         ) : null}
 
@@ -790,7 +877,10 @@ export default function ShareStudio(props: ShareStudioProps) {
               {/* ARROWS/+-/ZOOM BUTTONS REMOVED (v4, item 3) - replaced by
                   direct manipulation on the preview itself (pan to move,
                   pinch to zoom, double-tap to reset - see photoPanResponder
-                  above). Whole|Fill toggle and Reset stay here per spec. */}
+                  above). Whole|Fill toggle and Reset stay here per spec.
+                  WHOLE-MODE HINT (v5, item 4d) - the gesture overlay is
+                  inactive in Whole mode, so this is the only on-screen cue
+                  telling the user why dragging the preview does nothing. */}
               {photoMode === "fill" ? (
                 <>
                   <Text style={st.photoHint} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
@@ -800,7 +890,11 @@ export default function ShareStudio(props: ShareStudioProps) {
                     <Text style={st.resetBtnText} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Reset</Text>
                   </TouchableOpacity>
                 </>
-              ) : null}
+              ) : (
+                <Text style={st.photoHint} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
+                  Whole photo — switch to Fill to move or zoom
+                </Text>
+              )}
             </ScrollView>
           ) : null}
 
@@ -990,6 +1084,16 @@ const st = StyleSheet.create({
   previewImgDimmed: { opacity: 0.45 },
   previewPlaceholder: { width: "100%", height: "100%", borderRadius: 12, backgroundColor: C.surfaceHigh },
   previewSpinner: { position: "absolute" },
+  // GESTURE OVERLAY (v5, item 4a) - absolutely positioned, covers the whole
+  // previewArea, sits above the image/placeholder/error box (zIndex), and
+  // is the ONLY view photoPanResponder.panHandlers is ever attached to -
+  // never the previewArea container itself (that was v4's approach; this
+  // is the explicit "separate layer above the image" fix). pointerEvents
+  // is set inline per-mode (box-only in active Fill, none otherwise).
+  gestureOverlay: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, zIndex: 50 },
+  // Thin lime frame, visible only while Fill is selected - a constant cue
+  // (independent of any gesture in progress) that the mode is on.
+  previewFillFrame: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, borderRadius: 12, borderWidth: 1.5, borderColor: C.green },
   previewShimmer: { position: "absolute", top: 8, left: PREVIEW_PAD_H + 8, right: PREVIEW_PAD_H + 8, height: 3, borderRadius: 2, backgroundColor: C.green },
   errorBox: { position: "absolute", left: 16, right: 16, bottom: 10, backgroundColor: C.surface, borderWidth: 1, borderColor: C.red + "50", borderRadius: 12, padding: 14 },
   errorTitle: { color: C.red, fontSize: 14, fontWeight: "800", marginBottom: 4 },
@@ -1005,7 +1109,11 @@ const st = StyleSheet.create({
   // both screen edges. paddingHorizontal keeps it inside the safe width;
   // numberOfLines={2} (set at the JSX call site) lets it wrap instead of
   // clipping once the verdict/tone/src suffix pushes it past one line.
-  renderReadout: { color: C.text4, fontSize: 11, fontFamily: "monospace" as any, textAlign: "center", paddingVertical: 4, paddingHorizontal: 12 },
+  // fontSize 10 (not 11) + numberOfLines={3} at the JSX call site (v5, item
+  // 5): the full `src=<entryPoint>` suffix used to get ellipsized on a
+  // narrow screen - owner-only readout, never shown to real users, so
+  // shrinking it slightly to fit 3 lines costs nothing real users see.
+  renderReadout: { color: C.text4, fontSize: 10, fontFamily: "monospace" as any, textAlign: "center", paddingVertical: 4, paddingHorizontal: 12 },
 
   // TAB STRIP — four equal tabs, each >=44pt tall.
   tabStrip: { flexDirection: "row", borderTopWidth: 1, borderTopColor: C.border, paddingHorizontal: 16 },

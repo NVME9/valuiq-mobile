@@ -16,9 +16,16 @@ export interface StudioPrefs {
   // DEFAULT_PHOTO_MODE, same "missing key = fresh-install default" rule
   // `hook` already follows above.
   photoMode?: PhotoMode;
-  // Accent swatch hex, or null/absent for "Auto" (the card's own
-  // verdict-derived color, sending no `accent` field at all) - the default.
-  accent?: string | null;
+  // ACCENT IS DELIBERATELY NEVER PERSISTED (v5, founder device bug): a lime
+  // swatch picked in an earlier session used to be restored on the next
+  // open and silently override the verdict color - a PASS/red card could
+  // render with a LIME hero because a stale saved accent outlived the scan
+  // that picked it. Every open now starts at Auto (the tone color); within
+  // a session a picked swatch applies to hero+stamp only until the Studio
+  // closes. No `accent` field exists on this interface any more, and
+  // loadStudioPrefs/saveStudioPrefs never read or write one - even a legacy
+  // saved blob that still has an `accent` key from before this fix is
+  // simply never looked at.
 }
 
 const STORAGE_KEY = "@valuiq_share_studio_prefs";
@@ -48,11 +55,12 @@ export async function loadStudioPrefs(fallbackDisplayName?: string | null): Prom
         handle: typeof parsed?.handle === "string" ? parsed.handle : defaultHandle(fallbackDisplayName),
         hook: hasHook ? (typeof parsed.hook === "string" ? parsed.hook : null) : DEFAULT_HOOK,
         photoMode: parsed?.photoMode === "fill" ? "fill" : DEFAULT_PHOTO_MODE,
-        accent: typeof parsed?.accent === "string" ? parsed.accent : null,
+        // `parsed.accent` is intentionally never read, even when a legacy
+        // saved blob still carries one - see this file's header comment.
       };
     }
   } catch {}
-  return { handleEnabled: false, handle: defaultHandle(fallbackDisplayName), hook: DEFAULT_HOOK, photoMode: DEFAULT_PHOTO_MODE, accent: null };
+  return { handleEnabled: false, handle: defaultHandle(fallbackDisplayName), hook: DEFAULT_HOOK, photoMode: DEFAULT_PHOTO_MODE };
 }
 
 export async function saveStudioPrefs(prefs: StudioPrefs): Promise<void> {

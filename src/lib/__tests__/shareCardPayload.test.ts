@@ -144,8 +144,13 @@ describe("buildShareVideoPayload - Make video", () => {
   });
 });
 
+// WIN-VARIANT STAMP/TONE (v5, founder device bug: a real LOSS - Mainstays
+// 21.5qt canner, paid 19.62/sold 5/profit -15.28 - still stamped "SOLD" and
+// read as a win). Three-way on profit's sign: a real loss is the only case
+// that stamps "LOSS"/reads red - break-even is neutral (treated as a win:
+// "SOLD"/lime/"BREAK EVEN"), never dressed up OR down.
 describe("buildShareCardPayload - win variant", () => {
-  test("win with profit: lime tone, SOLD stamp, 'PROFIT AFTER FEES' caption, signed hero", () => {
+  test("win with profit (has cents): lime tone, SOLD stamp, 'PROFIT AFTER FEES' caption, signed hero with cents", () => {
     const p = buildShareCardPayload({
       variant: "win", format: "story", itemName: "Vintage Jacket",
       boughtPrice: 20, soldPrice: 65, profit: 45,
@@ -156,26 +161,44 @@ describe("buildShareCardPayload - win variant", () => {
     expect(p.hero).toBe("+$45");
     expect(p.paid).toBe("$20");
     expect(p.sold).toBe("$65");
+
+    const withCents = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Vintage Jacket",
+      boughtPrice: 7.60, soldPrice: 40, profit: 32.40,
+    });
+    expect(withCents.tone).toBe("lime");
+    expect(withCents.stamp).toBe("SOLD");
+    expect(withCents.hero).toBe("+$32.40");
   });
 
-  test("win with a loss: negative hero, red tone, SOLD stamp, 'LOSS AFTER FEES' caption", () => {
+  test("win with a loss (has cents): negative hero, red tone, LOSS stamp, 'LOSS AFTER FEES' caption - MEASURED fixture: Mainstays 21.5qt canner, paid 19.62/sold 5/profit -15.28", () => {
     const p = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Mainstays 21.5 Quart Stainless Steel Canner",
+      boughtPrice: 19.62, soldPrice: 5, profit: -15.28,
+    });
+    expect(p.tone).toBe("red");
+    expect(p.stamp).toBe("LOSS");
+    expect(p.caption).toBe("LOSS AFTER FEES");
+    expect(p.hero).toBe("-$15.28");
+
+    const wholeDollarLoss = buildShareCardPayload({
       variant: "win", format: "story", itemName: "Vintage Jacket",
       boughtPrice: 65, soldPrice: 20, profit: -45,
     });
-    expect(p.tone).toBe("red");
-    expect(p.stamp).toBe("SOLD");
-    expect(p.caption).toBe("LOSS AFTER FEES");
-    expect(p.hero).toBe("-$45");
+    expect(wholeDollarLoss.tone).toBe("red");
+    expect(wholeDollarLoss.stamp).toBe("LOSS");
+    expect(wholeDollarLoss.caption).toBe("LOSS AFTER FEES");
+    expect(wholeDollarLoss.hero).toBe("-$45");
   });
 
-  test("win break-even (profit exactly zero): red tone, 'LOSS AFTER FEES' caption, unsigned zero hero", () => {
+  test("win break-even (profit exactly zero): treated as neutral/profit, not a loss - lime tone, SOLD stamp, 'BREAK EVEN' caption, unsigned zero hero", () => {
     const p = buildShareCardPayload({
       variant: "win", format: "story", itemName: "Vintage Jacket",
       boughtPrice: 20, soldPrice: 20, profit: 0,
     });
-    expect(p.tone).toBe("red");
-    expect(p.caption).toBe("LOSS AFTER FEES");
+    expect(p.tone).toBe("lime");
+    expect(p.stamp).toBe("SOLD");
+    expect(p.caption).toBe("BREAK EVEN");
     expect(p.hero).toBe("$0");
   });
 });
@@ -285,6 +308,71 @@ describe("heroLabelForShareCard / buildShareCardPayload's heroLabel field", () =
       boughtPrice: 20, soldPrice: 65, profit: 45,
     });
     expect(win.heroLabel).toBeUndefined();
+  });
+});
+
+// SERVER ROOT CAUSE (v5, founder device bug: a PASS Columbia-hat card still
+// read "PAID $13 - SELLS FOR $20"): the server's label line
+// (deal-ai-pro/lib/shareCard/renderCard.ts:326) never reads `heroLabel` at
+// all - it derives its own "WORTH ABOUT"/"SELLS FOR" tail purely from the
+// boolean `estimate` field (app/api/share-card/route.ts:72's
+// `body?.estimate === true`), so sending `heroLabel` alone (v4's fix) was a
+// no-op. These tests assert on the BUILT PAYLOAD's `estimate` field - the
+// one the server actually reads - for every fixture the founder's bug
+// report named, not just on the heroLabelForShareCard helper in isolation.
+describe("buildShareCardPayload - the `estimate` field the server's label line actually reads", () => {
+  test("PASS (sold-backed, not a product-level estimate): estimate:true so the server's label shows WORTH ABOUT, no ESTIMATE caption", () => {
+    const p = buildShareCardPayload({
+      variant: "scan", format: "story", itemName: "Columbia Hat",
+      paidPrice: 13, heroSellPrice: 20, verdict: "PASS", isEstimate: false,
+    });
+    expect(p.estimate).toBe(true);
+    expect(p.caption).toBeUndefined();
+  });
+
+  test("THIN (sold-backed): estimate:true, no ESTIMATE caption", () => {
+    const p = buildShareCardPayload({
+      variant: "scan", format: "story", itemName: "Item",
+      paidPrice: 10, heroSellPrice: 14, verdict: "THIN", isEstimate: false,
+    });
+    expect(p.estimate).toBe(true);
+    expect(p.caption).toBeUndefined();
+  });
+
+  test("CHECK ITEM (sold-backed): estimate:true, no ESTIMATE caption", () => {
+    const p = buildShareCardPayload({
+      variant: "scan", format: "story", itemName: "Item",
+      paidPrice: 10, heroSellPrice: 18, verdict: "CHECK ITEM", isEstimate: false,
+    });
+    expect(p.estimate).toBe(true);
+    expect(p.caption).toBeUndefined();
+  });
+
+  test("WORTH A LOOK, sold-backed: estimate omitted entirely so the server's label shows SELLS FOR", () => {
+    const p = buildShareCardPayload({
+      variant: "scan", format: "story", itemName: "Item",
+      paidPrice: 20, heroSellPrice: 65, verdict: "WORTH A LOOK", isEstimate: false,
+    });
+    expect(p.estimate).toBeUndefined();
+    expect(p.caption).toBeUndefined();
+  });
+
+  test("SOLID, sold-backed: estimate omitted entirely so the server's label shows SELLS FOR", () => {
+    const p = buildShareCardPayload({
+      variant: "scan", format: "story", itemName: "Item",
+      paidPrice: 20, heroSellPrice: 65, verdict: "SOLID", isEstimate: false,
+    });
+    expect(p.estimate).toBeUndefined();
+    expect(p.caption).toBeUndefined();
+  });
+
+  test("a real product-level estimate (isEstimate:true) still sends both estimate:true AND the ESTIMATE caption, regardless of verdict", () => {
+    const p = buildShareCardPayload({
+      variant: "scan", format: "story", itemName: "Item",
+      paidPrice: 20, heroSellPrice: 65, verdict: "SOLID", isEstimate: true,
+    });
+    expect(p.estimate).toBe(true);
+    expect(p.caption).toBe("ESTIMATE");
   });
 });
 
