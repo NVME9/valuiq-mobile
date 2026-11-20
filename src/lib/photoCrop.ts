@@ -29,6 +29,12 @@ export const PHOTO_BOX: Record<StudioFormat, { w: number; h: number }> = {
 export const CROP_ZOOM_MIN = 1;
 export const CROP_ZOOM_MAX = 3;
 
+// Margin (screen points) kept clear around the frame on every edge, inside
+// whatever stage area the crop screen measures via its own onLayout - the
+// SAME 28pt margin v6/v7's fallbackFrameSize used, just centralized here so
+// it's one pure, testable number instead of a component-local constant.
+export const FRAME_MARGIN = 28;
+
 export interface CropRect {
   left: number;
   top: number;
@@ -88,6 +94,29 @@ export function computeCropRect(
   left = Math.max(0, Math.min(left, iw - width));
   top = Math.max(0, Math.min(top, ih - height));
   return { left, top, width, height };
+}
+
+// Centers a box of the given ASPECT ratio inside a (stageW x stageH) area,
+// shrunk by `margin` on every edge - v8 ROOT-CAUSE FIX for the founder
+// screenshot (frame drawn at x=0, vertically centered, NOT at the computed
+// x=28/y=104 the old debug readout claimed): the arithmetic below is
+// line-for-line what v6/v7's fallbackFrameSize already computed (it was
+// never wrong - the founder's own numbers prove it: a 430x932 screen minus
+// header/footer/margin yields exactly left=28/width=374/height=299 for the
+// story box), but the old component never actually POSITIONED the frame at
+// that rect - it handed width/height to a flex row (dimSide/frameRow/dim
+// Views) and trusted flexbox to center it, which is exactly the "views are
+// not position:'absolute' inside a position:'relative' container" bug.
+// This function now returns left/top too, so PhotoCropScreen.tsx can set
+// them directly as style.left/style.top on an absolutely-positioned frame
+// View instead of hoping flex centering lines up with this math.
+export function computeFrameRect(stageW: number, stageH: number, boxAspect: number, margin: number = FRAME_MARGIN): CropRect {
+  if (!(stageW > 0) || !(stageH > 0) || !(boxAspect > 0)) return { left: 0, top: 0, width: 0, height: 0 };
+  const availW = Math.max(0, stageW - margin * 2);
+  const availH = Math.max(0, stageH - margin * 2);
+  const width = availW / availH > boxAspect ? availH * boxAspect : availW;
+  const height = width / boxAspect;
+  return { left: (stageW - width) / 2, top: (stageH - height) / 2, width, height };
 }
 
 // On-screen scale at zoom:1 (fx=fy=0.5) at which the photo exactly "covers"

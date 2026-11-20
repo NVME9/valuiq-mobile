@@ -38,6 +38,47 @@ function getImageSize(uri: string): Promise<{ width: number; height: number }> {
   });
 }
 
+export interface NormalizedPhoto {
+  uri: string;
+  width: number;
+  height: number;
+}
+
+// Writes a data: URI's base64 payload to a cache file FIRST (v8, item 1) -
+// manipulateAsync technically accepts a data: URI directly, but a full-
+// resolution photo's base64 string can run into native-bridge size trouble
+// on some devices/platforms, so this app never hands manipulateAsync a raw
+// data: URI when it can hand it a short file:// path instead. No-op for
+// any URI that isn't a data: URI already.
+async function materializeDataUri(uri: string): Promise<string> {
+  if (!uri.startsWith("data:") || !FileSystem) return uri;
+  const match = /^data:([^;,]+);base64,([\s\S]*)$/.exec(uri);
+  if (!match) return uri;
+  const ext = /png/i.test(match[1]) ? "png" : "jpg";
+  const file = new (FileSystem as any).File((FileSystem as any).Paths.cache, `share-photo-src-${Date.now()}.${ext}`);
+  file.create({ overwrite: true, intermediates: true });
+  await file.write(match[2], { encoding: "base64" });
+  return file.uri;
+}
+
+// NORMALIZE ORIENTATION ONCE (v8, item 1) - the root-cause fix for the
+// founder's crop-screen bug (natural=667x1280 reported for a photo painted
+// LANDSCAPE): a zero-op manipulateAsync pass bakes the photo's EXIF
+// orientation into its actual pixels, so its RETURNED width/height always
+// agree with how it's painted - no probe (Image.getSize, <Image>'s onLoad)
+// can disagree with that ever again, because nothing downstream reads raw
+// sensor pixels anymore. The caller (ShareStudio.tsx) threads this single
+// result into BOTH the crop screen (as its `natural` prop) and the final
+// share payload (via resolveSharePhoto's `normalized` param below), so the
+// server's own sharp(...).rotate() has nothing left to do.
+export async function normalizePhotoOrientation(uri: string): Promise<NormalizedPhoto> {
+  const srcUri = await materializeDataUri(uri);
+  const out = await ImageManipulator.manipulateAsync(srcUri, [], {
+    compress: 0.92, format: ImageManipulator.SaveFormat.JPEG,
+  });
+  return { uri: out.uri, width: out.width, height: out.height };
+}
+
 // Downscales ONLY when the photo's longest edge actually exceeds the
 // budget (never upscales a smaller photo) - probes the real dimensions
 // first (Image.getSize works on a data: URI same as a file one) so a
@@ -58,6 +99,29 @@ async function downscalePhoto(base64Raw: string): Promise<string> {
   return out.base64;
 }
 
+// Same downscale budget as downscalePhoto above, but starting from an
+// already-normalized {uri, width, height} (v8, item 1) - no Image.getSize
+// probe needed, since the caller's width/height ALREADY agree with how the
+// photo paints (that's the whole point of normalizePhotoOrientation).
+async function downscaleFromNormalized(uri: string, width: number, height: number): Promise<string> {
+  const longEdge = Math.max(width, height);
+  const actions = longEdge > MAX_LONG_EDGE
+    ? [width >= height ? { resize: { width: MAX_LONG_EDGE } } : { resize: { height: MAX_LONG_EDGE } }]
+    : [];
+  const out = await ImageManipulator.manipulateAsync(uri, actions, {
+    compress: JPEG_QUALITY, format: ImageManipulator.SaveFormat.JPEG, base64: true,
+  });
+  if (!out.base64) throw new Error("manipulateAsync produced no base64");
+  return out.base64;
+}
+
+// Shared with ShareStudio.tsx so it knows NOT to bother normalizing a photo
+// that's already a remote asset on our own Storage host (no local pixels to
+// normalize - see resolveSharePhoto's {url} passthrough branch below).
+export function isRemoteShareUrl(uri: string | null): boolean {
+  return !!uri && /^https?:\/\//i.test(uri) && uri.startsWith(`${SUPABASE_URL}/storage/`);
+}
+
 export type SharePhoto = { base64: string } | { url: string };
 
 export type ResolvePhotoResult = { photo: SharePhoto } | { error: string };
@@ -69,9 +133,26 @@ export type ResolvePhotoResult = { photo: SharePhoto } | { error: string };
 // API contract; any other remote URL has no local bytes to read, so it's
 // treated as "no photo" rather than fetched (no new upload/download
 // plumbing for a case this app doesn't actually produce today).
-export async function resolveSharePhoto(photoBase64: string | null, photoUri: string | null): Promise<ResolvePhotoResult> {
-  if (photoUri && /^https?:\/\//i.test(photoUri) && photoUri.startsWith(`${SUPABASE_URL}/storage/`)) {
-    return { photo: { url: photoUri } };
+export async function resolveSharePhoto(
+  photoBase64: string | null, photoUri: string | null,
+  // v8, item 1: when the caller already normalized the photo's orientation
+  // (ShareStudio.tsx's normalizedPhoto state), use ITS uri/width/height
+  // directly instead of re-deriving raw base64 and re-probing size below -
+  // this is what makes "editor's natural size == payload's natural size"
+  // true, so the server's sharp(...).rotate() is a no-op. Falls through to
+  // the legacy raw-bytes path if omitted, or if normalization itself fails.
+  normalized?: NormalizedPhoto | null
+): Promise<ResolvePhotoResult> {
+  if (isRemoteShareUrl(photoUri)) {
+    return { photo: { url: photoUri as string } };
+  }
+  if (normalized) {
+    try {
+      const base64 = await downscaleFromNormalized(normalized.uri, normalized.width, normalized.height);
+      return { photo: { base64 } };
+    } catch {
+      // fall through to the legacy raw-bytes path below as a last resort
+    }
   }
   const raw = photoBase64
     ? stripDataUriPrefix(photoBase64)

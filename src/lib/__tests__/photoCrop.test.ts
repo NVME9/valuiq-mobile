@@ -9,6 +9,7 @@ import {
   computeCropRect, coverScale, focusBounds, clampFocusToBounds,
   dragDeltaToFocus, pinchScaleToZoom, clampZoom, clampFocus, cropDisplayRect,
   initCropGestureState, cropGestureReducer, CropGestureState, PHOTO_BOX,
+  computeFrameRect, FRAME_MARGIN, CROP_ZOOM_MAX,
 } from "../photoCrop";
 
 // Standalone reference copy of deal-ai-pro's lib/shareCard/renderCard.ts
@@ -182,6 +183,63 @@ describe("clampZoom / clampFocus", () => {
     expect(clampFocus(-1)).toBe(0);
     expect(clampFocus(2)).toBe(1);
     expect(clampFocus(0.3)).toBe(0.3);
+  });
+});
+
+// v8 FOUNDER-DEVICE FIXTURE (owner readout:
+// src=data:image/jpeg (210KB) natural=667x1280 container=430x932
+// frame=28,104,374,299 imageRect=0,-224,374,748 - frame was drawn at x=0,
+// vertically centered, NOT at the computed x=28/y=104; the photo was a hat
+// painted LANDSCAPE while natural read 667x1280 PORTRAIT). This suite pins
+// down the exact numbers from that fixture, with the photo's natural size
+// corrected to how it's actually PAINTED (1280x667 landscape - the fix in
+// PhotoCropScreen.tsx/shareCardApi.ts is making the natural size always
+// agree with that, via expo-image-manipulator baking in EXIF orientation
+// once, instead of a raw, orientation-blind pixel probe).
+describe("v8 fixture - container 430x932, upright photo 1280x667, story frame 800:640", () => {
+  const STAGE_W = 430;
+  const STAGE_H = 932 - 76 - 150; // SCREEN_H - HEADER_H - FOOTER_H, same as v7's fallbackFrameSize
+  const BOX_ASPECT = PHOTO_BOX.story.w / PHOTO_BOX.story.h; // 800/640 = 1.25
+  const IW = 1280, IH = 667; // corrected (landscape) natural size
+
+  test("frame is centered horizontally with left=28, matching the founder's own readout", () => {
+    const rect = computeFrameRect(STAGE_W, STAGE_H, BOX_ASPECT, FRAME_MARGIN);
+    expect(rect.left).toBeCloseTo(28, 5);
+    expect(rect.width).toBeCloseTo(374, 1);
+    expect(rect.height).toBeCloseTo(299.2, 1);
+  });
+
+  test("cover scale at zoom 1 covers the computed frame with no gap on any edge", () => {
+    const rect = computeFrameRect(STAGE_W, STAGE_H, BOX_ASPECT, FRAME_MARGIN);
+    const r = cropDisplayRect(0.5, 0.5, 1, IW, IH, rect.width, rect.height);
+    expect(r.left).toBeLessThanOrEqual(0.01);
+    expect(r.top).toBeLessThanOrEqual(0.01);
+    expect(r.left + r.width).toBeGreaterThanOrEqual(rect.width - 0.01);
+    expect(r.top + r.height).toBeGreaterThanOrEqual(rect.height - 0.01);
+  });
+
+  test("pan clamps to the gap-free bounds for this exact frame/photo pair", () => {
+    const rect = computeFrameRect(STAGE_W, STAGE_H, BOX_ASPECT, FRAME_MARGIN);
+    const { fx, fy } = dragDeltaToFocus(0.5, 0.5, 100000, 100000, IW, IH, rect.width, rect.height, 1.5);
+    const bounds = focusBounds(IW, IH, rect.width, rect.height, 1.5);
+    expect(fx).toBeCloseTo(bounds.minFx, 3);
+    expect(fy).toBeCloseTo(bounds.minFy, 3);
+  });
+
+  test("pinch clamps zoom to [1, 3] for this exact frame/photo pair", () => {
+    expect(pinchScaleToZoom(1, 10)).toBe(CROP_ZOOM_MAX);
+    expect(pinchScaleToZoom(3, 0.01)).toBe(1);
+  });
+
+  test("reset snaps straight back to fx=fy=0.5/zoom=1 regardless of in-progress gesture", () => {
+    const rect = computeFrameRect(STAGE_W, STAGE_H, BOX_ASPECT, FRAME_MARGIN);
+    let s: CropGestureState = initCropGestureState(0.5, 0.5, 1);
+    s = cropGestureReducer(s, { type: "start" });
+    s = cropGestureReducer(s, { type: "move", touches: 2, dx: 0, dy: 0, pinchDist: 100, iw: IW, ih: IH, frameW: rect.width, frameH: rect.height });
+    s = cropGestureReducer(s, { type: "move", touches: 2, dx: 0, dy: 0, pinchDist: 300, iw: IW, ih: IH, frameW: rect.width, frameH: rect.height });
+    expect(s.zoom).toBeGreaterThan(1);
+    s = cropGestureReducer(s, { type: "reset", fx: 0.5, fy: 0.5, zoom: 1 });
+    expect(s).toEqual(initCropGestureState(0.5, 0.5, 1));
   });
 });
 

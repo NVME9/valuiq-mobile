@@ -53,7 +53,7 @@ import {
 import { PHOTO_BOX } from "../lib/photoCrop";
 import PhotoCropScreen from "./PhotoCropScreen";
 import { buildShareCardPayload, buildShareVideoPayload, ShareCardTone, stampForHeroVerdict, toneForHeroVerdict } from "../lib/shareCardPayload";
-import { resolveSharePhoto, fetchShareCardPng } from "../lib/shareCardApi";
+import { resolveSharePhoto, fetchShareCardPng, normalizePhotoOrientation, isRemoteShareUrl, NormalizedPhoto } from "../lib/shareCardApi";
 import { fetchShareVideoMp4 } from "../lib/shareVideoApi";
 import { loadStudioPrefs, saveStudioPrefs, StudioPrefs } from "../lib/studioPrefs";
 import { logEvent } from "../lib/api";
@@ -64,6 +64,13 @@ import { HeroVerdict } from "../lib/outcomeTier";
 // this app's share code uses, so a missing module can't crash app launch.
 let Sharing: typeof import("expo-sharing") | null = null;
 try { Sharing = require("expo-sharing"); } catch { Sharing = null; }
+
+// CUT OUT (v8, item 4) - the control is hidden entirely while this is
+// false: the server's 501 cutout_unavailable gate, cutoutAvailable state,
+// and the "Coming soon" disabled-chip styling all stay in the code (still
+// reachable the instant this flips back to true), but no "Cut out" chip -
+// disabled or not - is ever shown to a real user.
+const FEATURE_CUTOUT = false;
 
 const { height: SCREEN_H } = Dimensions.get("window");
 // Preview is a FLEXIBLE box (flex:1, contain) with a floor of 38% of screen
@@ -237,6 +244,30 @@ export default function ShareStudio(props: ShareStudioProps) {
   // mid-gesture).
   const [cropOpen, setCropOpen] = useState(false);
 
+  // NORMALIZED PHOTO (v8, item 1) - computed ONCE per raw photo, fed as the
+  // single source of truth into BOTH the crop screen (`natural` prop) and
+  // the share payload (resolveSharePhoto's `normalized` param) - see
+  // shareCardApi.ts's normalizePhotoOrientation header comment for the bug
+  // this fixes (a landscape-painted photo reading natural=667x1280
+  // portrait). null while normalization hasn't finished yet (or there's no
+  // local photo to normalize - a History re-share by remote URL has no
+  // local pixels, so it's left null and every caller below falls back to
+  // its own legacy path for that case, same as before this feature existed).
+  const [normalizedPhoto, setNormalizedPhoto] = useState<NormalizedPhoto | null>(null);
+  useEffect(() => {
+    const raw = rawPhotoUri(photoBase64, photoUri);
+    if (!raw || isRemoteShareUrl(raw)) {
+      setNormalizedPhoto(null);
+      return;
+    }
+    let cancelled = false;
+    setNormalizedPhoto(null);
+    normalizePhotoOrientation(raw)
+      .then((n) => { if (!cancelled) setNormalizedPhoto(n); })
+      .catch(() => { if (!cancelled) setNormalizedPhoto(null); });
+    return () => { cancelled = true; };
+  }, [photoBase64, photoUri]);
+
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeqRef = useRef(0);
@@ -324,7 +355,7 @@ export default function ShareStudio(props: ShareStudioProps) {
     // Downscale happens here too (expo-image-manipulator, async) - a stale
     // request can still be superseded while this is in flight, same as the
     // network fetch below.
-    const resolved = await resolveSharePhoto(photoBase64, photoUri ?? null);
+    const resolved = await resolveSharePhoto(photoBase64, photoUri ?? null, normalizedPhoto);
     if (seq !== requestSeqRef.current) return null; // superseded while resolving the photo
 
     if ("error" in resolved) {
@@ -425,7 +456,7 @@ export default function ShareStudio(props: ShareStudioProps) {
   }, [
     visible, format, hook, handleEnabled, handle, hidePrice, photoMode, zoom, fx, fy, accent,
     cutout, photoBorder, bgStyle, cutoutAvailable,
-    scanId, itemName, photoBase64, photoUri, paidPrice, sellPrice, profitConfidence,
+    scanId, itemName, photoBase64, photoUri, normalizedPhoto, paidPrice, sellPrice, profitConfidence,
     heroVerdict, toneOverride, winData,
   ]);
 
@@ -611,7 +642,7 @@ export default function ShareStudio(props: ShareStudioProps) {
     setVideoState("making");
     setVideoError(null);
     try {
-      const resolved = await resolveSharePhoto(photoBase64, photoUri ?? null);
+      const resolved = await resolveSharePhoto(photoBase64, photoUri ?? null, normalizedPhoto);
       if ("error" in resolved) {
         setVideoState("failed");
         setVideoError({ ms: 0, message: resolved.error });
@@ -853,19 +884,23 @@ export default function ShareStudio(props: ShareStudioProps) {
                   <Text style={[st.chipText, st.chipTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Adjust</Text>
                 </TouchableOpacity>
               ) : null}
-              {/* CUT OUT (v7, item 3) - disables itself with a "Coming soon"
-                  hint the instant the server answers a request with 501
-                  cutout_unavailable (see runFetch), rather than letting the
-                  user keep tapping a toggle that can never succeed. */}
-              <TouchableOpacity
-                style={[st.chip, cutout && cutoutAvailable && st.chipActive, !cutoutAvailable && st.chipDisabled]}
-                onPress={toggleCutout}
-                disabled={!cutoutAvailable}
-              >
-                <Text style={[st.chipText, cutout && cutoutAvailable && st.chipTextActive, !cutoutAvailable && st.chipDisabledText]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
-                  {cutoutAvailable ? "Cut out" : "Cut out · Coming soon"}
-                </Text>
-              </TouchableOpacity>
+              {/* CUT OUT (v8, item 4) - hidden entirely behind FEATURE_CUTOUT
+                  (module scope, top of file). The 501 cutout_unavailable
+                  handling in runFetch and the "Coming soon" disabled chip
+                  styling both still exist below, unused while this is
+                  false, so flipping the flag is the only step needed once
+                  the feature actually ships. */}
+              {FEATURE_CUTOUT ? (
+                <TouchableOpacity
+                  style={[st.chip, cutout && cutoutAvailable && st.chipActive, !cutoutAvailable && st.chipDisabled]}
+                  onPress={toggleCutout}
+                  disabled={!cutoutAvailable}
+                >
+                  <Text style={[st.chipText, cutout && cutoutAvailable && st.chipTextActive, !cutoutAvailable && st.chipDisabledText]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
+                    {cutoutAvailable ? "Cut out" : "Cut out · Coming soon"}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity style={[st.chip, photoBorder && st.chipActive]} onPress={togglePhotoBorder}>
                 <Text style={[st.chipText, photoBorder && st.chipTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Border</Text>
               </TouchableOpacity>
@@ -1084,7 +1119,8 @@ export default function ShareStudio(props: ShareStudioProps) {
             user was mid-edit on, leaving the last COMMITTED crop in place. */}
         {cropOpen ? (
           <PhotoCropScreen
-            photoUri={rawPhotoUri(photoBase64, photoUri)}
+            photoUri={normalizedPhoto?.uri ?? rawPhotoUri(photoBase64, photoUri)}
+            natural={normalizedPhoto ? { w: normalizedPhoto.width, h: normalizedPhoto.height } : null}
             box={PHOTO_BOX[format]}
             initial={{ fx, fy, zoom }}
             isOwner={isOwner}
