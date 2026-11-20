@@ -57,6 +57,12 @@ import {
   cropDisplayRect, initCropGestureState, cropGestureReducer, CropGestureState,
   computeFrameRect, FRAME_MARGIN, clampZoom, clampFocusToBounds, CropRect,
 } from "../lib/photoCrop";
+import { MIN_NORMALIZED_EDGE_PX } from "../lib/shareCardApi";
+
+// OTA-SAFE IMPORT (same convention shareCardApi.ts uses) - only needed here
+// for the owner debug readout's file-size probe, never for real crop logic.
+let FileSystem: typeof import("expo-file-system") | null = null;
+try { FileSystem = require("expo-file-system"); } catch { FileSystem = null; }
 
 export interface PhotoCropScreenProps {
   photoUri: string | null;
@@ -69,6 +75,14 @@ export interface PhotoCropScreenProps {
   // own onLoad event, same as v6/v7.
   natural?: { w: number; h: number } | null;
   isOwner?: boolean;
+  // v9, requirement 1 ("payload=") - a label for whatever resolveSharePhoto
+  // resolved to on the last card render, shown in the owner readout next to
+  // this screen's own src=/natural= for a side-by-side repro.
+  payloadDebug?: string;
+  // v9, requirement 3 - wired to the error state's "Use original" button;
+  // omitted (no button rendered) for a caller that has no original to fall
+  // back to.
+  onUseOriginal?: () => void;
   onCancel: () => void;
   onDone: (adjust: { fx: number; fy: number; zoom: number }) => void;
 }
@@ -89,13 +103,61 @@ function describeUriSource(uri: string | null): string {
   return "unknown";
 }
 
-export default function PhotoCropScreen({ photoUri, box, initial, natural, isOwner, onCancel, onDone }: PhotoCropScreenProps) {
+// Owner-readout ONLY, requirement 1 - the uri's last 30 chars, so a repro
+// can tell two file:// cache paths apart at a glance without the whole uri.
+function last30(uri: string | null): string {
+  if (!uri) return "none";
+  return uri.length <= 30 ? uri : `…${uri.slice(-30)}`;
+}
+
+export default function PhotoCropScreen({
+  photoUri, box, initial, natural, isOwner, payloadDebug, onUseOriginal, onCancel, onDone,
+}: PhotoCropScreenProps) {
   const [loadedNatural, setLoadedNatural] = useState<{ w: number; h: number } | null>(null);
   const [loadError, setLoadError] = useState(false);
+  // DECODED size, from the <Image>'s own onLoad event - captured for EVERY
+  // load, even when `natural` was already supplied (unlike loadedNatural
+  // below, which is only a fallback). This is requirement 1's "decoded
+  // size reported by the rendered <Image> onLoad" AND requirement 3's tiny-
+  // decode check - both need to see what actually got painted, not just
+  // what the caller claimed it normalized to.
+  const [decodedSize, setDecodedSize] = useState<{ w: number; h: number } | null>(null);
+  // Actual on-disk byte size of `photoUri` - requirement 1. null for a
+  // data:/remote uri (no local file to stat) or while the probe is still
+  // running; never blocks rendering.
+  const [fileBytes, setFileBytes] = useState<number | null>(null);
+  // A NEW photoUri (e.g. the owner just tapped "Use original") deserves a
+  // fresh load attempt, not yesterday's error/decoded-size readout.
+  useEffect(() => {
+    setLoadError(false);
+    setDecodedSize(null);
+  }, [photoUri]);
+  useEffect(() => {
+    setFileBytes(null);
+    if (!photoUri) return;
+    if (photoUri.startsWith("data:")) {
+      setFileBytes(Math.floor((photoUri.length * 3) / 4));
+      return;
+    }
+    if (!FileSystem || !photoUri.startsWith("file://")) return;
+    try {
+      const size = (new (FileSystem as any).File(photoUri)).size;
+      if (typeof size === "number") setFileBytes(size);
+    } catch {
+      // owner-readout only - a failed stat just leaves fileBytes at null
+    }
+  }, [photoUri]);
   // Fallback natural size ONLY used when the caller hasn't normalized the
   // photo yet (see this file's header comment, item 2) - once `natural` is
   // passed in, the onLoad handler below never overwrites it.
   const effectiveNatural = natural ?? loadedNatural;
+  // v9, requirement 3 - a visible error state (readout + "Use original"),
+  // decoupled from `ready` below: `ready` only checks that SOME natural
+  // size and frame rect exist, which stays true even when the normalized
+  // photo's own self-reported dimensions are the bad data (see shareCardApi
+  // .ts's normalizePhotoOrientation header comment) - this instead looks at
+  // what the <Image> actually decoded, the one thing that can't lie.
+  const decodeFailed = loadError || (!!decodedSize && (decodedSize.w < MIN_NORMALIZED_EDGE_PX || decodedSize.h < MIN_NORMALIZED_EDGE_PX));
 
   const boxAspect = box.w / box.h;
 
@@ -291,25 +353,36 @@ export default function PhotoCropScreen({ photoUri, box, initial, natural, isOwn
                   source={{ uri: photoUri }}
                   resizeMode="cover"
                   onLoad={(e) => {
-                    if (natural) return; // already normalized upstream - never override
                     const src = e.nativeEvent?.source;
-                    if (src && src.width > 0 && src.height > 0) setLoadedNatural({ w: src.width, h: src.height });
+                    if (src && src.width > 0 && src.height > 0) {
+                      setDecodedSize({ w: src.width, h: src.height });
+                      if (!natural) setLoadedNatural({ w: src.width, h: src.height }); // already normalized upstream - never override
+                    }
                   }}
                   onError={() => setLoadError(true)}
                   style={{
                     position: "absolute",
                     left: aLeft, top: aTop, width: aWidth, height: aHeight,
-                    opacity: ready ? 1 : 0,
+                    opacity: ready && !decodeFailed ? 1 : 0,
                   }}
                 />
               ) : null}
-              {!ready ? (
+              {!ready && !decodeFailed ? (
                 <View style={st.loadingBox}>
-                  {loadError ? (
-                    <Text style={st.loadErrorText}>Couldn't load the photo.</Text>
-                  ) : (
-                    <ActivityIndicator color={C.green} />
-                  )}
+                  <ActivityIndicator color={C.green} />
+                </View>
+              ) : null}
+              {decodeFailed ? (
+                <View style={st.loadingBox}>
+                  <Text style={st.loadErrorText}>
+                    Couldn't load the photo.{"\n"}
+                    {loadError ? "Image failed to decode" : `Decoded too small (${decodedSize?.w}×${decodedSize?.h})`}
+                  </Text>
+                  {onUseOriginal ? (
+                    <TouchableOpacity style={st.useOriginalBtn} onPress={onUseOriginal}>
+                      <Text style={st.useOriginalBtnText}>Use original</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               ) : null}
             </View>
@@ -319,12 +392,18 @@ export default function PhotoCropScreen({ photoUri, box, initial, natural, isOwn
                 pointerEvents 'box-only' so it is a single hit box
                 regardless of what's rendered beneath it. Holds the
                 PanResponder - drag/pinch work anywhere in the stage, not
-                just directly over the frame. */}
-            <View
-              style={st.touchLayer}
-              pointerEvents="box-only"
-              {...responder.panHandlers}
-            />
+                just directly over the frame. Skipped entirely while
+                decodeFailed (v9) - it would otherwise sit on top of the
+                error state's "Use original" button (inside frame, a lower
+                sibling) and swallow the tap meant for it; panning/zooming a
+                photo that failed to decode has nothing useful to do anyway. */}
+            {!decodeFailed ? (
+              <View
+                style={st.touchLayer}
+                pointerEvents="box-only"
+                {...responder.panHandlers}
+              />
+            ) : null}
           </>
         ) : (
           <View style={st.loadingBox}>
@@ -333,22 +412,25 @@ export default function PhotoCropScreen({ photoUri, box, initial, natural, isOwn
         )}
       </View>
 
-      {/* ZOOM ROW (requirement 3) - works even if pinch fails. */}
+      {/* ZOOM ROW (requirement 3) - works even if pinch fails. Disabled
+          while decodeFailed too (v9) - nothing useful to pan/zoom on a
+          photo that failed to decode. */}
       <View style={st.zoomRow}>
-        <TouchableOpacity style={st.zoomBtn} onPress={() => bumpZoom(-ZOOM_STEP)} disabled={!ready}>
+        <TouchableOpacity style={st.zoomBtn} onPress={() => bumpZoom(-ZOOM_STEP)} disabled={!ready || decodeFailed}>
           <Text style={st.zoomBtnText}>−</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={st.centerBtn} onPress={handleCenter} disabled={!ready}>
+        <TouchableOpacity style={st.centerBtn} onPress={handleCenter} disabled={!ready || decodeFailed}>
           <Text style={st.centerBtnText}>Center</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={st.zoomBtn} onPress={() => bumpZoom(ZOOM_STEP)} disabled={!ready}>
+        <TouchableOpacity style={st.zoomBtn} onPress={() => bumpZoom(ZOOM_STEP)} disabled={!ready || decodeFailed}>
           <Text style={st.zoomBtnText}>+</Text>
         </TouchableOpacity>
       </View>
 
       {isOwner ? (
-        <Text style={st.debugText} numberOfLines={4}>
-          src={describeUriSource(photoUri)} natural={effectiveNatural ? `${effectiveNatural.w}x${effectiveNatural.h}` : "—"} stage={stageSize ? `${Math.round(stageSize.w)}x${Math.round(stageSize.h)}` : "—"}
+        <Text style={st.debugText} numberOfLines={8}>
+          src={describeUriSource(photoUri)} tail={last30(photoUri)} bytes={fileBytes != null ? fileBytes : "—"} natural={effectiveNatural ? `${effectiveNatural.w}x${effectiveNatural.h}` : "—"} decoded={decodedSize ? `${decodedSize.w}x${decodedSize.h}` : "—"} stage={stageSize ? `${Math.round(stageSize.w)}x${Math.round(stageSize.h)}` : "—"}
+          {"\n"}blurRadius=none resizeMode=cover defaultSource=none payload={payloadDebug ?? "none"}
           {"\n"}frame computed={frameRect ? `${Math.round(frameRect.left)},${Math.round(frameRect.top)},${Math.round(frameRect.width)},${Math.round(frameRect.height)}` : "—"} measured={measuredFrameRect ? `${Math.round(measuredFrameRect.x)},${Math.round(measuredFrameRect.y)},${Math.round(measuredFrameRect.w)},${Math.round(measuredFrameRect.h)}` : "—"}
           {"\n"}imageRect={`${Math.round(debugRect.left)},${Math.round(debugRect.top)},${Math.round(debugRect.width)},${Math.round(debugRect.height)}`}
           {"\n"}gesture: {debugState.phase} touches={debugState.touches} dx={debugState.dx.toFixed(2)} dy={debugState.dy.toFixed(2)} scale={debugState.scale.toFixed(2)} fx={debugState.fx.toFixed(2)} fy={debugState.fy.toFixed(2)} zoom={debugState.zoom.toFixed(2)}
@@ -362,7 +444,7 @@ export default function PhotoCropScreen({ photoUri, box, initial, natural, isOwn
         <TouchableOpacity style={st.resetBtn} onPress={handleReset}>
           <Text style={st.resetBtnText}>Reset</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={st.doneBtn} onPress={handleDone} disabled={!ready}>
+        <TouchableOpacity style={st.doneBtn} onPress={handleDone} disabled={!ready || decodeFailed}>
           <Text style={st.doneBtnText}>Done</Text>
         </TouchableOpacity>
       </View>
@@ -387,8 +469,13 @@ const st = StyleSheet.create({
   // above the frame/dim views (zIndex), box-only so it alone is the hit
   // target for the PanResponder.
   touchLayer: { position: "absolute", left: 0, top: 0, right: 0, bottom: 0, zIndex: 50 },
-  loadingBox: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
+  loadingBox: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 14 },
   loadErrorText: { color: C.text3, fontSize: 13, fontWeight: "700", textAlign: "center", paddingHorizontal: 20 },
+  // "Use original" button (v9, requirement 3) - inside the error state's
+  // loadingBox, above the (now un-rendered) touch layer so it's reliably
+  // tappable - see the touchLayer comment above.
+  useOriginalBtn: { minHeight: 44, minWidth: 140, paddingHorizontal: 18, borderRadius: 12, backgroundColor: C.green, alignItems: "center", justifyContent: "center" },
+  useOriginalBtnText: { color: C.greenDark, fontSize: 14, fontWeight: "800" },
   zoomRow: { flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingTop: 10, justifyContent: "center" },
   zoomBtn: { minWidth: 50, minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: C.border, alignItems: "center", justifyContent: "center" },
   zoomBtnText: { color: C.text2, fontSize: 20, fontWeight: "800" },

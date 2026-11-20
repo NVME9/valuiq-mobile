@@ -44,6 +44,43 @@ export interface NormalizedPhoto {
   height: number;
 }
 
+// v9 - REJECT A BAD NORMALIZATION OUTPUT (founder device: owner readout
+// showed frame positioned correctly and a plausible natural=1000x1920, but
+// the crop screen painted a blurry brown smudge instead of the hat photo -
+// while the SAME photo rendered sharp in the server-side card preview).
+// manipulateAsync's returned {width,height} is read straight off the output
+// JPEG's header, which survives even when the actual scan data after it is
+// tiny/truncated/corrupt (a bad write to the materialized cache file, a
+// starved disk, etc.) - so the header alone can't prove the pixels are
+// real. A real re-encoded photo (quality 0.92) is always far bigger than a
+// few KB, and this app never deals in sub-300px source photos, so a result
+// landing under either bar is treated as untrustworthy and discarded by
+// normalizePhotoOrientation below, which falls back to the ORIGINAL uri -
+// never to a different decode's dimensions.
+export const MIN_NORMALIZED_EDGE_PX = 300;
+const MIN_NORMALIZED_FILE_BYTES = 4096;
+
+export function isNormalizedPhotoValid(width: number, height: number, bytes: number | null): boolean {
+  if (!(width >= MIN_NORMALIZED_EDGE_PX) || !(height >= MIN_NORMALIZED_EDGE_PX)) return false;
+  if (bytes != null && bytes < MIN_NORMALIZED_FILE_BYTES) return false;
+  return true;
+}
+
+// Reads the normalized output's actual on-disk size via SDK 54's File class
+// (see AGENTS.md's "Expo HAS CHANGED" note - the legacy FileSystem.
+// getInfoAsync this app used pre-54 is gone from the default import).
+// Returns null (never throws) for anything that isn't a local file - a
+// remote/data: uri has no local byte count to read, and the caller treats
+// "unknown" as "can't disprove it," not as a reason to reject.
+function normalizedFileBytes(uri: string): number | null {
+  if (!FileSystem || !uri.startsWith("file://")) return null;
+  try {
+    return (new (FileSystem as any).File(uri)).size ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // Writes a data: URI's base64 payload to a cache file FIRST (v8, item 1) -
 // manipulateAsync technically accepts a data: URI directly, but a full-
 // resolution photo's base64 string can run into native-bridge size trouble
@@ -76,7 +113,15 @@ export async function normalizePhotoOrientation(uri: string): Promise<Normalized
   const out = await ImageManipulator.manipulateAsync(srcUri, [], {
     compress: 0.92, format: ImageManipulator.SaveFormat.JPEG,
   });
-  return { uri: out.uri, width: out.width, height: out.height };
+  if (isNormalizedPhotoValid(out.width, out.height, normalizedFileBytes(out.uri))) {
+    return { uri: out.uri, width: out.width, height: out.height };
+  }
+  // REJECTED - fall back to the ORIGINAL uri (never the materialized
+  // srcUri, which can carry the same bad write) and probe ITS dimensions
+  // independently via Image.getSize, so the crop screen and the payload
+  // both end up painting the same real photo instead of the broken file.
+  const size = await getImageSize(uri);
+  return { uri, width: size.width, height: size.height };
 }
 
 // Downscales ONLY when the photo's longest edge actually exceeds the
@@ -125,6 +170,16 @@ export function isRemoteShareUrl(uri: string | null): boolean {
 export type SharePhoto = { base64: string } | { url: string };
 
 export type ResolvePhotoResult = { photo: SharePhoto } | { error: string };
+
+// Owner-readout ONLY (v9, requirement 1's `payload=`) - a short label for
+// whatever resolveSharePhoto actually resolved to, so a repro can compare
+// it against the crop screen's own src=/natural= on the same screen instead
+// of trusting that the two code paths used the same bytes.
+export function describeSharePhoto(photo: SharePhoto | null): string {
+  if (!photo) return "none";
+  if ("url" in photo) return `url:${photo.url.slice(-30)}`;
+  return `base64 ${(estimateBase64Bytes(photo.base64) / 1024).toFixed(0)}KB`;
+}
 
 // Prefers photoBase64 (raw, no data: prefix - the shape a fresh scan's own
 // capture state is already in). Falls back to photoUri, which may itself be

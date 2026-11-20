@@ -53,7 +53,7 @@ import {
 import { PHOTO_BOX } from "../lib/photoCrop";
 import PhotoCropScreen from "./PhotoCropScreen";
 import { buildShareCardPayload, buildShareVideoPayload, ShareCardTone, stampForHeroVerdict, toneForHeroVerdict } from "../lib/shareCardPayload";
-import { resolveSharePhoto, fetchShareCardPng, normalizePhotoOrientation, isRemoteShareUrl, NormalizedPhoto } from "../lib/shareCardApi";
+import { resolveSharePhoto, fetchShareCardPng, normalizePhotoOrientation, isRemoteShareUrl, describeSharePhoto, NormalizedPhoto } from "../lib/shareCardApi";
 import { fetchShareVideoMp4 } from "../lib/shareVideoApi";
 import { loadStudioPrefs, saveStudioPrefs, StudioPrefs } from "../lib/studioPrefs";
 import { logEvent } from "../lib/api";
@@ -226,6 +226,16 @@ export default function ShareStudio(props: ShareStudioProps) {
   const [renderStatus, setRenderStatus] = useState<"idle" | "ok" | "failed">("idle");
   const [fetchError, setFetchError] = useState<FetchError | null>(null);
   const [debugBytes, setDebugBytes] = useState<number | null>(null);
+  // v9 requirement 1 ("payload=") - a label for whatever resolveSharePhoto
+  // actually resolved to on the last render, so the crop screen's owner
+  // readout can show it next to its own src=/natural= for a side-by-side
+  // repro instead of trusting the two paths used the same bytes.
+  const [payloadDebug, setPayloadDebug] = useState<string>("none");
+  // v9 requirement 3 ("Use original" button) - set when the owner taps it
+  // on the crop screen's error state; forces BOTH the crop screen and the
+  // share payload off the (rejected/broken) normalized photo and back onto
+  // the untouched original uri for the rest of this Studio session.
+  const [useOriginalPhoto, setUseOriginalPhoto] = useState(false);
 
   const [sharing, setSharing] = useState(false);
   const [shareStatus, setShareStatus] = useState<{ kind: "ok" | "fail"; text: string } | null>(null);
@@ -262,11 +272,18 @@ export default function ShareStudio(props: ShareStudioProps) {
     }
     let cancelled = false;
     setNormalizedPhoto(null);
+    setUseOriginalPhoto(false); // a NEW raw photo gets a fresh chance at normalization
     normalizePhotoOrientation(raw)
       .then((n) => { if (!cancelled) setNormalizedPhoto(n); })
       .catch(() => { if (!cancelled) setNormalizedPhoto(null); });
     return () => { cancelled = true; };
   }, [photoBase64, photoUri]);
+
+  // The normalized photo actually in effect for both the crop screen and
+  // the share payload - null whenever the owner has tapped "Use original"
+  // on the crop screen's error state (requirement 3), so both callers fall
+  // back to their own raw-uri/raw-bytes path together, never just one of them.
+  const effectiveNormalizedPhoto = useOriginalPhoto ? null : normalizedPhoto;
 
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -355,7 +372,8 @@ export default function ShareStudio(props: ShareStudioProps) {
     // Downscale happens here too (expo-image-manipulator, async) - a stale
     // request can still be superseded while this is in flight, same as the
     // network fetch below.
-    const resolved = await resolveSharePhoto(photoBase64, photoUri ?? null, normalizedPhoto);
+    const resolved = await resolveSharePhoto(photoBase64, photoUri ?? null, effectiveNormalizedPhoto);
+    if (isOwner) setPayloadDebug(describeSharePhoto("error" in resolved ? null : resolved.photo));
     if (seq !== requestSeqRef.current) return null; // superseded while resolving the photo
 
     if ("error" in resolved) {
@@ -642,7 +660,7 @@ export default function ShareStudio(props: ShareStudioProps) {
     setVideoState("making");
     setVideoError(null);
     try {
-      const resolved = await resolveSharePhoto(photoBase64, photoUri ?? null, normalizedPhoto);
+      const resolved = await resolveSharePhoto(photoBase64, photoUri ?? null, effectiveNormalizedPhoto);
       if ("error" in resolved) {
         setVideoState("failed");
         setVideoError({ ms: 0, message: resolved.error });
@@ -1119,11 +1137,13 @@ export default function ShareStudio(props: ShareStudioProps) {
             user was mid-edit on, leaving the last COMMITTED crop in place. */}
         {cropOpen ? (
           <PhotoCropScreen
-            photoUri={normalizedPhoto?.uri ?? rawPhotoUri(photoBase64, photoUri)}
-            natural={normalizedPhoto ? { w: normalizedPhoto.width, h: normalizedPhoto.height } : null}
+            photoUri={effectiveNormalizedPhoto?.uri ?? rawPhotoUri(photoBase64, photoUri)}
+            natural={effectiveNormalizedPhoto ? { w: effectiveNormalizedPhoto.width, h: effectiveNormalizedPhoto.height } : null}
             box={PHOTO_BOX[format]}
             initial={{ fx, fy, zoom }}
             isOwner={isOwner}
+            payloadDebug={payloadDebug}
+            onUseOriginal={() => setUseOriginalPhoto(true)}
             onCancel={() => setCropOpen(false)}
             onDone={({ fx: nextFx, fy: nextFy, zoom: nextZoom }) => commitPhotoAdjust(nextFx, nextFy, nextZoom)}
           />
