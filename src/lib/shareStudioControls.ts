@@ -6,6 +6,7 @@
 // checkItemCard.ts/profitBanner.ts. No React, no network, no file I/O.
 import {
   StudioFormat, PhotoMode, DEFAULT_PHOTO_ADJUST, clampZoom, clampFocus,
+  BgStyle, DEFAULT_BG_STYLE, DEFAULT_CUTOUT, DEFAULT_PHOTO_BORDER,
 } from "./shareStudio";
 
 export type StudioTab = "hook" | "photo" | "color" | "more";
@@ -21,6 +22,9 @@ export interface StudioControlsState {
   zoom: number;
   fx: number;
   fy: number;
+  cutout: boolean;
+  photoBorder: boolean;
+  bgStyle: BgStyle;
   accent: string | null;
 }
 
@@ -35,7 +39,11 @@ export interface InitialControlsInput {
 // Every fresh Studio open (or reopen with a different scan) starts back at
 // format:"story" / tab:"hook" / zoom-focus centered - only hook/handleEnabled/
 // handle/photoMode/accent come from the caller (persisted prefs, or a win
-// variant's profit-driven hook default).
+// variant's profit-driven hook default). cutout/photoBorder/bgStyle are
+// SESSION-ONLY (v7, same "never silently inherit a stale session" rule
+// accent already follows - see studioPrefs.ts's header comment) - every open
+// starts at the founder's spec defaults (blur backdrop, border on, cutout
+// off) regardless of whatever an earlier session left them at.
 export function initialStudioControls(opts: InitialControlsInput): StudioControlsState {
   return {
     format: "story",
@@ -48,6 +56,9 @@ export function initialStudioControls(opts: InitialControlsInput): StudioControl
     zoom: DEFAULT_PHOTO_ADJUST.zoom,
     fx: DEFAULT_PHOTO_ADJUST.fx,
     fy: DEFAULT_PHOTO_ADJUST.fy,
+    cutout: DEFAULT_CUTOUT,
+    photoBorder: DEFAULT_PHOTO_BORDER,
+    bgStyle: DEFAULT_BG_STYLE,
     accent: opts.accent,
   };
 }
@@ -116,4 +127,55 @@ export function setPhotoAdjust(
 
 export function setAccent(state: StudioControlsState, hex: string | null): StudioControlsState {
   return { ...state, accent: hex };
+}
+
+export function setCutout(state: StudioControlsState, cutout: boolean): StudioControlsState {
+  return { ...state, cutout };
+}
+
+export function setPhotoBorder(state: StudioControlsState, photoBorder: boolean): StudioControlsState {
+  return { ...state, photoBorder };
+}
+
+export function setBgStyle(state: StudioControlsState, bgStyle: BgStyle): StudioControlsState {
+  return { ...state, bgStyle };
+}
+
+// PER-TAB RESET (v7, founder device finding #1: "every option needs a
+// reset"). Each function touches ONLY the fields its own tab's content row
+// shows - never a sibling tab's state - same independence guarantee
+// setFormat/setActiveTab above already have, just in the reset direction.
+// `defaultHook` is passed in rather than hardcoded so the win variant's
+// profit-driven hook default (WIN_PROFIT_HOOK/null - see ShareStudio.tsx)
+// resets to ITS own default, not the scan variant's DEFAULT_HOOK.
+export function resetHookTab(state: StudioControlsState, defaultHook: string | null): StudioControlsState {
+  return { ...state, hook: defaultHook };
+}
+
+export function resetPhotoTab(state: StudioControlsState): StudioControlsState {
+  return {
+    ...state,
+    photoMode: "whole",
+    zoom: DEFAULT_PHOTO_ADJUST.zoom,
+    fx: DEFAULT_PHOTO_ADJUST.fx,
+    fy: DEFAULT_PHOTO_ADJUST.fy,
+    cutout: DEFAULT_CUTOUT,
+    photoBorder: DEFAULT_PHOTO_BORDER,
+    bgStyle: DEFAULT_BG_STYLE,
+  };
+}
+
+export function resetColorTab(state: StudioControlsState): StudioControlsState {
+  return { ...state, accent: null };
+}
+
+export function resetMoreTab(state: StudioControlsState): StudioControlsState {
+  return { ...state, handleEnabled: false, hidePrice: false };
+}
+
+// RESET ALL (v7) - every tab's defaults at once, in one call, without
+// touching format or activeTab (which tab/export-size the user is looking
+// at isn't a "control" the spec asks this link to reset).
+export function resetAllTabs(state: StudioControlsState, defaultHook: string | null): StudioControlsState {
+  return resetMoreTab(resetColorTab(resetPhotoTab(resetHookTab(state, defaultHook))));
 }

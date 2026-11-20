@@ -47,6 +47,23 @@ export function formatFileSize(bytes: number): string {
 export type PhotoMode = "whole" | "fill";
 export const DEFAULT_PHOTO_MODE: PhotoMode = "whole";
 
+// BACKGROUND STYLE (v7, server fields from the card v4: bgStyle/cutout/
+// photoBorder) — what fills the photo box behind the contained photo.
+// Default "blur" matches the server's own default (deal-ai-pro's
+// lib/shareCard/renderCard.ts: `d.bgStyle ?? "blur"`), so a Studio that
+// never touches this control still sends a value that matches what the
+// server would have picked anyway.
+export type BgStyle = "blur" | "dark" | "tint";
+export const DEFAULT_BG_STYLE: BgStyle = "blur";
+export const BG_STYLES: BgStyle[] = ["blur", "dark", "tint"];
+
+// CUT OUT / BORDER (v7) — both OFF/ON booleans the server now accepts.
+// Cut out defaults OFF (an extra, possibly-unavailable effect - see
+// ShareStudio.tsx's cutout-501 handling); border defaults ON per the
+// founder's device-findings spec ("Defaults: Blur, border on").
+export const DEFAULT_CUTOUT = false;
+export const DEFAULT_PHOTO_BORDER = true;
+
 export interface PhotoAdjust {
   mode: PhotoMode;
   zoom: number; // 1..3
@@ -102,4 +119,15 @@ export const ACCENT_HEX_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
 export function isValidAccentHex(v: string): boolean {
   return ACCENT_HEX_PATTERN.test(v);
+}
+
+// SURPRISE ME (v7) — picks a random swatch from ACCENT_SWATCHES, excluding
+// the currently-active one when there are other swatches to pick from (so a
+// second tap can never be a visible no-op). `rand` is injectable so this is
+// deterministically testable - defaults to Math.random for the real app.
+export function pickSurpriseAccent(currentAccent: string | null, rand: () => number = Math.random): string {
+  const pool = ACCENT_SWATCHES.filter((sw) => sw.hex !== currentAccent);
+  const choices = pool.length > 0 ? pool : ACCENT_SWATCHES;
+  const idx = Math.min(choices.length - 1, Math.floor(rand() * choices.length));
+  return choices[idx].hex;
 }

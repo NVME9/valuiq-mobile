@@ -5,7 +5,7 @@
 // on a loss" rule can all be unit tested independent of the component tree.
 import { formatMoney } from "./money";
 import { HeroVerdict } from "./outcomeTier";
-import { DEFAULT_PHOTO_ADJUST, PhotoAdjust, isValidAccentHex } from "./shareStudio";
+import { DEFAULT_PHOTO_ADJUST, PhotoAdjust, isValidAccentHex, BgStyle } from "./shareStudio";
 
 export type ShareCardFormat = "story" | "feed" | "square";
 export type ShareCardVariant = "scan" | "win";
@@ -162,6 +162,18 @@ export interface ShareCardPayload {
   // that value is actually a valid 6-digit hex (see isValidAccentHex).
   accent?: string;
   photoAdjust: PhotoAdjust;
+  // v7 (deal-ai-pro server fields): bgStyle/photoBorder are only ever sent
+  // when the caller actually set them - omitted falls back to the SERVER's
+  // own defaults ('blur'/accent-driven - see renderCard.ts's resolvePhotoBorder),
+  // same "omit for the default, don't resend it" convention `accent` uses.
+  // `cutout` is the one exception: always sent as an explicit boolean (never
+  // omitted) so the server's "cutout:true -> 501 cutout_unavailable" gate -
+  // checked before any photo work - sees a real value rather than defaulting
+  // via `?? false` on every request, which would mask a caller that forgot
+  // to pass it at all.
+  bgStyle?: BgStyle;
+  photoBorder?: boolean;
+  cutout: boolean;
 }
 
 interface ControlsInput {
@@ -172,6 +184,9 @@ interface ControlsInput {
   hidePrice?: boolean;
   accent?: string | null; // null/undefined/invalid hex = Auto, omitted from the payload
   photoAdjust?: PhotoAdjust; // defaults to DEFAULT_PHOTO_ADJUST (whole, zoom 1, centered) when omitted
+  bgStyle?: BgStyle | null; // null/undefined = let the server pick its own default ('blur')
+  photoBorder?: boolean | null; // null/undefined = let the server pick its own default (accent-driven)
+  cutout?: boolean; // always sent - see ShareCardPayload.cutout's own comment
 }
 
 export interface BuildScanCardInput extends ControlsInput {
@@ -204,6 +219,9 @@ export function buildShareCardPayload(input: BuildShareCardInput): ShareCardPayl
   const hidePrice = !!input.hidePrice;
   const accent = input.accent && isValidAccentHex(input.accent) ? input.accent : undefined;
   const photoAdjust = input.photoAdjust ?? DEFAULT_PHOTO_ADJUST;
+  const bgStyle = input.bgStyle ?? undefined;
+  const photoBorder = input.photoBorder ?? undefined;
+  const cutout = !!input.cutout;
 
   if (input.variant === "win") {
     // A sale can be logged at a profit, a loss, or dead even - the sign of
@@ -230,10 +248,13 @@ export function buildShareCardPayload(input: BuildShareCardInput): ShareCardPayl
       tone: isLoss ? "red" : "lime",
       name: input.itemName,
       photoAdjust,
+      cutout,
       ...(handle ? { handle } : {}),
       ...(hook ? { hook } : {}),
       ...(hidePrice ? { hidePrice: true } : {}),
       ...(accent ? { accent } : {}),
+      ...(bgStyle ? { bgStyle } : {}),
+      ...(photoBorder != null ? { photoBorder } : {}),
     };
   }
 
@@ -271,6 +292,7 @@ export function buildShareCardPayload(input: BuildShareCardInput): ShareCardPayl
     heroLabel,
     name: input.itemName,
     photoAdjust,
+    cutout,
     ...(stamp ? { stamp } : {}),
     ...(input.isEstimate
       ? { estimate: true, caption: "ESTIMATE" }
@@ -279,6 +301,8 @@ export function buildShareCardPayload(input: BuildShareCardInput): ShareCardPayl
     ...(hook ? { hook } : {}),
     ...(hidePrice || paidUnknown ? { hidePrice: true } : {}),
     ...(accent ? { accent } : {}),
+    ...(bgStyle ? { bgStyle } : {}),
+    ...(photoBorder != null ? { photoBorder } : {}),
   };
 }
 

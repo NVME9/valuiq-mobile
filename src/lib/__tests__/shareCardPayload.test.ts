@@ -376,6 +376,58 @@ describe("buildShareCardPayload - the `estimate` field the server's label line a
   });
 });
 
+// v7 SERVER FIELDS (bgStyle/photoBorder/cutout) - deal-ai-pro's
+// lib/shareCard/validateBody.ts: bgStyle/photoBorder are optional (the
+// server falls back to its own defaults when omitted), cutout is always a
+// real boolean (never defaulted client-side) so the server's 501
+// cutout_unavailable gate always sees an explicit value.
+describe("buildShareCardPayload - bgStyle/photoBorder/cutout", () => {
+  test("cutout is always present as an explicit boolean, even when the caller never passed it", () => {
+    const p = buildShareCardPayload({
+      variant: "scan", format: "story", itemName: "Lamp",
+      paidPrice: 10, heroSellPrice: 30, verdict: "SOLID", isEstimate: false,
+    });
+    expect(p.cutout).toBe(false);
+  });
+
+  test("bgStyle/photoBorder are omitted when not given, letting the server pick its own defaults", () => {
+    const p = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Lamp",
+      boughtPrice: 20, soldPrice: 65, profit: 45,
+    });
+    expect(p.bgStyle).toBeUndefined();
+    expect(p.photoBorder).toBeUndefined();
+  });
+
+  test("bgStyle/photoBorder/cutout pass through as given, for both variants", () => {
+    const scan = buildShareCardPayload({
+      variant: "scan", format: "story", itemName: "Lamp",
+      paidPrice: 10, heroSellPrice: 30, verdict: "SOLID", isEstimate: false,
+      bgStyle: "tint", photoBorder: false, cutout: true,
+    });
+    expect(scan.bgStyle).toBe("tint");
+    expect(scan.photoBorder).toBe(false);
+    expect(scan.cutout).toBe(true);
+
+    const win = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Lamp",
+      boughtPrice: 20, soldPrice: 65, profit: 45,
+      bgStyle: "dark", photoBorder: true, cutout: false,
+    });
+    expect(win.bgStyle).toBe("dark");
+    expect(win.photoBorder).toBe(true);
+    expect(win.cutout).toBe(false);
+  });
+
+  test("photoBorder:false is sent, not dropped like a falsy flag would be", () => {
+    const p = buildShareCardPayload({
+      variant: "win", format: "story", itemName: "Lamp",
+      boughtPrice: 20, soldPrice: 65, profit: 45, photoBorder: false,
+    });
+    expect(p.photoBorder).toBe(false);
+  });
+});
+
 describe("canShareWin - the 'no share on loss' rule", () => {
   test("a real profit can be shared", () => {
     expect(canShareWin(45)).toBe(true);

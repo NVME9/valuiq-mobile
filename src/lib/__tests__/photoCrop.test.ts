@@ -83,6 +83,39 @@ describe("coverScale / cropDisplayRect - the photo always covers the frame", () 
   });
 });
 
+// ROOT-CAUSE PROOF (v7, founder device bug: "Adjust photo" showed a blurry
+// blob offset to the left edge instead of the photo - screenshot readout
+// fx=0.50 fy=0.50 zoom=1.00, image not covering the frame on one side).
+// The suite above already proves coverScale/cropDisplayRect are gap-free
+// given VALID, matching inputs - these two tests pin down exactly what
+// happens when one of the two real-world inputs (the image's natural size,
+// the frame's measured size) is wrong or not yet known, which is the only
+// way the "always covers" guarantee above can break. See
+// src/components/PhotoCropScreen.tsx's header comment for the fix (read
+// natural size from the Image's own onLoad, frame size from its own
+// onLayout - never a stale probe/constant).
+describe("cropDisplayRect - what breaks the cover guarantee (root-cause proof)", () => {
+  test("a zero/not-yet-loaded natural size collapses coverScale to its invalid-input fallback (1), undersizing and left-anchoring the image inside the frame - exactly the founder's screenshot", () => {
+    // natural 0x0 (image not actually loaded yet) into a 1188x951-ish frame
+    // (roughly the founder's screenshot proportions) at the reported
+    // fx=0.5/fy=0.5/zoom=1.00.
+    const r = cropDisplayRect(0.5, 0.5, 1, 0, 0, 1188, 951);
+    // coverScale's guard returns 1 for invalid iw/ih, so width/height come
+    // out as the raw (zero) natural size, not a frame-covering size - the
+    // image renders far SMALLER than the frame instead of covering it.
+    expect(r.width).toBeLessThan(1188);
+    expect(r.height).toBeLessThan(951);
+  });
+
+  test("a valid natural size for the SAME frame covers it with no gap - proving the math itself is sound once both real inputs are known", () => {
+    const r = cropDisplayRect(0.5, 0.5, 1, 3024, 4032, 1188, 951);
+    expect(r.left).toBeLessThanOrEqual(0.0001);
+    expect(r.top).toBeLessThanOrEqual(0.0001);
+    expect(r.left + r.width).toBeGreaterThanOrEqual(1188 - 0.0001);
+    expect(r.top + r.height).toBeGreaterThanOrEqual(951 - 0.0001);
+  });
+});
+
 describe("focusBounds / clampFocusToBounds", () => {
   test("on the axis the box aspect fully consumes (regionW==iw), the valid range collapses to 0.5 - panning that axis cannot do anything, matching the server's own forced-left=0 clamp", () => {
     // A very tall/narrow photo into a squarish box: width is the limiting

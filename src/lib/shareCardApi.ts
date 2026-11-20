@@ -97,6 +97,12 @@ export interface ShareCardFetchResult {
   size?: number;
   status?: number;
   stage?: string;
+  // Parsed `error` field off a non-OK JSON body (e.g. "cutout_unavailable" -
+  // see the 501 gate in deal-ai-pro's app/api/share-card/route.ts) - distinct
+  // from `stage` (a different field on the same error body, only ever set
+  // by the decode/render failure paths) so a caller can tell "feature not
+  // available" apart from "something broke" without string-matching bodyPreview.
+  errorCode?: string;
   ms: number;
   bodyPreview?: string;
 }
@@ -128,8 +134,13 @@ export async function fetchShareCardPng(
     if (!r.ok || !contentType.includes("image/png")) {
       const text = await r.text().catch(() => "");
       let stage: string | undefined;
-      try { stage = JSON.parse(text)?.stage; } catch {}
-      return { ok: false, status: r.status, stage, ms, bodyPreview: text.slice(0, 120) };
+      let errorCode: string | undefined;
+      try {
+        const parsed = JSON.parse(text);
+        stage = parsed?.stage;
+        errorCode = typeof parsed?.error === "string" ? parsed.error : undefined;
+      } catch {}
+      return { ok: false, status: r.status, stage, errorCode, ms, bodyPreview: text.slice(0, 120) };
     }
     const buf = await r.arrayBuffer();
     const bytes = new Uint8Array(buf);

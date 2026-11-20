@@ -7,7 +7,8 @@
 import {
   initialStudioControls, setFormat, setActiveTab, setHook, setPhotoMode,
   setPhotoAdjust, resetPhotoAdjust, setAccent, toggleHandleEnabled,
-  setHandle, setHidePrice,
+  setHandle, setHidePrice, setCutout, setPhotoBorder, setBgStyle,
+  resetHookTab, resetPhotoTab, resetColorTab, resetMoreTab, resetAllTabs,
 } from "../shareStudioControls";
 
 function baseState() {
@@ -25,6 +26,122 @@ describe("initialStudioControls", () => {
     expect(s.fx).toBe(0.5);
     expect(s.fy).toBe(0.5);
     expect(s.hidePrice).toBe(false);
+  });
+
+  test("v7: always starts cutout off, border on, background blur - regardless of what an earlier session left them at", () => {
+    const s = baseState();
+    expect(s.cutout).toBe(false);
+    expect(s.photoBorder).toBe(true);
+    expect(s.bgStyle).toBe("blur");
+  });
+});
+
+describe("v7 setters - cutout/photoBorder/bgStyle", () => {
+  test("each setter touches only its own field", () => {
+    let s = baseState();
+    s = setCutout(s, true);
+    expect(s.cutout).toBe(true);
+    expect(s.photoBorder).toBe(true);
+    expect(s.bgStyle).toBe("blur");
+
+    s = setPhotoBorder(s, false);
+    expect(s.photoBorder).toBe(false);
+    expect(s.cutout).toBe(true);
+
+    s = setBgStyle(s, "tint");
+    expect(s.bgStyle).toBe("tint");
+    expect(s.cutout).toBe(true);
+    expect(s.photoBorder).toBe(false);
+  });
+});
+
+describe("per-tab Reset (v7, founder device finding #1: every option needs a reset)", () => {
+  test("resetHookTab restores the caller's default hook (scan vs. win variant) without touching other tabs", () => {
+    let s = baseState();
+    s = setAccent(s, "#a3e635");
+    s = setHook(s, "Yeah");
+    s = resetHookTab(s, "Would you flip it?");
+    expect(s.hook).toBe("Would you flip it?");
+    expect(s.accent).toBe("#a3e635");
+
+    // Win variant's default is null ("None"), not the scan preset.
+    const win = resetHookTab(setHook(baseState(), "Yeah"), null);
+    expect(win.hook).toBeNull();
+  });
+
+  test("resetPhotoTab restores Whole/no-crop/no-cutout/border-on/blur without touching hook/color/handle", () => {
+    let s = baseState();
+    s = setHook(s, "Yeah");
+    s = setAccent(s, "#22d3ee");
+    s = setPhotoMode(s, "fill");
+    s = setPhotoAdjust(s, { zoom: 2.5, fx: 0.2, fy: 0.8 });
+    s = setCutout(s, true);
+    s = setPhotoBorder(s, false);
+    s = setBgStyle(s, "dark");
+
+    s = resetPhotoTab(s);
+    expect(s.photoMode).toBe("whole");
+    expect(s.zoom).toBe(1);
+    expect(s.fx).toBe(0.5);
+    expect(s.fy).toBe(0.5);
+    expect(s.cutout).toBe(false);
+    expect(s.photoBorder).toBe(true);
+    expect(s.bgStyle).toBe("blur");
+    expect(s.hook).toBe("Yeah");
+    expect(s.accent).toBe("#22d3ee");
+  });
+
+  test("resetColorTab restores Auto without touching hook/photo/handle", () => {
+    let s = baseState();
+    s = setHook(s, "Yeah");
+    s = setAccent(s, "#ff6b6b");
+    s = setPhotoMode(s, "fill");
+    s = resetColorTab(s);
+    expect(s.accent).toBeNull();
+    expect(s.hook).toBe("Yeah");
+    expect(s.photoMode).toBe("fill");
+  });
+
+  test("resetMoreTab restores handle-off/price-shown without touching hook/photo/color", () => {
+    let s = baseState();
+    s = setHook(s, "Yeah");
+    s = setAccent(s, "#ff6b6b");
+    s = toggleHandleEnabled(s, true);
+    s = setHandle(s, "@thriftflips");
+    s = setHidePrice(s, true);
+
+    s = resetMoreTab(s);
+    expect(s.handleEnabled).toBe(false);
+    expect(s.hidePrice).toBe(false);
+    expect(s.hook).toBe("Yeah");
+    expect(s.accent).toBe("#ff6b6b");
+  });
+
+  test("resetAllTabs restores every tab's defaults at once, but never format/activeTab", () => {
+    let s = baseState();
+    s = setFormat(s, "square");
+    s = setActiveTab(s, "color");
+    s = setHook(s, "Yeah");
+    s = setAccent(s, "#ff6b6b");
+    s = setPhotoMode(s, "fill");
+    s = setPhotoAdjust(s, { zoom: 2 });
+    s = setCutout(s, true);
+    s = toggleHandleEnabled(s, true);
+    s = setHidePrice(s, true);
+
+    s = resetAllTabs(s, "Would you flip it?");
+    expect(s.hook).toBe("Would you flip it?");
+    expect(s.accent).toBeNull();
+    expect(s.photoMode).toBe("whole");
+    expect(s.zoom).toBe(1);
+    expect(s.cutout).toBe(false);
+    expect(s.photoBorder).toBe(true);
+    expect(s.bgStyle).toBe("blur");
+    expect(s.handleEnabled).toBe(false);
+    expect(s.hidePrice).toBe(false);
+    // Navigation state is NOT part of "reset all".
+    expect(s.format).toBe("square");
+    expect(s.activeTab).toBe("color");
   });
 });
 

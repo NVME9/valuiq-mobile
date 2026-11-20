@@ -35,7 +35,8 @@ import {
   FORMAT_SIZES, FORMAT_LABELS, StudioFormat, StudioConfidence, formatFileSize,
   HOOK_PRESETS, DEFAULT_HOOK, WIN_PROFIT_HOOK,
   PhotoMode, DEFAULT_PHOTO_ADJUST,
-  ACCENT_SWATCHES, isValidAccentHex,
+  ACCENT_SWATCHES, isValidAccentHex, pickSurpriseAccent,
+  BgStyle, BG_STYLES,
 } from "../lib/shareStudio";
 import {
   StudioTab, StudioControlsState, initialStudioControls,
@@ -44,6 +45,10 @@ import {
   setHidePrice as csSetHidePrice, setPhotoMode as csSetPhotoMode,
   setPhotoAdjust as csSetPhotoAdjust,
   setAccent as csSetAccent,
+  setCutout as csSetCutout, setPhotoBorder as csSetPhotoBorder, setBgStyle as csSetBgStyle,
+  resetHookTab as csResetHookTab, resetPhotoTab as csResetPhotoTab,
+  resetColorTab as csResetColorTab, resetMoreTab as csResetMoreTab,
+  resetAllTabs as csResetAllTabs,
 } from "../lib/shareStudioControls";
 import { PHOTO_BOX } from "../lib/photoCrop";
 import PhotoCropScreen from "./PhotoCropScreen";
@@ -177,7 +182,27 @@ export default function ShareStudio(props: ShareStudioProps) {
   }));
   const {
     format, activeTab, hook, handleEnabled, handle, hidePrice, photoMode, zoom, fx, fy, accent,
+    cutout, photoBorder, bgStyle,
   } = controls;
+
+  // The one default-hook value this screen's variant actually uses -
+  // threaded into resetHookTab/resetAllTabs so Reset restores THIS variant's
+  // own default (the win variant's profit-driven pitch, never the scan
+  // variant's DEFAULT_HOOK) rather than a hardcoded constant.
+  const defaultHookForVariant = isWin ? (winData && winData.profit > 0 ? WIN_PROFIT_HOOK : null) : DEFAULT_HOOK;
+
+  // CUTOUT AVAILABILITY (v7, item 3): the server can answer a cutout:true
+  // request with 501 {error:"cutout_unavailable"} (deal-ai-pro's
+  // app/api/share-card/route.ts - the feature isn't shippable yet, see that
+  // route's own comment). Once a request comes back that way, the control
+  // disables itself with a "Coming soon" hint rather than letting the user
+  // keep re-triggering a request that can never succeed.
+  const [cutoutAvailable, setCutoutAvailable] = useState(true);
+  // Shown once a cutout:true render has been in flight for >3s - a real
+  // background-removal pass is slower than a normal card render, so the
+  // plain "render Nms" readout alone would read as hung rather than working.
+  const [cuttingOut, setCuttingOut] = useState(false);
+  const cutoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Ephemeral inline-editor UI state only - not part of the persisted/
   // testable controls state above.
@@ -256,6 +281,14 @@ export default function ShareStudio(props: ShareStudioProps) {
     setVideoState("idle");
     setVideoError(null);
     setCropOpen(false);
+    // Cutout availability/progress are session-scoped, same as every other
+    // v7 control (see initialStudioControls's own comment) - a fresh open
+    // re-probes rather than carrying forward a 501 learned on a PREVIOUS
+    // scan's render (the server's own gate is unconditional today, but
+    // nothing about this screen should assume that forever).
+    setCutoutAvailable(true);
+    setCuttingOut(false);
+    if (cutoutTimerRef.current) clearTimeout(cutoutTimerRef.current);
     // First paint shows a spinner on a dark box immediately - the debounced
     // fetch below doesn't fire for another 350ms, but there's never a gap
     // where this screen shows nothing at all.
@@ -306,11 +339,20 @@ export default function ShareStudio(props: ShareStudioProps) {
 
     const effectiveHandle = handleEnabled ? handle : null;
     const photoAdjust = { mode: photoMode, zoom, fx, fy };
+    // CUTOUT PROGRESS (v7, item 3): a cutout:true render can take noticeably
+    // longer than a normal one - this timer only ever shows "Cutting out…"
+    // once the request has actually been in flight for >3s, never on a
+    // normal fast render. Cleared in every exit path below.
+    if (cutoutTimerRef.current) clearTimeout(cutoutTimerRef.current);
+    if (cutout && cutoutAvailable) {
+      cutoutTimerRef.current = setTimeout(() => { if (seq === requestSeqRef.current) setCuttingOut(true); }, 3000);
+    }
     const base = isWin
       ? buildShareCardPayload({
           variant: "win", format, itemName,
           boughtPrice: winData!.boughtPrice, soldPrice: winData!.soldPrice, profit: winData!.profit,
           hook, handle: effectiveHandle, hidePrice, accent, photoAdjust,
+          bgStyle, photoBorder, cutout: cutout && cutoutAvailable,
         })
       : buildShareCardPayload({
           variant: "scan", format, itemName,
@@ -318,9 +360,12 @@ export default function ShareStudio(props: ShareStudioProps) {
           verdict: heroVerdict ?? null, toneOverride,
           isEstimate: profitConfidence === "estimate",
           hook, handle: effectiveHandle, hidePrice, accent, photoAdjust,
+          bgStyle, photoBorder, cutout: cutout && cutoutAvailable,
         });
 
     const result = await fetchShareCardPng({ ...base, photo: resolved.photo, scale: requestedScale }, token, controller.signal);
+    if (cutoutTimerRef.current) clearTimeout(cutoutTimerRef.current);
+    setCuttingOut(false);
     if (seq !== requestSeqRef.current) return null; // superseded by a newer request
     setLoading(false);
     setRenderMs(result.ms);
@@ -330,6 +375,17 @@ export default function ShareStudio(props: ShareStudioProps) {
       setFetchError(null);
       if (isOwner) setDebugBytes(result.size ?? null);
       return result.uri;
+    } else if (result.errorCode === "cutout_unavailable") {
+      // DISABLE, DON'T CRASH, DON'T ERROR-BOX (v7, item 3): the server's
+      // cutout gate is unconditional today (deal-ai-pro's
+      // app/api/share-card/route.ts:91's `if (cutout)` check, before any
+      // photo work) - so this flips the control off and lets the already-
+      // wired debounced-fetch effect (cutout is one of its deps) re-request
+      // the SAME render without cutout, rather than leaving the user stuck
+      // on a red error box for a toggle that was never going to work.
+      setCutoutAvailable(false);
+      setControls((prev) => csSetCutout(prev, false));
+      return null;
     } else if (result.stage !== "aborted") {
       setRenderStatus("failed");
       setFetchError({
@@ -368,6 +424,7 @@ export default function ShareStudio(props: ShareStudioProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     visible, format, hook, handleEnabled, handle, hidePrice, photoMode, zoom, fx, fy, accent,
+    cutout, photoBorder, bgStyle, cutoutAvailable,
     scanId, itemName, photoBase64, photoUri, paidPrice, sellPrice, profitConfidence,
     heroVerdict, toneOverride, winData,
   ]);
@@ -447,6 +504,64 @@ export default function ShareStudio(props: ShareStudioProps) {
     Keyboard.dismiss();
   }
 
+  function chooseSurpriseAccent() {
+    chooseAccent(pickSurpriseAccent(accent));
+  }
+
+  // v7 Photo tab - Cut out/Border/Background. SESSION-ONLY, same as accent -
+  // never persisted (see initialStudioControls's own comment).
+  function toggleCutout() {
+    if (!cutoutAvailable) return; // disabled - see the 501 handling in runFetch
+    setControls((prev) => csSetCutout(prev, !prev.cutout));
+  }
+
+  function togglePhotoBorder() {
+    setControls((prev) => csSetPhotoBorder(prev, !prev.photoBorder));
+  }
+
+  function chooseBgStyle(style: BgStyle) {
+    setControls((prev) => csSetBgStyle(prev, style));
+  }
+
+  // PER-TAB RESET (v7, founder device finding #1) - each pill touches only
+  // its own tab's fields (see shareStudioControls.ts's resetXTab functions);
+  // the Hook tab's reset also writes through persistPrefs so "persist what
+  // the user picks" (item 5) stays true for a reset-to-default too, not
+  // just an explicit chip tap.
+  function resetHookTab() {
+    setControls((prev) => csResetHookTab(prev, defaultHookForVariant));
+    setCustomHookOpen(false);
+    persistPrefs({ hook: defaultHookForVariant });
+  }
+
+  function resetPhotoTab() {
+    setControls((prev) => csResetPhotoTab(prev));
+    persistPrefs({ photoMode: "whole" });
+    setCropOpen(false);
+  }
+
+  function resetColorTab() {
+    setControls((prev) => csResetColorTab(prev));
+    setHexOpen(false);
+    setHexError(false);
+  }
+
+  function resetMoreTab() {
+    setControls((prev) => csResetMoreTab(prev));
+    setHandleEditOpen(false);
+    persistPrefs({ handleEnabled: false });
+  }
+
+  function resetAll() {
+    setControls((prev) => csResetAllTabs(prev, defaultHookForVariant));
+    setCustomHookOpen(false);
+    setHandleEditOpen(false);
+    setHexOpen(false);
+    setHexError(false);
+    setCropOpen(false);
+    persistPrefs({ hook: defaultHookForVariant, photoMode: "whole", handleEnabled: false });
+  }
+
   async function copyCaption() {
     const text = hook ? `${hook}\n\n${CAPTION_TAGLINE}` : CAPTION_TAGLINE;
     try {
@@ -509,6 +624,7 @@ export default function ShareStudio(props: ShareStudioProps) {
             variant: "win", format, itemName,
             boughtPrice: winData!.boughtPrice, soldPrice: winData!.soldPrice, profit: winData!.profit,
             hook, handle: effectiveHandle, hidePrice, accent, photoAdjust,
+            bgStyle, photoBorder, cutout: cutout && cutoutAvailable,
           })
         : buildShareVideoPayload({
             variant: "scan", format, itemName,
@@ -516,6 +632,7 @@ export default function ShareStudio(props: ShareStudioProps) {
             verdict: heroVerdict ?? null, toneOverride,
             isEstimate: profitConfidence === "estimate",
             hook, handle: effectiveHandle, hidePrice, accent, photoAdjust,
+            bgStyle, photoBorder, cutout: cutout && cutoutAvailable,
           });
       const controller = new AbortController();
       const result = await fetchShareVideoMp4({ ...base, photo: resolved.photo }, token, controller.signal);
@@ -608,6 +725,13 @@ export default function ShareStudio(props: ShareStudioProps) {
             <>
               <PreviewShimmer />
               <ActivityIndicator style={st.previewSpinner} color={C.green} size="large" />
+              {/* CUTOUT PROGRESS (v7, item 3) - only once a cutout:true
+                  render has been in flight for >3s (see runFetch's timer) -
+                  a plain spinner alone reads as hung for the slower pass a
+                  real background-removal render takes. */}
+              {cuttingOut ? (
+                <Text style={st.cuttingOutText}>Cutting out…</Text>
+              ) : null}
             </>
           ) : null}
           {fetchError ? (
@@ -692,9 +816,20 @@ export default function ShareStudio(props: ShareStudioProps) {
                   style={[st.chip, isCustomHookActive && st.chipActive]}
                   onPress={() => { setCustomHookText(isCustomHookActive ? (hook as string) : ""); setCustomHookOpen(true); }}
                 >
+                  {/* "Custom: <text>" (v7, item 5) - a bare custom hook value
+                      used to read identically to any other active chip,
+                      which is exactly why a persisted custom hook from a
+                      PRIOR scan ("Yeah") reportedly didn't look highlighted
+                      on a fresh card - the "Custom:" prefix makes clear this
+                      chip IS the active hook, not a label to tap to edit it. */}
                   <Text style={[st.chipText, isCustomHookActive && st.chipTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
-                    {isCustomHookActive ? hook : "Custom…"}
+                    {isCustomHookActive ? `Custom: ${hook}` : "Custom…"}
                   </Text>
+                </TouchableOpacity>
+                {/* RESET (v7, item 1) - restores this variant's own default
+                    hook (scan: DEFAULT_HOOK; win: WIN_PROFIT_HOOK/None). */}
+                <TouchableOpacity style={st.resetChip} onPress={resetHookTab}>
+                  <Text style={st.resetChipText} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Reset</Text>
                 </TouchableOpacity>
               </ScrollView>
             )
@@ -718,9 +853,38 @@ export default function ShareStudio(props: ShareStudioProps) {
                   <Text style={[st.chipText, st.chipTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Adjust</Text>
                 </TouchableOpacity>
               ) : null}
-              <Text style={st.photoHint} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
-                {photoMode === "fill" ? "Tap Adjust to move or zoom the crop" : "Whole photo — switch to Fill to crop"}
-              </Text>
+              {/* CUT OUT (v7, item 3) - disables itself with a "Coming soon"
+                  hint the instant the server answers a request with 501
+                  cutout_unavailable (see runFetch), rather than letting the
+                  user keep tapping a toggle that can never succeed. */}
+              <TouchableOpacity
+                style={[st.chip, cutout && cutoutAvailable && st.chipActive, !cutoutAvailable && st.chipDisabled]}
+                onPress={toggleCutout}
+                disabled={!cutoutAvailable}
+              >
+                <Text style={[st.chipText, cutout && cutoutAvailable && st.chipTextActive, !cutoutAvailable && st.chipDisabledText]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
+                  {cutoutAvailable ? "Cut out" : "Cut out · Coming soon"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[st.chip, photoBorder && st.chipActive]} onPress={togglePhotoBorder}>
+                <Text style={[st.chipText, photoBorder && st.chipTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Border</Text>
+              </TouchableOpacity>
+              {/* BACKGROUND GROUP (v7, item 3) - Blur/Dark/Tint (bgStyle),
+                  what fills the photo box behind the contained photo.
+                  Default Blur. */}
+              <View style={st.chipGroupDivider} />
+              {BG_STYLES.map((style) => (
+                <TouchableOpacity key={style} style={[st.chip, bgStyle === style && st.chipActive]} onPress={() => chooseBgStyle(style)}>
+                  <Text style={[st.chipText, bgStyle === style && st.chipTextActive]} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
+                    {style === "blur" ? "Blur" : style === "dark" ? "Dark" : "Tint"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              {/* RESET (v7, item 1) - Whole, no crop, no cutout, border on,
+                  blur background. */}
+              <TouchableOpacity style={st.resetChip} onPress={resetPhotoTab}>
+                <Text style={st.resetChipText} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Reset</Text>
+              </TouchableOpacity>
             </ScrollView>
           ) : null}
 
@@ -748,13 +912,13 @@ export default function ShareStudio(props: ShareStudioProps) {
               </View>
             ) : (
               <View>
-                {/* CAPTION (v6, item C): the server now only ever lets an
-                    accent recolor the grid/corners/background tint - the
-                    verdict color itself is untouched - so this row needs to
-                    say what it actually changes, not imply it recolors the
-                    whole card. */}
+                {/* CAPTION (v7, item 4): the server now lets accent recolor
+                    the grid, corners, photo frame (the Border outline), AND
+                    the backdrop glow - a wider reach than v6's "grid,
+                    corners and background" copy - the verdict color itself
+                    (number/stamp/label) stays untouched either way. */}
                 <Text style={st.colorCaption} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>
-                  Changes grid, corners and background
+                  Changes grid, corners, photo frame and glow
                 </Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.rowScrollContent}>
                   <TouchableOpacity
@@ -780,6 +944,15 @@ export default function ShareStudio(props: ShareStudioProps) {
                     onPress={openHexEditor}
                   >
                     <Text style={st.swatchAutoText}>#</Text>
+                  </TouchableOpacity>
+                  {/* SURPRISE ME (v7, item 4) - a random swatch from the 12,
+                      never a visible no-op repeat of whatever's active. */}
+                  <TouchableOpacity style={st.surprisePill} onPress={chooseSurpriseAccent}>
+                    <Text style={st.surprisePillText} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>🎲 Surprise me</Text>
+                  </TouchableOpacity>
+                  {/* RESET (v7, item 1) - back to Auto. */}
+                  <TouchableOpacity style={st.resetChip} onPress={resetColorTab}>
+                    <Text style={st.resetChipText} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Reset</Text>
                   </TouchableOpacity>
                 </ScrollView>
               </View>
@@ -835,6 +1008,10 @@ export default function ShareStudio(props: ShareStudioProps) {
                     <Text style={st.leaderboardLinkText} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>See the leaderboard →</Text>
                   </TouchableOpacity>
                 ) : null}
+                {/* RESET (v7, item 1) - handle off, price shown. */}
+                <TouchableOpacity style={st.resetChip} onPress={resetMoreTab}>
+                  <Text style={st.resetChipText} numberOfLines={1} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Reset</Text>
+                </TouchableOpacity>
               </ScrollView>
             )
           ) : null}
@@ -856,9 +1033,17 @@ export default function ShareStudio(props: ShareStudioProps) {
               </Text>
             </View>
           ) : null}
-          <TouchableOpacity style={st.copyBtn} onPress={copyCaption}>
-            <Text style={st.copyBtnText} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>{copied ? "Copied!" : "Copy caption"}</Text>
-          </TouchableOpacity>
+          <View style={st.linkRow}>
+            <TouchableOpacity style={st.copyBtn} onPress={copyCaption}>
+              <Text style={st.copyBtnText} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>{copied ? "Copied!" : "Copy caption"}</Text>
+            </TouchableOpacity>
+            {/* RESET ALL (v7, item 1) - every tab's defaults at once, one
+                tap, above Share - never format/activeTab (see
+                shareStudioControls.ts's resetAllTabs). */}
+            <TouchableOpacity style={st.copyBtn} onPress={resetAll}>
+              <Text style={st.resetAllText} maxFontSizeMultiplier={CONTROL_FONT_SCALE}>Reset all</Text>
+            </TouchableOpacity>
+          </View>
           <View style={st.footerBtnRow}>
             <TouchableOpacity
               style={[st.shareBtn, (!previewUri || sharing) && st.shareBtnDisabled]}
@@ -948,6 +1133,9 @@ const st = StyleSheet.create({
   previewPlaceholder: { width: "100%", height: "100%", borderRadius: 12, backgroundColor: C.surfaceHigh },
   previewSpinner: { position: "absolute" },
   previewShimmer: { position: "absolute", top: 8, left: PREVIEW_PAD_H + 8, right: PREVIEW_PAD_H + 8, height: 3, borderRadius: 2, backgroundColor: C.green },
+  // CUTOUT PROGRESS (v7, item 3) - only shown once a cutout render has run
+  // past the 3s threshold (see runFetch's timer).
+  cuttingOutText: { position: "absolute", bottom: 14, color: C.green, fontSize: 13, fontWeight: "800" },
   errorBox: { position: "absolute", left: 16, right: 16, bottom: 10, backgroundColor: C.surface, borderWidth: 1, borderColor: C.red + "50", borderRadius: 12, padding: 14 },
   errorTitle: { color: C.red, fontSize: 14, fontWeight: "800", marginBottom: 4 },
   errorDetail: { color: C.text3, fontSize: 11, fontFamily: "monospace" as any, marginBottom: 4 },
@@ -984,6 +1172,21 @@ const st = StyleSheet.create({
   chipActive: { backgroundColor: C.green, borderColor: C.green },
   chipText: { color: C.text2, fontSize: 13, fontWeight: "700" },
   chipTextActive: { color: C.greenDark, fontWeight: "900" },
+  // DISABLED (v7, item 3) - Cut out once the server's answered 501
+  // cutout_unavailable - never tappable again this session, with a
+  // "Coming soon" hint right on the chip itself.
+  chipDisabled: { opacity: 0.45 },
+  chipDisabledText: { color: C.text4 },
+  // RESET PILL (v7, item 1) - one per tab's content row, deliberately a
+  // plain outline (never chipActive's green fill) so it never reads as
+  // "currently selected."
+  resetChip: { minHeight: 44, paddingHorizontal: 14, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, alignItems: "center", justifyContent: "center" },
+  resetChipText: { color: C.text3, fontSize: 13, fontWeight: "700" },
+  // Thin vertical rule separating the photo-mode chips from the Background
+  // group in the Photo tab's one scroll row.
+  chipGroupDivider: { width: 1, height: 28, backgroundColor: C.border },
+  surprisePill: { minHeight: 44, paddingHorizontal: 14, borderRadius: 100, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.surface, alignItems: "center", justifyContent: "center" },
+  surprisePillText: { color: C.text2, fontSize: 13, fontWeight: "700" },
 
   inlineInputRow: { flexDirection: "row", alignItems: "center", backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.green, borderRadius: 100, paddingLeft: 16, paddingRight: 8, minHeight: 44, height: 44 },
   inlineInput: { flex: 1, color: C.text1, fontSize: 14, fontWeight: "600", paddingVertical: Platform.OS === "ios" ? 10 : 6 },
@@ -1026,6 +1229,9 @@ const st = StyleSheet.create({
   videoBtnDisabled: { opacity: 0.4, borderColor: C.border },
   videoBtnText: { color: C.green, fontSize: 14, fontWeight: "900", textAlign: "center" },
   videoHint: { color: C.text4, fontSize: 11, fontWeight: "600", textAlign: "center", marginTop: 6 },
+  // Copy caption + Reset all (v7, item 1) share one row, both "above Share".
+  linkRow: { flexDirection: "row", justifyContent: "center", gap: 18 },
   copyBtn: { alignItems: "center", paddingVertical: 8, marginBottom: 2 },
   copyBtnText: { color: C.text3, fontSize: 13, fontWeight: "700" },
+  resetAllText: { color: C.text3, fontSize: 13, fontWeight: "700", textDecorationLine: "underline" },
 });
