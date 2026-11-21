@@ -25,4 +25,16 @@ describe("formatMoney", () => {
       expect(formatMoney(n)).not.toContain("$-");
     }
   });
+  // ScannerScreen.tsx's "Tag: $..." label (result step, compact tag price
+  // row) used to echo the raw buyPrice TextInput string instead of running
+  // it through this formatter - "10.5" printed as "Tag: $10.5" instead of
+  // "Tag: $10.50", while a whole-dollar tag like "28" was already fine by
+  // accident. Fixed by routing that label through fmtMoney(enteredBp) -
+  // these two cases are exactly what that fix depends on.
+  test("a non-integer tag price pads to two decimals ($10.5 -> $10.50)", () => {
+    expect(formatMoney(10.5)).toBe("$10.50");
+  });
+  test("an integer tag price stays undecorated ($28 stays $28)", () => {
+    expect(formatMoney(28)).toBe("$28");
+  });
 });

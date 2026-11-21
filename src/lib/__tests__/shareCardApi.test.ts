@@ -15,6 +15,11 @@ const mockFileCreate = jest.fn();
 // without caring about file size at all; tests for the v9 guard itself
 // override it per-case.
 let mockFileSize: number | null = 999999;
+// v10, requirement 2's ratio guard needs the ORIGINAL file and the
+// normalized OUTPUT file to report DIFFERENT sizes (that's the whole
+// point) - keyed by uri, falling back to mockFileSize when a uri has no
+// specific entry, so every pre-v10 test above keeps working unchanged.
+let mockFileSizeByUri: Record<string, number> = {};
 
 jest.mock("expo-image-manipulator", () => ({
   manipulateAsync: (...args: any[]) => mockManipulateAsync(...args),
@@ -34,7 +39,7 @@ jest.mock("expo-file-system", () => {
     }
     create = mockFileCreate;
     write = mockFileWrite;
-    get size() { return mockFileSize; }
+    get size() { return this.uri in mockFileSizeByUri ? mockFileSizeByUri[this.uri] : mockFileSize; }
   }
   return { File, Paths: { cache: "file:///cache" } };
 });
@@ -61,6 +66,7 @@ beforeEach(() => {
   mockFileWrite.mockClear();
   mockFileCreate.mockClear();
   mockFileSize = 999999;
+  mockFileSizeByUri = {};
   mockGetSize.mockReset();
 });
 
@@ -74,10 +80,26 @@ describe("normalizePhotoOrientation - the crop screen's single source of truth f
 
     const result = await normalizePhotoOrientation("file:///var/mobile/original.jpg");
 
-    expect(result).toEqual({ uri: "file:///cache/normalized.jpg", width: 1280, height: 667 });
+    expect(result).toEqual({ uri: "file:///cache/normalized.jpg", width: 1280, height: 667, bytes: 999999, usedOriginal: false });
     // Never asked mockManipulateAsync to resize/rotate - a zero-op pass is
     // enough to bake in orientation.
     expect(mockManipulateAsync).toHaveBeenCalledWith("file:///var/mobile/original.jpg", [], { compress: 0.92, format: "jpeg" });
+  });
+
+  // v10, requirement 1 - the onStage instrumentation callback: every stage
+  // this function goes through, for a caller (ShareStudio.tsx) to fold into
+  // the owner readout.
+  test("reports every stage through onStage - source bytes, the manipulate result, and the valid verdict", async () => {
+    mockManipulateAsync.mockResolvedValue({ uri: "file:///cache/normalized.jpg", width: 1280, height: 667 });
+    const stages: string[] = [];
+
+    await normalizePhotoOrientation("file:///var/mobile/original.jpg", (line) => stages.push(line));
+
+    expect(stages).toEqual([
+      "original: bytes=999999",
+      "manipulate: 1280x667 bytes=999999",
+      "valid: true",
+    ]);
   });
 
   test("a data: URI is written to a cache file FIRST - mockManipulateAsync is never handed the raw base64 string", async () => {
@@ -138,7 +160,7 @@ describe("normalizePhotoOrientation - v9 reject-and-fall-back-to-original (found
 
     const result = await normalizePhotoOrientation("file:///var/mobile/original.jpg");
 
-    expect(result).toEqual({ uri: "file:///var/mobile/original.jpg", width: 1000, height: 1920 });
+    expect(result).toEqual({ uri: "file:///var/mobile/original.jpg", width: 1000, height: 1920, bytes: 999999, usedOriginal: true });
     expect(mockGetSize).toHaveBeenCalledWith("file:///var/mobile/original.jpg", expect.any(Function), expect.any(Function));
   });
 
@@ -158,7 +180,85 @@ describe("normalizePhotoOrientation - v9 reject-and-fall-back-to-original (found
 
     const result = await normalizePhotoOrientation("file:///var/mobile/original.jpg");
 
-    expect(result).toEqual({ uri: "file:///cache/normalized.jpg", width: 1000, height: 1920 });
+    expect(result).toEqual({ uri: "file:///cache/normalized.jpg", width: 1000, height: 1920, bytes: 250000, usedOriginal: false });
     expect(mockGetSize).not.toHaveBeenCalled();
+  });
+});
+
+// v10, requirement 2 - the AUTOMATIC fallback (no tap needed): a normalize
+// result that's technically valid by the old (edge/absolute-size) rules
+// alone, but is still a tiny fraction of the ORIGINAL's own byte size, when
+// that original was substantial. Generalizes the founder's "Studio photo
+// shrunk to 3x6" repro - a thumbnail-grade source standing in for the full
+// photo - beyond just "under 300px."
+describe("isNormalizedPhotoValid - v10 ratio guard (normalized output vs the ORIGINAL's own size)", () => {
+  test("rejects a normalized output under 25% of a substantial (>300KB) original's size", () => {
+    const originalBytes = 400 * 1024; // 400KB original
+    const normalizedBytes = 50 * 1024; // 50KB output - 12.5% of the original
+    expect(isNormalizedPhotoValid(1000, 1920, normalizedBytes, originalBytes)).toBe(false);
+  });
+
+  test("accepts a normalized output at/above 25% of a substantial original's size", () => {
+    const originalBytes = 400 * 1024;
+    const normalizedBytes = 120 * 1024; // 30% of the original
+    expect(isNormalizedPhotoValid(1000, 1920, normalizedBytes, originalBytes)).toBe(true);
+  });
+
+  test("never applies the ratio check when the original itself was small (<=300KB)", () => {
+    const originalBytes = 200 * 1024; // 200KB original - genuinely small to begin with
+    const normalizedBytes = 10 * 1024; // 5% of the original, but nothing's wrong here
+    expect(isNormalizedPhotoValid(1000, 1920, normalizedBytes, originalBytes)).toBe(true);
+  });
+
+  test("never applies the ratio check when originalBytes is unknown (remote/data: uri with no local stat)", () => {
+    expect(isNormalizedPhotoValid(1000, 1920, 10 * 1024, null)).toBe(true);
+  });
+});
+
+describe("normalizePhotoOrientation - v10 ratio guard wired end to end", () => {
+  test("a valid-dimension output that's still a fraction of a substantial original falls back to the original automatically, no tap needed", async () => {
+    const originalUri = "file:///var/mobile/original.jpg";
+    const outputUri = "file:///cache/normalized.jpg";
+    // Original is a real 480KB photo (the founder's "Use original" repro).
+    mockFileSizeByUri[originalUri] = 480 * 1024;
+    // Output passes the old edge/absolute-size checks (1000x1920, not
+    // microscopic) but is only 50KB - 10% of the 480KB original.
+    mockFileSizeByUri[outputUri] = 50 * 1024;
+    mockManipulateAsync.mockResolvedValue({ uri: outputUri, width: 1000, height: 1920 });
+    mockGetSize.mockImplementation((_uri: string, success: (w: number, h: number) => void) => success(1000, 1920));
+
+    const result = await normalizePhotoOrientation(originalUri);
+
+    expect(result?.usedOriginal).toBe(true);
+    expect(result?.uri).toBe(originalUri);
+  });
+});
+
+// v10 ROOT-CAUSE FIX - see shareCardApi.ts's normalizePhotoOrientation
+// header comment: the fallback probe (Image.getSize on the ORIGINAL uri)
+// used to be unguarded, so its rejection propagated straight out of this
+// function - which ShareStudio.tsx's `.catch(() => setNormalizedPhoto(null))`
+// then swallowed into a PERMANENT null indistinguishable from "still
+// normalizing" (the founder device's "natural=—"). This function must never
+// throw; the ONLY way to land in the error state is this resolved null.
+describe("normalizePhotoOrientation - v10 never throws, even when BOTH the manipulate attempt and the original-uri fallback fail", () => {
+  test("manipulateAsync throwing AND the fallback Image.getSize rejecting resolves to null, never an unhandled rejection", async () => {
+    mockManipulateAsync.mockRejectedValue(new Error("native module crashed"));
+    mockGetSize.mockImplementation((_uri: string, _success: any, failure: (e: any) => void) => failure(new Error("bridge message too large")));
+
+    const result = await normalizePhotoOrientation("data:image/jpeg;base64,/9j/4AAQSkZJRg==");
+
+    expect(result).toBeNull();
+  });
+
+  test("a rejecting fallback is still reported via onStage, not silently dropped", async () => {
+    mockManipulateAsync.mockResolvedValue({ uri: "file:///cache/normalized.jpg", width: 10, height: 10 }); // rejected on edge size
+    mockGetSize.mockImplementation((_uri: string, _success: any, failure: (e: any) => void) => failure(new Error("bridge message too large")));
+    const stages: string[] = [];
+
+    const result = await normalizePhotoOrientation("file:///var/mobile/original.jpg", (line) => stages.push(line));
+
+    expect(result).toBeNull();
+    expect(stages.some((s) => s.includes("fallback getImageSize: failed"))).toBe(true);
   });
 });

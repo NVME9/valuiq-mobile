@@ -20,8 +20,18 @@ try { FileSystem = require("expo-file-system"); } catch { FileSystem = null; }
 // scan upload itself. The old flat "reject over 5MB" rule now only applies
 // as a FALLBACK, if manipulation itself throws (missing/broken module) -
 // the normal path never needs it, since the downscaled photo is always small.
-const MAX_LONG_EDGE = 1400;
+//
+// v10, requirement 3 ("payload must match the crop screen's photo"): tries
+// 1400px first, same as before, but if THAT still lands over
+// PAYLOAD_MAX_BYTES it steps the long edge down (1200, then 1000 - never
+// lower, per requirement 3's "long edge at least 1000px unless the original
+// is smaller") at the SAME quality (0.85 - requirement 3 forbids trading
+// quality away to hit the budget). A photo that's still too big at 1000px/
+// 0.85 ships at 1000px anyway - the floor wins over the budget.
+const LONG_EDGE_STEPS = [1400, 1200, 1000];
+const MIN_LONG_EDGE_FLOOR = 1000;
 const JPEG_QUALITY = 0.85;
+const PAYLOAD_MAX_BYTES = 4 * 1024 * 1024;
 const LOCAL_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 
 function estimateBase64Bytes(b64: string): number {
@@ -42,6 +52,14 @@ export interface NormalizedPhoto {
   uri: string;
   width: number;
   height: number;
+  // v10, requirement 1 - the on-disk/base64 byte size backing `uri`, null
+  // for a remote uri or when the probe itself failed. Lets a caller show
+  // (and the ratio guard below compare) real bytes, not just a dimension.
+  bytes: number | null;
+  // v10, requirement 2 - true when this is the ORIGINAL photo (the
+  // oriented re-encode was rejected, or manipulation/materialization threw
+  // outright) rather than the freshly oriented output.
+  usedOriginal: boolean;
 }
 
 // v9 - REJECT A BAD NORMALIZATION OUTPUT (founder device: owner readout
@@ -59,10 +77,27 @@ export interface NormalizedPhoto {
 // never to a different decode's dimensions.
 export const MIN_NORMALIZED_EDGE_PX = 300;
 const MIN_NORMALIZED_FILE_BYTES = 4096;
+// v10, requirement 2 (AUTOMATIC fallback, no tap needed) - founder device:
+// a technically-valid-looking normalize (edges >=300, file not microscopic)
+// that is STILL a fraction of the original's own byte size - the "Studio
+// photo shrunk to 3x6" repro's general shape, a thumbnail-grade source
+// quietly standing in for the full photo. Only applies once the original
+// itself was substantial (a genuinely small original has nothing wrong with
+// also producing a small, honest re-encode).
+export const MIN_NORMALIZED_RATIO = 0.25;
+export const RATIO_CHECK_MIN_ORIGINAL_BYTES = 300 * 1024;
 
-export function isNormalizedPhotoValid(width: number, height: number, bytes: number | null): boolean {
+export function isNormalizedPhotoValid(
+  width: number, height: number, bytes: number | null,
+  originalBytes: number | null = null
+): boolean {
   if (!(width >= MIN_NORMALIZED_EDGE_PX) || !(height >= MIN_NORMALIZED_EDGE_PX)) return false;
   if (bytes != null && bytes < MIN_NORMALIZED_FILE_BYTES) return false;
+  if (
+    bytes != null && originalBytes != null &&
+    originalBytes > RATIO_CHECK_MIN_ORIGINAL_BYTES &&
+    bytes < originalBytes * MIN_NORMALIZED_RATIO
+  ) return false;
   return true;
 }
 
@@ -79,6 +114,19 @@ function normalizedFileBytes(uri: string): number | null {
   } catch {
     return null;
   }
+}
+
+// v10, requirement 1/2 - byte size of ANY photo uri (data: or file://),
+// used to probe the ORIGINAL before normalization touches it, so the ratio
+// guard above has something real to compare the normalized output against.
+// null (never throws) for a remote uri or a failed stat - "unknown," not a
+// reason to reject.
+function photoByteSize(uri: string): number | null {
+  if (uri.startsWith("data:")) {
+    const match = /^data:[^;,]+;base64,([\s\S]*)$/.exec(uri);
+    return match ? estimateBase64Bytes(match[1]) : null;
+  }
+  return normalizedFileBytes(uri);
 }
 
 // Writes a data: URI's base64 payload to a cache file FIRST (v8, item 1) -
@@ -108,56 +156,122 @@ async function materializeDataUri(uri: string): Promise<string> {
 // result into BOTH the crop screen (as its `natural` prop) and the final
 // share payload (via resolveSharePhoto's `normalized` param below), so the
 // server's own sharp(...).rotate() has nothing left to do.
-export async function normalizePhotoOrientation(uri: string): Promise<NormalizedPhoto> {
-  const srcUri = await materializeDataUri(uri);
-  const out = await ImageManipulator.manipulateAsync(srcUri, [], {
-    compress: 0.92, format: ImageManipulator.SaveFormat.JPEG,
-  });
-  if (isNormalizedPhotoValid(out.width, out.height, normalizedFileBytes(out.uri))) {
-    return { uri: out.uri, width: out.width, height: out.height };
+// v10 ROOT-CAUSE FIX (founder device: owner readout natural=— decoded=3x6 -
+// the crop screen and the share payload both silently painted a degraded
+// photo with NO error shown): this function used to let the fallback probe
+// below (Image.getSize on the ORIGINAL uri) throw straight out of the
+// function. A large original photo is a sizeable base64 string, and
+// Image.getSize on some devices/platforms can reject on exactly that (the
+// same native-bridge-size concern materializeDataUri's own comment already
+// documents for manipulateAsync) - when it did, the rejection propagated
+// out of normalizePhotoOrientation uncaught, and ShareStudio.tsx's
+// `.catch(() => setNormalizedPhoto(null))` swallowed it into a PERMANENT
+// null that looks identical to "still normalizing" (natural=—) - so
+// `effectiveNormalizedPhoto` stayed null for the rest of the session and
+// every caller quietly fell through to whatever degraded bytes were sitting
+// in photoBase64/photoUri (here, nothing new was ever retried - natural=—,
+// decoded=3x6). Fixed by never letting ANY step throw out of this function:
+// both the manipulate attempt and the fallback probe are now individually
+// guarded, each stage is reported via `onStage` (requirement 1's
+// instrumentation), and only when BOTH genuinely fail does this resolve to
+// null - the one case PhotoCropScreen's own "Use original" error state is
+// still for (requirement 2's last sentence).
+export async function normalizePhotoOrientation(
+  uri: string,
+  onStage?: (line: string) => void
+): Promise<NormalizedPhoto | null> {
+  const log = onStage || (() => {});
+  let originalBytes: number | null = null;
+  try { originalBytes = photoByteSize(uri); } catch { originalBytes = null; }
+  log(`original: bytes=${originalBytes ?? "—"}`);
+
+  let srcUri = uri;
+  try {
+    srcUri = await materializeDataUri(uri);
+  } catch (e: any) {
+    log(`materialize: failed (${String(e?.message || e)}) - using raw uri`);
+    srcUri = uri;
   }
-  // REJECTED - fall back to the ORIGINAL uri (never the materialized
+
+  try {
+    const out = await ImageManipulator.manipulateAsync(srcUri, [], {
+      compress: 0.92, format: ImageManipulator.SaveFormat.JPEG,
+    });
+    const outBytes = normalizedFileBytes(out.uri);
+    log(`manipulate: ${out.width}x${out.height} bytes=${outBytes ?? "—"}`);
+    if (isNormalizedPhotoValid(out.width, out.height, outBytes, originalBytes)) {
+      log("valid: true");
+      return { uri: out.uri, width: out.width, height: out.height, bytes: outBytes, usedOriginal: false };
+    }
+    log("valid: false - falling back to original");
+  } catch (e: any) {
+    log(`manipulate: failed (${String(e?.message || e)}) - falling back to original`);
+  }
+
+  // REJECTED/FAILED - fall back to the ORIGINAL uri (never the materialized
   // srcUri, which can carry the same bad write) and probe ITS dimensions
   // independently via Image.getSize, so the crop screen and the payload
   // both end up painting the same real photo instead of the broken file.
-  const size = await getImageSize(uri);
-  return { uri, width: size.width, height: size.height };
+  // GUARDED (the actual v10 fix - see header comment): a failure here no
+  // longer propagates out of this function.
+  try {
+    const size = await getImageSize(uri);
+    log(`fallback getImageSize: ${size.width}x${size.height}`);
+    return { uri, width: size.width, height: size.height, bytes: originalBytes, usedOriginal: true };
+  } catch (e: any) {
+    log(`fallback getImageSize: failed (${String(e?.message || e)})`);
+    return null;
+  }
+}
+
+export interface DownscaledPhoto {
+  base64: string;
+  width: number;
+  height: number;
 }
 
 // Downscales ONLY when the photo's longest edge actually exceeds the
-// budget (never upscales a smaller photo) - probes the real dimensions
-// first (Image.getSize works on a data: URI same as a file one) so a
-// photo that's already small just gets re-encoded at the target quality,
-// no resize action. Throws on any failure - the caller decides the
+// current step's target (never upscales a smaller photo) - probes the real
+// dimensions first (Image.getSize works on a data: URI same as a file one)
+// so a photo that's already small just gets re-encoded at the target
+// quality, no resize action. Throws on any failure - the caller decides the
 // fallback (see resolveSharePhoto below).
-async function downscalePhoto(base64Raw: string): Promise<string> {
+//
+// v10, requirement 3: steps the long edge down (LONG_EDGE_STEPS) at a FIXED
+// 0.85 quality until the result fits PAYLOAD_MAX_BYTES or hits the 1000px
+// floor - never trades quality for size, never goes below 1000px (or the
+// original's own size, if that's smaller to begin with).
+async function downscalePhoto(base64Raw: string): Promise<DownscaledPhoto> {
   const src = `data:image/jpeg;base64,${base64Raw}`;
   const { width, height } = await getImageSize(src);
-  const longEdge = Math.max(width, height);
-  const actions = longEdge > MAX_LONG_EDGE
-    ? [width >= height ? { resize: { width: MAX_LONG_EDGE } } : { resize: { height: MAX_LONG_EDGE } }]
-    : [];
-  const out = await ImageManipulator.manipulateAsync(src, actions, {
-    compress: JPEG_QUALITY, format: ImageManipulator.SaveFormat.JPEG, base64: true,
-  });
-  if (!out.base64) throw new Error("manipulateAsync produced no base64");
-  return out.base64;
+  return downscaleToStep(src, width, height);
 }
 
 // Same downscale budget as downscalePhoto above, but starting from an
 // already-normalized {uri, width, height} (v8, item 1) - no Image.getSize
 // probe needed, since the caller's width/height ALREADY agree with how the
 // photo paints (that's the whole point of normalizePhotoOrientation).
-async function downscaleFromNormalized(uri: string, width: number, height: number): Promise<string> {
+async function downscaleFromNormalized(uri: string, width: number, height: number): Promise<DownscaledPhoto> {
+  return downscaleToStep(uri, width, height);
+}
+
+async function downscaleToStep(src: string, width: number, height: number): Promise<DownscaledPhoto> {
   const longEdge = Math.max(width, height);
-  const actions = longEdge > MAX_LONG_EDGE
-    ? [width >= height ? { resize: { width: MAX_LONG_EDGE } } : { resize: { height: MAX_LONG_EDGE } }]
-    : [];
-  const out = await ImageManipulator.manipulateAsync(uri, actions, {
-    compress: JPEG_QUALITY, format: ImageManipulator.SaveFormat.JPEG, base64: true,
-  });
-  if (!out.base64) throw new Error("manipulateAsync produced no base64");
-  return out.base64;
+  let last: { base64: string; width: number; height: number } | null = null;
+  for (const target of LONG_EDGE_STEPS) {
+    const actions = longEdge > target
+      ? [width >= height ? { resize: { width: target } } : { resize: { height: target } }]
+      : [];
+    const out = await ImageManipulator.manipulateAsync(src, actions, {
+      compress: JPEG_QUALITY, format: ImageManipulator.SaveFormat.JPEG, base64: true,
+    });
+    if (!out.base64) throw new Error("manipulateAsync produced no base64");
+    last = { base64: out.base64, width: out.width, height: out.height };
+    if (estimateBase64Bytes(out.base64) <= PAYLOAD_MAX_BYTES || target <= MIN_LONG_EDGE_FLOOR) {
+      return last;
+    }
+  }
+  return last as DownscaledPhoto;
 }
 
 // Shared with ShareStudio.tsx so it knows NOT to bother normalizing a photo
@@ -169,16 +283,26 @@ export function isRemoteShareUrl(uri: string | null): boolean {
 
 export type SharePhoto = { base64: string } | { url: string };
 
-export type ResolvePhotoResult = { photo: SharePhoto } | { error: string };
+// v10, requirement 3 - the payload's own resolved pixel size travels
+// alongside `photo` (NOT inside it - `photo` is sent to the server
+// verbatim, see fetchShareCardPng, so it never carries debug-only fields),
+// so a caller can compare it against the crop screen's `natural` for the
+// "crop-screen vs payload" readout line. null width/height for a {url}
+// photo (no local pixels resolved) or the rare total-failure last resort.
+export type ResolvePhotoResult =
+  | { photo: SharePhoto; width: number | null; height: number | null }
+  | { error: string };
 
 // Owner-readout ONLY (v9, requirement 1's `payload=`) - a short label for
 // whatever resolveSharePhoto actually resolved to, so a repro can compare
 // it against the crop screen's own src=/natural= on the same screen instead
 // of trusting that the two code paths used the same bytes.
-export function describeSharePhoto(photo: SharePhoto | null): string {
-  if (!photo) return "none";
+export function describeSharePhoto(result: ResolvePhotoResult | null): string {
+  if (!result || "error" in result) return "none";
+  const photo = result.photo;
   if ("url" in photo) return `url:${photo.url.slice(-30)}`;
-  return `base64 ${(estimateBase64Bytes(photo.base64) / 1024).toFixed(0)}KB`;
+  const dims = result.width != null && result.height != null ? `${result.width}x${result.height} ` : "";
+  return `base64 ${dims}(${(estimateBase64Bytes(photo.base64) / 1024).toFixed(0)}KB)`;
 }
 
 // Prefers photoBase64 (raw, no data: prefix - the shape a fresh scan's own
@@ -199,12 +323,12 @@ export async function resolveSharePhoto(
   normalized?: NormalizedPhoto | null
 ): Promise<ResolvePhotoResult> {
   if (isRemoteShareUrl(photoUri)) {
-    return { photo: { url: photoUri as string } };
+    return { photo: { url: photoUri as string }, width: null, height: null };
   }
   if (normalized) {
     try {
-      const base64 = await downscaleFromNormalized(normalized.uri, normalized.width, normalized.height);
-      return { photo: { base64 } };
+      const { base64, width, height } = await downscaleFromNormalized(normalized.uri, normalized.width, normalized.height);
+      return { photo: { base64 }, width, height };
     } catch {
       // fall through to the legacy raw-bytes path below as a last resort
     }
@@ -215,15 +339,22 @@ export async function resolveSharePhoto(
   if (!raw) return { error: "No photo available to share." };
 
   try {
-    const base64 = await downscalePhoto(raw);
-    return { photo: { base64 } };
+    const { base64, width, height } = await downscalePhoto(raw);
+    return { photo: { base64 }, width, height };
   } catch {
     // Manipulation itself threw - fall back to the ORIGINAL bytes, still
     // capped so a huge, un-shrunk photo never ships either way.
     if (estimateBase64Bytes(raw) > LOCAL_PHOTO_MAX_BYTES) {
       return { error: "That photo is too large to share (over 5 MB)." };
     }
-    return { photo: { base64: raw } };
+    let width: number | null = null, height: number | null = null;
+    try {
+      const size = await getImageSize(`data:image/jpeg;base64,${raw}`);
+      width = size.width; height = size.height;
+    } catch {
+      // last-resort dims probe failed too - owner readout just shows "—"
+    }
+    return { photo: { base64: raw }, width, height };
   }
 }
 

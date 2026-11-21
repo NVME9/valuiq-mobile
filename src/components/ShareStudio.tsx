@@ -231,6 +231,11 @@ export default function ShareStudio(props: ShareStudioProps) {
   // readout can show it next to its own src=/natural= for a side-by-side
   // repro instead of trusting the two paths used the same bytes.
   const [payloadDebug, setPayloadDebug] = useState<string>("none");
+  // v10, requirement 3 - the payload's own resolved pixel size, set
+  // alongside payloadDebug on every runFetch, so the crop screen's readout
+  // can print a direct "crop vs payload" dimension/byte comparison instead
+  // of just the payload's byte count on its own.
+  const [payloadDims, setPayloadDims] = useState<{ w: number; h: number } | null>(null);
   // v9 requirement 3 ("Use original" button) - set when the owner taps it
   // on the crop screen's error state; forces BOTH the crop screen and the
   // share payload off the (rejected/broken) normalized photo and back onto
@@ -264,16 +269,29 @@ export default function ShareStudio(props: ShareStudioProps) {
   // local pixels, so it's left null and every caller below falls back to
   // its own legacy path for that case, same as before this feature existed).
   const [normalizedPhoto, setNormalizedPhoto] = useState<NormalizedPhoto | null>(null);
+  // v10, requirement 1 - every stage normalizePhotoOrientation goes through
+  // for THIS photo (works identically for a fresh scan's photoBase64 and a
+  // History/win-reveal row's photoUri - same function, same instrumentation
+  // either way), shown in the owner readout (PhotoCropScreen's debugText)
+  // and asserted on directly in shareCardApi.test.ts.
+  const [normalizeDebug, setNormalizeDebug] = useState<string[]>([]);
   useEffect(() => {
     const raw = rawPhotoUri(photoBase64, photoUri);
+    const source = photoBase64 ? "photoBase64" : photoUri ? "photoUri" : "none";
     if (!raw || isRemoteShareUrl(raw)) {
       setNormalizedPhoto(null);
+      setNormalizeDebug([`source: ${source} (remote/none - normalization skipped)`]);
       return;
     }
     let cancelled = false;
     setNormalizedPhoto(null);
     setUseOriginalPhoto(false); // a NEW raw photo gets a fresh chance at normalization
-    normalizePhotoOrientation(raw)
+    const stages: string[] = [`source: ${source}`];
+    setNormalizeDebug(stages);
+    normalizePhotoOrientation(raw, (line) => {
+      stages.push(line);
+      if (!cancelled) setNormalizeDebug([...stages]);
+    })
       .then((n) => { if (!cancelled) setNormalizedPhoto(n); })
       .catch(() => { if (!cancelled) setNormalizedPhoto(null); });
     return () => { cancelled = true; };
@@ -373,7 +391,10 @@ export default function ShareStudio(props: ShareStudioProps) {
     // request can still be superseded while this is in flight, same as the
     // network fetch below.
     const resolved = await resolveSharePhoto(photoBase64, photoUri ?? null, effectiveNormalizedPhoto);
-    if (isOwner) setPayloadDebug(describeSharePhoto("error" in resolved ? null : resolved.photo));
+    if (isOwner) {
+      setPayloadDebug(describeSharePhoto(resolved));
+      setPayloadDims(!("error" in resolved) && resolved.width != null && resolved.height != null ? { w: resolved.width, h: resolved.height } : null);
+    }
     if (seq !== requestSeqRef.current) return null; // superseded while resolving the photo
 
     if ("error" in resolved) {
@@ -1143,6 +1164,8 @@ export default function ShareStudio(props: ShareStudioProps) {
             initial={{ fx, fy, zoom }}
             isOwner={isOwner}
             payloadDebug={payloadDebug}
+            payloadDims={payloadDims}
+            normalizeDebug={normalizeDebug}
             onUseOriginal={() => setUseOriginalPhoto(true)}
             onCancel={() => setCropOpen(false)}
             onDone={({ fx: nextFx, fy: nextFy, zoom: nextZoom }) => commitPhotoAdjust(nextFx, nextFy, nextZoom)}

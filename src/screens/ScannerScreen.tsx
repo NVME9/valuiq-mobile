@@ -2718,7 +2718,14 @@ export default function ScannerScreen({ token, plan, scansLeft, setScansLeft, on
                       "" until typed/confirmed - never a real "$0.00" value,
                       only the gray "0.00" placeholder below). */}
                   <Text style={s.priceLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
-                    {enteredBp > 0 ? `Tag: $${buyPrice} (tap to change)` : "Tag price"}
+                    {/* FORMAT FIX (2026-11-20): this used to echo the raw
+                        `buyPrice` TextInput string verbatim ("Tag: $10.5"
+                        for a typed "10.5") instead of running it through the
+                        shared fmtMoney formatter every other price on this
+                        screen already uses - fmtMoney(enteredBp) always pads
+                        a genuine fraction to two decimals ($10.50) while
+                        leaving a whole dollar amount undecorated ($28). */}
+                    {enteredBp > 0 ? `Tag: ${fmtMoney(enteredBp)} (tap to change)` : "Tag price"}
                   </Text>
                   {/* NEVER "$0.00" (2026-11-15, result-fix item 11): the
                       static "$" used to sit in front of the placeholder

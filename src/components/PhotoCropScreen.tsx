@@ -79,6 +79,16 @@ export interface PhotoCropScreenProps {
   // resolved to on the last card render, shown in the owner readout next to
   // this screen's own src=/natural= for a side-by-side repro.
   payloadDebug?: string;
+  // v10, requirement 3 - the payload's own resolved pixel size (parsed out
+  // of payloadDebug would be fragile - this travels structured), so the
+  // readout can print a direct crop-screen-vs-payload comparison instead of
+  // just the payload's byte count on its own.
+  payloadDims?: { w: number; h: number } | null;
+  // v10, requirement 1 - every stage normalizePhotoOrientation went through
+  // for the CURRENT photoUri (source/materialize/manipulate/valid/fallback),
+  // same instrumentation for a fresh scan or a History/win-reveal row -
+  // shown as the owner readout's last line.
+  normalizeDebug?: string[];
   // v9, requirement 3 - wired to the error state's "Use original" button;
   // omitted (no button rendered) for a caller that has no original to fall
   // back to.
@@ -111,7 +121,7 @@ function last30(uri: string | null): string {
 }
 
 export default function PhotoCropScreen({
-  photoUri, box, initial, natural, isOwner, payloadDebug, onUseOriginal, onCancel, onDone,
+  photoUri, box, initial, natural, isOwner, payloadDebug, payloadDims, normalizeDebug, onUseOriginal, onCancel, onDone,
 }: PhotoCropScreenProps) {
   const [loadedNatural, setLoadedNatural] = useState<{ w: number; h: number } | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -428,12 +438,21 @@ export default function PhotoCropScreen({
       </View>
 
       {isOwner ? (
-        <Text style={st.debugText} numberOfLines={8}>
+        <Text style={st.debugText} numberOfLines={16}>
           src={describeUriSource(photoUri)} tail={last30(photoUri)} bytes={fileBytes != null ? fileBytes : "—"} natural={effectiveNatural ? `${effectiveNatural.w}x${effectiveNatural.h}` : "—"} decoded={decodedSize ? `${decodedSize.w}x${decodedSize.h}` : "—"} stage={stageSize ? `${Math.round(stageSize.w)}x${Math.round(stageSize.h)}` : "—"}
           {"\n"}blurRadius=none resizeMode=cover defaultSource=none payload={payloadDebug ?? "none"}
+          {/* v10, requirement 3 - crop-screen vs payload dims/bytes, side by
+              side, so a mismatch (the founder repro's 43KB payload next to a
+              344KB "Use original" crop screen) is visible on-screen without
+              a repro + source dive. */}
+          {"\n"}compare crop={effectiveNatural ? `${effectiveNatural.w}x${effectiveNatural.h}` : "—"} payload={payloadDims ? `${payloadDims.w}x${payloadDims.h}` : "—"} match={effectiveNatural && payloadDims ? (effectiveNatural.w === payloadDims.w && effectiveNatural.h === payloadDims.h ? "yes" : "NO") : "—"}
           {"\n"}frame computed={frameRect ? `${Math.round(frameRect.left)},${Math.round(frameRect.top)},${Math.round(frameRect.width)},${Math.round(frameRect.height)}` : "—"} measured={measuredFrameRect ? `${Math.round(measuredFrameRect.x)},${Math.round(measuredFrameRect.y)},${Math.round(measuredFrameRect.w)},${Math.round(measuredFrameRect.h)}` : "—"}
           {"\n"}imageRect={`${Math.round(debugRect.left)},${Math.round(debugRect.top)},${Math.round(debugRect.width)},${Math.round(debugRect.height)}`}
           {"\n"}gesture: {debugState.phase} touches={debugState.touches} dx={debugState.dx.toFixed(2)} dy={debugState.dy.toFixed(2)} scale={debugState.scale.toFixed(2)} fx={debugState.fx.toFixed(2)} fy={debugState.fy.toFixed(2)} zoom={debugState.zoom.toFixed(2)}
+          {/* v10, requirement 1 - every normalizePhotoOrientation stage for
+              THIS photo (works the same for a fresh scan's photoBase64 and
+              a History/win-reveal row's photoUri). */}
+          {normalizeDebug && normalizeDebug.length ? `\nnormalize: ${normalizeDebug.join(" | ")}` : null}
         </Text>
       ) : null}
 
